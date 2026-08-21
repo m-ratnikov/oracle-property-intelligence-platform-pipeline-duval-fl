@@ -47,13 +47,11 @@ const DEMO_PROMPTS = [
   "Which properties appear to be strong candidates for further review based on ownership age, roof age, and location signals?",
 ];
 
-const TOOLS = [
-  { name: "get_schema", description: "DESCRIBE the published query table plus the six question rules, so the agent knows the columns before it writes SQL." },
-  { name: "preset_question", description: "Run one of the eight question presets, the exact SQL the Questions page runs, with evidence and provenance columns and a total match count." },
-  { name: "run_sql", description: "A single read only SELECT over the view properties in server side DuckDB, capped at 200 rows, for combinations and rankings." },
-  { name: "get_property", description: "Fetch one parcel by folio, including the per property JSON on IPFS when it is published." },
-  { name: "get_run_history", description: "Read the pipeline run history for freshness, sources, deltas and documented limitations." },
-];
+/**
+ * Named, not described. The descriptions lived in a sidebar card that repeated on every answer;
+ * what the names have to carry is the claim that the agent can only read.
+ */
+const TOOL_NAMES = ["get_schema", "preset_question", "run_sql", "get_property", "get_run_history"];
 
 const EVIDENCE_META = new Set(["property_id", "address", "source_system", "source_url", "fetched_at", "via"]);
 
@@ -214,6 +212,12 @@ export default function AgentPage() {
       cancelled = true;
     };
   }, []);
+
+  // What produced the rows, so the collapsed summary says something useful rather than just a count.
+  const evidenceSource =
+    (evidence[0] as { via?: string } | undefined)?.via ??
+    [...toolCalls].reverse().find((call) => !call.error && (call.row_count ?? 0) > 0)?.name ??
+    null;
 
   const choices = config?.model_choices ?? [];
   const providerLabel = config?.server_default?.provider ?? null;
@@ -481,17 +485,32 @@ export default function AgentPage() {
             )}
           </div>
 
+          {/*
+            Evidence is required - the assignment asks for source backed answers - but the answer
+            above already prints the rows. Repeating the same table, always open, in a narrow
+            column read as clutter rather than proof. It is the same rows straight from DuckDB
+            rather than the model's retelling, which is the point, so it stays one click away with
+            a summary that says what it holds.
+          */}
           <div className="card">
-            <div className="border-b border-border px-3 py-2 text-[12px] font-semibold">
-              Evidence {evidence.length > 0 ? `(${evidence.length} parcels)` : ""}
-            </div>
             {evidence.length === 0 ? (
-              <div className="px-3 py-3 text-[12px] text-faint">
-                Rows the answer rests on land here, each with the matched columns, its source
-                system, source URL and collection timestamp.
-              </div>
+              <>
+                <div className="border-b border-border px-3 py-2 text-[12px] font-semibold">Evidence</div>
+                <div className="px-3 py-3 text-[12px] text-faint">
+                  Rows the answer rests on land here, each with the matched columns, its source
+                  system, source URL and collection timestamp.
+                </div>
+              </>
             ) : (
-              <EvidenceTable rows={evidence} />
+              <details>
+                <summary className="cursor-pointer border-b border-border px-3 py-2 text-[12px] font-semibold marker:text-faint">
+                  Evidence ({evidence.length} parcels)
+                  <span className="ml-1 font-normal text-faint">
+                    {evidenceSource ? `from ${evidenceSource}` : "as returned by the tool"} - show rows
+                  </span>
+                </summary>
+                <EvidenceTable rows={evidence} />
+              </details>
             )}
           </div>
 
@@ -505,21 +524,16 @@ export default function AgentPage() {
             </Callout>
           ) : null}
 
-          <div className="card card-pad">
-            <div className="text-[12px] font-semibold">Tools the agent is given</div>
-            <ul className="mt-2 space-y-2 text-[12px]">
-              {TOOLS.map((tool) => (
-                <li key={tool.name}>
-                  <span className="mono font-semibold">{tool.name}</span>
-                  <div className="text-muted">{tool.description}</div>
-                </li>
-              ))}
-            </ul>
-            <p className="mt-3 text-[12px] text-muted">
-              The same questions are answerable on the <Link href="/questions">Questions</Link> page,
-              which runs those rules directly in the browser.
-            </p>
-          </div>
+          {/*
+            The full tool catalogue used to sit here as a card. It is reference material, identical
+            on every answer, and it pushed the evidence it was meant to explain below the fold. The
+            names alone carry the claim that matters - the agent may only read - and the transcript
+            above shows which ones actually ran.
+          */}
+          <p className="text-[11.5px] text-muted">
+            Read-only tools: <span className="mono">{TOOL_NAMES.join(", ")}</span>. The same
+            questions run without a model at all on the <Link href="/questions">Questions</Link> page.
+          </p>
         </aside>
       </div>
     </div>
