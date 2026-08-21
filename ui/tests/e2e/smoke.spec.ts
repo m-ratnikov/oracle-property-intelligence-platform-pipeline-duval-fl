@@ -187,7 +187,7 @@ test.describe("model settings", () => {
     await page.goto("/settings");
 
     // The registry drives the UI, so every provider the server supports is here.
-    for (const label of ["Google AI Studio (Gemini)", "Groq", "Cerebras", "Vercel AI Gateway", "Anthropic", "Amazon Bedrock"]) {
+    for (const label of ["Google AI Studio (Gemini)", "Groq", "Cerebras", "Hugging Face", "Vercel AI Gateway", "Anthropic", "Amazon Bedrock"]) {
       await expect(page.getByText(label).first()).toBeVisible();
     }
     await expect(page.getByText("nothing configured", { exact: true })).toBeVisible();
