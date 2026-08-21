@@ -230,7 +230,7 @@ export default function DataPage() {
           title="Provenance"
           description="Every row in the query table carries where it came from. These counts are computed in DuckDB against the published parquet right now."
         >
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
             <div>
               <div className="mb-1.5 text-[12px] font-semibold text-muted">By source system</div>
               {sourceRows ? (

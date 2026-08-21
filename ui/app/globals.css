@@ -117,6 +117,13 @@ a:hover {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: 6px;
+  /*
+   * Lets the contents ask how much room this card actually has. A card is a grid
+   * or block child everywhere it is used, so its width already comes from its
+   * parent rather than its contents, which is what inline-size containment
+   * requires. See the .kv container query below for what asks.
+   */
+  container-type: inline-size;
 }
 
 .card-pad {
@@ -381,23 +388,67 @@ pre.block {
   white-space: pre;
 }
 
+/*
+ * Label and value.
+ *
+ * The label track sizes to its content instead of claiming a fixed 150 to 240px
+ * band, and the value track is minmax(0, 1fr) so it is allowed to be narrower
+ * than its own content rather than being treated as unshrinkable.
+ */
 .kv {
   display: grid;
-  grid-template-columns: minmax(150px, 240px) 1fr;
-  gap: 0 1rem;
+  grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
+  /*
+   * No column gap. The label pads its own track instead, so the rule under the
+   * label meets the rule under the value and each row reads as one line rather
+   * than two with a notch between them.
+   */
 }
 
-.kv > dt {
+/*
+ * Descendant, not child. Some call sites wrap each pair in a display: contents
+ * element so dt and dd still become grid items; that wrapper keeps its place in
+ * the DOM tree, so `.kv > dt` silently matched nothing there.
+ */
+.kv dt {
   color: var(--color-muted);
   font-size: 12px;
-  padding: 0.25rem 0;
+  padding: 0.25rem 1rem 0.25rem 0;
   border-bottom: 1px solid var(--color-border);
 }
 
-.kv > dd {
+.kv dd {
   padding: 0.25rem 0;
   border-bottom: 1px solid var(--color-border);
-  word-break: break-word;
+  min-width: 0;
+  /*
+   * overflow-wrap, not word-break. word-break: break-word let a long url report a
+   * min-content width of one character, so the value track collapsed to nothing
+   * and the label track took the whole card. This form breaks a long word only
+   * when it has to, and does not shrink the track's intrinsic width to do it.
+   */
+  overflow-wrap: break-word;
+}
+
+/*
+ * Two columns need room for two columns. In the 320px property sidebar the
+ * source_url wrapped one character per line, which is what prompted this. Below
+ * this width the label sits above its value and the value gets the full card.
+ */
+@container (max-width: 400px) {
+  .kv {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .kv dt {
+    border-bottom: none;
+    padding: 0.35rem 0 0;
+  }
+
+  .kv dd {
+    padding: 0.1rem 0 0.35rem;
+  }
 }
 
 .progress {
