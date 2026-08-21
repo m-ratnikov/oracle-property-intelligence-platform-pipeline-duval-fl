@@ -1,10 +1,10 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { COUNTY, REPO_DIR } from "../src/config.js";
-import { ensureSchema, openDb, type Db } from "../src/db.js";
+import { all, ensureSchema, openDb, type Db } from "../src/db.js";
 import { createLogger } from "../src/log.js";
 import { previousTotal, tableDelta } from "../src/run.js";
-import { rehydrateRunLog } from "../src/runLog.js";
+import { insertRunSource, rehydrateRunLog, type InsertableRunSource } from "../src/runLog.js";
 
 /**
  * The published `water` row read "inserted 0, updated 0, unchanged 757" and "table delta +757" in
@@ -21,6 +21,36 @@ async function coldDb(): Promise<Db> {
   const db = await openDb(":memory:");
   await ensureSchema(db.conn);
   return db;
+}
+
+/** A completed `sales` row as a track running against THIS database writes one. */
+function localSource(over: Partial<InsertableRunSource> = {}): InsertableRunSource {
+  return {
+    track: "sales",
+    source_system: "fdor_sdf",
+    target_table: "sales_history",
+    source_url: "https://example.invalid/sdf.zip",
+    artifact_path: "sales/sdf.zip",
+    artifact_sha256: null,
+    artifact_etag: null,
+    artifact_last_modified: null,
+    artifact_bytes: null,
+    download_status: "cached",
+    rows_staged: 0,
+    inserted: 0,
+    updated: 0,
+    unchanged: 0,
+    missing_in_source: 0,
+    table_total_after: null,
+    delta_vs_prev_total: null,
+    started_at: "2026-08-21 21:00:00.000",
+    finished_at: "2026-08-21 21:01:00.000",
+    status: "completed",
+    limitations: [],
+    notes: {},
+    error: null,
+    ...over,
+  };
 }
 
 describe("the table delta against the previous recorded run", () => {
@@ -47,34 +77,50 @@ describe("the table delta against the previous recorded run", () => {
   });
 });
 
+/**
+ * Rehydrating gave the database its history back, and then a run subtracted the OTHER lineage's
+ * total from its own tables. The committed records come from both Actions cache lineages, whose
+ * databases hold different amounts of data, so a rehydrated `table_total_after` counts a table this
+ * database does not have. Run 01M0JZHQY2SM published "sales 65,876, delta -7,528" on a run that
+ * inserted nothing, because the most recent recorded total was the branch lineage's 73,404.
+ *
+ * A rehydrated row stays history for display, provenance and coverage. It is not a measurement of
+ * this database, and previousTotal reads only rows this database produced.
+ */
 describe("a cold database with the committed run records on disk", () => {
-  it("resolves the previous total instead of reporting a fake first load", async () => {
+  it("still reports unknown, because the rehydrated totals describe another database", async () => {
     const db = await coldDb();
     const runsDir = join(REPO_DIR, "runs");
 
-    // Before rehydrating: exactly the runner the bug came from. The tables are populated, the
-    // history is not, and the delta claims the whole table.
     expect(await previousTotal(db, "water")).toBeNull();
-    expect(tableDelta(757, await previousTotal(db, "water"))).toBeNull();
 
     const result = await rehydrateRunLog(db, { runsDir, county: COUNTY.key, logger: silent });
     expect(result.runsInserted).toBeGreaterThanOrEqual(31);
+    expect(result.sourcesInserted).toBeGreaterThan(0);
 
-    const prev = await previousTotal(db, "water");
-    expect(prev).toBe(757);
-    expect(tableDelta(757, prev)).toBe(0);
+    // The history is there to read...
+    const rows = await all<{ n: string | number }>(
+      db.conn,
+      "SELECT count(*) AS n FROM run_log_sources WHERE track = 'water' AND table_total_after IS NOT NULL",
+    );
+    expect(Number(rows[0]!.n)).toBeGreaterThan(0);
+    // ...and none of it is a total this database measured.
+    expect(await previousTotal(db, "water")).toBeNull();
+    expect(tableDelta(757, await previousTotal(db, "water"))).toBeNull();
     await db.close();
   });
 
-  it("resolves the previous total for a track whose table really did grow", async () => {
+  it("compares against this database's own earlier run once it has one", async () => {
     const db = await coldDb();
     await rehydrateRunLog(db, { runsDir: join(REPO_DIR, "runs"), county: COUNTY.key, logger: silent });
+    expect(await previousTotal(db, "sales")).toBeNull();
 
+    // The first run of this lineage: unknown delta, and a total of its own recorded.
+    await insertRunSource(db, "local-run-1", localSource({ table_total_after: 65876 }));
     const prev = await previousTotal(db, "sales");
-    expect(prev).not.toBeNull();
-    expect(prev!).toBeGreaterThan(0);
-    // A table that has not moved since the last recorded run reports 0, which is a fact, not a gap.
-    expect(tableDelta(prev, prev)).toBe(0);
+    expect(prev).toBe(65876);
+    expect(tableDelta(65876, prev)).toBe(0);
+    expect(tableDelta(66000, prev)).toBe(124);
     await db.close();
   });
 });

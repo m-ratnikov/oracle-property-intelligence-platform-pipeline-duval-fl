@@ -13,8 +13,8 @@ import type { RunSourceRecord } from "./run.js";
  * cron fires on the default branch, and the two lineages never see each other's database. Every
  * lookup that reads history then answers "nothing" on a pipeline that has run thirty times:
  *
- *   - the previous-run total, so a re-verified table reports a first load (see tableDelta in run.ts)
  *   - dataset-coverage.json's `expected_count`, which reads the last completed run's `rows_staged`
+ *   - the last recorded skip reason for a track, which is why a source is unavailable
  *   - the published run history, which is only as long as the database the runner happened to get
  *
  * The durable copy is already on disk and was being ignored. CI commits every completed run to
@@ -37,6 +37,12 @@ import type { RunSourceRecord } from "./run.js";
  *     disagreement between two artifacts about the same run_id. A source record that cannot be
  *     written skips its whole file.
  *   - TIMESTAMPS LAND AS UTC. See toUtcTimestamp.
+ *   - A LOADED ROW IS HISTORY, NOT A MEASUREMENT OF THIS DATABASE. The files come from BOTH cache
+ *     lineages and those two databases hold different amounts of data, so a loaded row's
+ *     `table_total_after` counts a table this database does not have. Every row this file writes is
+ *     marked `rehydrated`, and `previousTotal` (run.ts) reads only rows this database produced.
+ *     Ignoring that published run 01M0JZHQY2SM as "sales 65,876, delta -7,528" on a run that
+ *     inserted nothing, because the most recent recorded total was the other lineage's 73,404.
  */
 
 /** A file that was not loaded, and why. Reported, never thrown. */
@@ -74,8 +80,17 @@ export type InsertableRunSource = Omit<RunSourceRecord, "source_url" | "finished
  * through it, because the previous-run total (run.ts) and coverage's `expected_count`
  * (publish/coverage.ts) read these columns positionally and a second INSERT that agreed only by
  * inspection would drift.
+ *
+ * `opts.rehydrated` is the ONE thing the two callers must disagree about, and it defaults to false
+ * so that a caller writing a row for a track that just ran against this database says nothing: only
+ * `rehydrateRunLog` opts in. See REHYDRATED_COLUMN in db.ts for what the flag protects.
  */
-export async function insertRunSource(db: Db, runId: string, s: InsertableRunSource): Promise<void> {
+export async function insertRunSource(
+  db: Db,
+  runId: string,
+  s: InsertableRunSource,
+  opts: { rehydrated?: boolean } = {},
+): Promise<void> {
   const n = (v: number | null) => (v === null ? "NULL" : String(v));
   const ts = (v: string | null) => (v === null ? "NULL" : `${q(v)}::TIMESTAMP`);
   await db.conn.run(`
@@ -84,7 +99,7 @@ export async function insertRunSource(db: Db, runId: string, s: InsertableRunSou
       ${q(s.artifact_path)}, ${q(s.artifact_sha256)}, ${q(s.artifact_etag)}, ${q(s.artifact_last_modified)}, ${n(s.artifact_bytes)},
       ${q(s.download_status)}, ${s.rows_staged}, ${n(s.inserted)}, ${n(s.updated)}, ${n(s.unchanged)}, ${n(s.missing_in_source)},
       ${n(s.table_total_after)}, ${n(s.delta_vs_prev_total)}, ${ts(s.started_at)}, ${ts(s.finished_at)},
-      ${q(s.status)}, ${q(JSON.stringify(s.limitations))}::JSON, ${q(s.error)})`);
+      ${q(s.status)}, ${q(JSON.stringify(s.limitations))}::JSON, ${q(s.error)}, ${opts.rehydrated === true ? "TRUE" : "FALSE"})`);
 }
 
 /** Anything ending in Z or an explicit +HH:MM / -HHMM offset already names its zone. */
@@ -361,7 +376,9 @@ export async function rehydrateRunLog(
       continue;
     }
     for (const source of run.sources) {
-      await insertRunSource(db, run.runId, source);
+      // Marked as this database's own history but NOT as its own measurement: the file may come
+      // from the other cache lineage, whose tables are a different size. previousTotal skips these.
+      await insertRunSource(db, run.runId, source, { rehydrated: true });
       result.sourcesInserted += 1;
     }
     if (run.sources.length > 0) haveSources.add(run.runId);

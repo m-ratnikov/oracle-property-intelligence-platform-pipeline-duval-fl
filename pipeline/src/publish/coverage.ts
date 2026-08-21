@@ -140,6 +140,12 @@ export async function buildCoverageSnapshot(
     const owned = source.ownedRowsFilter;
     const ingested =
       owned === undefined ? await count(conn, source.targetTable) : await countWhere(conn, source.targetTable, owned);
+    // Rehydrated rows COUNT here, unlike in previousTotal (run.ts). `rows_staged` is what the
+    // track observed in the SOURCE, and the source offered the same rows to whichever cache
+    // lineage happened to run: it is not a measurement of this database's tables, so it stays
+    // comparable across them. `run_id` and `status` identify that run and are equally lineage
+    // independent. Excluding them would put `expected_count` back to null on a rolled cache,
+    // which is the amnesia rehydrateRunLog exists to cure.
     const latest = await all<{ rows_staged: string | number | null; run_id: string; status: string; finished_at: string | null }>(
       conn,
       `SELECT rows_staged, run_id, status, finished_at::VARCHAR AS finished_at FROM run_log_sources
@@ -153,6 +159,8 @@ export async function buildCoverageSnapshot(
     if (source.knownExpectedCount !== undefined) expected = source.knownExpectedCount;
     else if (deltaFeed) expected = ingested > 0 ? ingested : null;
     else if (last?.rows_staged !== null && last?.rows_staged !== undefined) expected = Number(last.rows_staged);
+    // Rehydrated rows count here too: why a track was skipped ("skipped: non-US egress", an API
+    // behind a WAF) is a fact about the source and the runner, not about this database's tables.
     const skipRows = await all<{ limitations: string | null }>(
       conn,
       `SELECT limitations::VARCHAR AS limitations FROM run_log_sources WHERE track = ${q(source.track)} AND status = 'skipped' ORDER BY started_at DESC LIMIT 1`,

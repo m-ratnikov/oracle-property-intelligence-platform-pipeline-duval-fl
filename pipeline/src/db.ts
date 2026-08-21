@@ -496,9 +496,50 @@ CREATE TABLE IF NOT EXISTS run_log_sources (
   finished_at          TIMESTAMP,
   status               VARCHAR NOT NULL,
   limitations          JSON,
-  error                VARCHAR
+  error                VARCHAR,
+  -- TRUE when the row was loaded from a committed runs/*.json by rehydrateRunLog rather than
+  -- written by a track running against THIS database. See REHYDRATED_COLUMN below.
+  rehydrated           BOOLEAN DEFAULT FALSE
 );
 `;
+
+/**
+ * `run_log_sources.rehydrated` marks a row this database did not produce.
+ *
+ * The committed `runs/*.json` records come from both Actions cache lineages (the feature branch's
+ * and the default branch's), and those two databases hold different amounts of data. A rehydrated
+ * row is still history for display, provenance and coverage, but its `table_total_after` describes
+ * a table this database does not have: subtracting it produced run 01M0JZHQY2SM's published
+ * "sales -7,528" on a run that inserted nothing. `previousTotal` therefore reads only rows this
+ * database wrote, and answers null when it has none (see run.ts).
+ *
+ * Two shapes have to agree, because both are in the fleet:
+ *
+ *   - a database created by the DDL above, which has the column from birth;
+ *   - a warm Actions cache created before the column existed, which gets it by ALTER TABLE.
+ *
+ * DuckDB cannot add a constrained column ("Adding columns with constraints not yet supported"), so
+ * the column is declared WITHOUT `NOT NULL` in the DDL too, and the two paths produce the same
+ * column definition rather than a constraint that only half the fleet carries. Every write goes
+ * through `insertRunSource`, which always supplies the value, and the one read that must not cross
+ * lineages tests `rehydrated IS FALSE`, so a NULL from any path is excluded rather than trusted.
+ *
+ * Rows that predate the column have UNKNOWN provenance: a warm main-lineage cache holds both its
+ * own rows and the foreign ones the first rehydrate pass inserted, and nothing on disk tells them
+ * apart. They are marked rehydrated, which costs that database one run reporting "no previous run
+ * recorded" and then compares every run after it against its own row. The alternative, assuming
+ * they are local, republishes the same negative delta one more time.
+ */
+const REHYDRATED_COLUMN = "rehydrated";
+
+async function ensureRehydratedColumn(conn: DuckDBConnection): Promise<void> {
+  const columns = await tableColumns(conn, "main", "run_log_sources");
+  if (columns.includes(REHYDRATED_COLUMN)) return;
+  await conn.run(`ALTER TABLE run_log_sources ADD COLUMN IF NOT EXISTS ${REHYDRATED_COLUMN} BOOLEAN DEFAULT FALSE`);
+  // Runs once, on the migration itself: the column-existence check above stops a later start from
+  // re-marking rows written since.
+  await conn.run(`UPDATE run_log_sources SET ${REHYDRATED_COLUMN} = TRUE`);
+}
 
 export interface Db {
   instance: DuckDBInstance;
@@ -528,6 +569,9 @@ const RECREATE_WHEN_EMPTY = [
 
 export async function ensureSchema(conn: DuckDBConnection): Promise<void> {
   await conn.run(DDL);
+  // `CREATE TABLE IF NOT EXISTS` leaves an existing run_log_sources exactly as it found it, and
+  // run_log_sources is never in RECREATE_WHEN_EMPTY, so a warm cache needs the column added.
+  await ensureRehydratedColumn(conn);
   const rows = await all<{ value: string }>(conn, "SELECT value FROM schema_meta WHERE key = 'schema_version'");
   const current = rows[0] ? Number(rows[0].value) : 1;
   if (current < SCHEMA_VERSION) {

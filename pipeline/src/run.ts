@@ -127,10 +127,26 @@ function toSourceRecord(r: TrackResult, prevTotal: number | null): RunSourceReco
   };
 }
 
+/**
+ * The most recent table total THIS database recorded for the track, or null when it has none.
+ *
+ * `rehydrated IS FALSE` is the whole point. The committed `runs/*.json` that rehydrateRunLog loads
+ * come from both Actions cache lineages, and those two databases hold different amounts of data, so
+ * a rehydrated row's `table_total_after` counts a table this database does not have. Reading the
+ * most recent recorded total without asking who recorded it is what published run 01M0JZHQY2SM as
+ * "sales 65,876, delta -7,528" on a run that inserted nothing: the previous record was the other
+ * lineage's 73,404. `IS FALSE` rather than `NOT rehydrated` so that a NULL from a migrated warm
+ * cache is excluded rather than trusted.
+ *
+ * Null is the answer, not a fallback to a rehydrated total. `tableDelta` renders an absent previous
+ * total as unknown and the UI as "no previous run recorded", so a fresh lineage's first run reports
+ * unknown deltas honestly and every run after it compares against its own row.
+ */
 export async function previousTotal(db: Db, track: string): Promise<number | null> {
   const rows = await all<{ t: string | number | null }>(
     db.conn,
     `SELECT table_total_after AS t FROM run_log_sources WHERE track = ${q(track)} AND status = 'completed' AND table_total_after IS NOT NULL
+     AND rehydrated IS FALSE
      ORDER BY started_at DESC LIMIT 1`,
   );
   const v = rows[0]?.t;
@@ -238,9 +254,9 @@ export async function runPipeline(opts: RunOptions): Promise<{ run: RunRecord; v
 
   // Before ANY lookup that reads history. The DuckDB file comes from a branch-scoped Actions
   // cache that rolls, so `run_log` can be empty on a runner whose tables are full; the committed
-  // runs/*.json are the durable copy and every runner has them checked out. Without this the
-  // first track's previousTotal answers null and its delta reports a first load. Gaps only:
-  // anything already in run_log wins.
+  // runs/*.json are the durable copy and every runner has them checked out. Gaps only: anything
+  // already in run_log wins. The loaded rows are marked `rehydrated` and previousTotal skips them,
+  // because they may describe the other lineage's tables (see previousTotal above).
   await rehydrateRunLog(db, { runsDir: paths.runsDir, county: COUNTY.key, logger });
 
   // A previous process that died mid-run leaves status 'running'; close it out honestly.

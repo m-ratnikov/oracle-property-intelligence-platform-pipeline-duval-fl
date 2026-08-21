@@ -121,6 +121,7 @@ No secrets are read anywhere except `publish/filebase.ts` and `tracks/businesses
 
 Every entity table carries `row_hash, source_system, source_url, source_artifact, source_sha256, fetched_at, run_id`.
 `source_artifact` is the path under `DATA_DIR/artifacts/` and `source_sha256` the hash of that exact file (Sunbiz rows point at their daily file, water rows at the AGO geojson or the NHD zip, Overture rows at the release), so any row can be traced to the bytes it came from. `run_log_sources` records per run and per source: artifact ETag / Last-Modified / bytes / sha256, download status, rows staged, inserted / updated / unchanged / missing, table total, delta vs the previous completed run, limitations, errors and notes (throughput, files processed, match counts).
+`run_log_sources.rehydrated` says whether the row was written by a track running against this database or loaded from a committed `runs/*.json` by `rehydrateRunLog`. The committed records come from both GitHub Actions cache lineages, whose databases hold different amounts of data, so a rehydrated row is history for display, provenance and coverage but never a measurement of this database's tables: the delta vs the previous completed run compares only against runs this database recorded, and reports unknown when it has none.
 
 ## Tables (DuckDB, `DATA_DIR/duval.duckdb`, schema v2)
 

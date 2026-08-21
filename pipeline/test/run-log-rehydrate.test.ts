@@ -219,9 +219,21 @@ describe("rehydrating a cold run_log from runs/*.json", () => {
     const rehydrated = rows.find((r) => r.run_id === "rehydrated")!;
     expect(Object.keys(rehydrated)).toEqual(Object.keys(live));
     for (const key of Object.keys(live)) {
-      if (key === "run_id") continue;
+      // `rehydrated` is the ONE column the two paths must disagree about, and is asserted below.
+      if (key === "run_id" || key === "rehydrated") continue;
       expect({ [key]: rehydrated[key] }).toEqual({ [key]: live[key] });
     }
+    expect(live.rehydrated).toBe(false);
+    expect(rehydrated.rehydrated).toBe(true);
+    await db.close();
+  });
+
+  it("marks every row it loads, so previousTotal can tell them from this database's own", async () => {
+    const db = await coldDb();
+    await rehydrate(db, runsDirWith({ "a.json": run({ run_id: "run-a" }), "b.json": run({ run_id: "run-b" }) }));
+    const rows = await sourceRows(db);
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.rehydrated === true)).toBe(true);
     await db.close();
   });
 });
