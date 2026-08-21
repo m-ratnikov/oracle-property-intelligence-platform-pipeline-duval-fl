@@ -21,7 +21,7 @@
  *                         wins, in registry order.
  *        AGENT_MODEL      model id, optional. Must be listed for the provider.
  *        <provider key>   GOOGLE_GENERATIVE_AI_API_KEY, GROQ_API_KEY,
- *                         CEREBRAS_API_KEY, AI_GATEWAY_API_KEY,
+ *                         CEREBRAS_API_KEY, HF_TOKEN, AI_GATEWAY_API_KEY,
  *                         ANTHROPIC_API_KEY, AWS_BEARER_TOKEN_BEDROCK, ...
  *
  * This deployment ships with NO server key set, on purpose: a public,
@@ -173,6 +173,24 @@ async function createProviderModel(
     case "cerebras": {
       const { createCerebras } = await import("@ai-sdk/cerebras");
       return createCerebras({ apiKey })(modelId);
+    }
+    case "huggingface": {
+      // Deliberately the OpenAI compatible client against the router's chat
+      // completions endpoint, not the official @ai-sdk/huggingface provider.
+      // That provider is responses-API only, and the tool support this agent
+      // depends on is what the router publishes per model on
+      // https://router.huggingface.co/v1/models as `supports_tools`, which
+      // describes chat completions. Every Hugging Face example of tool calling
+      // posts to /v1/chat/completions too. Using the responses path would mean
+      // shipping a tool loop against an API surface whose per provider tool
+      // coverage on this router is not documented. Switching back is one line
+      // once it is.
+      const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible");
+      return createOpenAICompatible({
+        name: "huggingface",
+        baseURL: "https://router.huggingface.co/v1",
+        apiKey,
+      })(modelId);
     }
     case "vercel-ai-gateway": {
       const { createGateway } = await import("@ai-sdk/gateway");

@@ -88,6 +88,7 @@ describe("redaction", () => {
       "gsk_abcdefghijklmnopqrstuvwx",
       "csk-abcdefghijklmnopqrstuvwx",
       "vck_abcdefghijklmnopqrstuvwx",
+      "hf_abcdefghijklmnopqrstuvwx",
       "AKIAIOSFODNN7EXAMPLE",
     ];
     for (const candidate of cases) {

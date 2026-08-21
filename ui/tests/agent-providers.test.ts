@@ -91,6 +91,20 @@ describe("provider registry integrity", () => {
     expect(prose).not.toContain("—");
   });
 
+  it("keeps the Hugging Face entry pointed at models the router says take tools", () => {
+    // The router publishes supports_tools per model at
+    // https://router.huggingface.co/v1/models. Nothing there is priced at zero,
+    // so the free tier is the monthly credit and every model note has to say
+    // roughly how far that credit goes rather than implying it is unlimited.
+    const hf = findProvider("huggingface");
+    expect(hf).not.toBeNull();
+    expect(hf?.freeTier.available).toBe(true);
+    expect(hf?.freeTier.summary).toContain("$0.10");
+    for (const model of hf?.models ?? []) {
+      expect(model.notes).toMatch(/\$0?\.\d|credit|questions/);
+    }
+  });
+
   it("resolves lookups and rejects anything unlisted", () => {
     expect(findProvider("google")?.id).toBe("google");
     expect(findProvider("not-a-provider")).toBeNull();

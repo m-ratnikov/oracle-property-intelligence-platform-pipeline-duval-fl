@@ -19,6 +19,7 @@ export type AgentProvider =
   | "google"
   | "groq"
   | "cerebras"
+  | "huggingface"
   | "vercel-ai-gateway"
   | "anthropic"
   | "bedrock";
@@ -176,6 +177,52 @@ export const PROVIDERS: readonly ProviderDefinition[] = [
       summary:
         "$5 in free credits after making an account. This is one time signup credit, not a monthly refresh, so it runs out.",
       source: "https://www.cerebras.ai/pricing",
+      readOn: FREE_TIER_VERIFIED_ON,
+    },
+  },
+  {
+    id: "huggingface",
+    label: "Hugging Face",
+    envKeys: ["HF_TOKEN", "HUGGINGFACE_API_KEY"],
+    models: [
+      {
+        id: "openai/gpt-oss-120b",
+        label: "GPT-OSS 120B",
+        free: true,
+        notes:
+          "Routed to deepinfra at $0.037 per million input and $0.17 per million output. A question here costs on the order of $0.0015, so the $0.10 monthly credit is roughly 60 questions. The best capability per credit of the four.",
+      },
+      {
+        id: "deepseek-ai/DeepSeek-V4-Flash",
+        label: "DeepSeek V4 Flash",
+        free: true,
+        notes:
+          "$0.09 in / $0.18 out per million, and a one million token context. Roughly 30 questions on the monthly credit. Strongest reasoning of the four.",
+      },
+      {
+        id: "Qwen/Qwen3-235B-A22B-Instruct-2507",
+        label: "Qwen3 235B A22B Instruct",
+        free: true,
+        notes:
+          "$0.09 in / $0.58 out per million. Roughly 25 questions on the monthly credit; the output price is what shortens it.",
+      },
+      {
+        id: "Qwen/Qwen3-4B-Instruct-2507",
+        label: "Qwen3 4B Instruct",
+        free: true,
+        notes:
+          "$0.01 in / $0.03 out per million, so the monthly credit stretches to a few hundred questions. A 4B model is weak at planning a five tool loop, so expect it to answer without looking at the data. Test it before trusting it.",
+      },
+    ],
+    docsUrl: "https://huggingface.co/docs/inference-providers/pricing",
+    keyUrl: "https://huggingface.co/settings/tokens",
+    acceptsUserKey: true,
+    keyHint: "A Hugging Face user access token with inference permission. Starts with hf_.",
+    freeTier: {
+      available: true,
+      summary:
+        "$0.10 of routed inference credit a month for a free account, no card, refreshing monthly ($2.00 on PRO). One token reaches around 130 models across many inference providers. No model on the router is priced at zero, so the credit is the whole free tier.",
+      source: "https://huggingface.co/docs/inference-providers/pricing",
       readOn: FREE_TIER_VERIFIED_ON,
     },
   },
