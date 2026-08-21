@@ -456,7 +456,9 @@ export default function PropertyPage() {
               <Callout tone="neutral">
                 {row.has_permits === true
                   ? `The query table records ${formatInt(Number(row.permit_count ?? 0))} permits for this parcel, but the permit detail is not in the per property JSON published so far.`
-                  : "No permits linked to this parcel in the published data."}
+                  : row.has_permits === false
+                    ? "No permits linked to this parcel in the published data."
+                    : "The permit source is blocked at the county, so no parcel has permit data. This is not a statement about this parcel."}
               </Callout>
             )}
           </Section>

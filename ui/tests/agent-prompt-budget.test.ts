@@ -12,9 +12,11 @@
  *
  * The numbers below are measured from a real ToolLoopAgent run against a real
  * DuckDB with the model mocked, so they move when the system prompt or the tool
- * schemas move. If someone doubles the system prompt, this test fails and the
- * registry notes get revisited, instead of the free tier claims quietly
- * becoming wrong.
+ * schemas move, and also when the PUBLISHED TABLE GETS WIDER: `get_schema`
+ * describes every column of the view, and that result is resent on every step.
+ * If someone doubles the system prompt, or the pipeline publishes forty more
+ * columns, this test fails and the registry notes get revisited, instead of the
+ * free tier claims quietly becoming wrong.
  *
  * Token counts are characters / 4, the usual rough conversion. That is not
  * exact for any specific tokenizer and does not need to be: the thresholds here
@@ -34,8 +36,13 @@ const CHARS_PER_TOKEN = 4;
  * The largest single request a typical answer sends. Anything above this and
  * the Groq free tier claim is not the only one that needs rewriting, so the
  * ceiling is deliberately close to the measured value.
+ *
+ * Raised from 12,000 when the sample parquet was widened from 88 columns to the
+ * 131 the pipeline actually publishes. Nothing about the agent changed: the
+ * narrower sample had been under reporting what this loop costs against the
+ * published artifact, and `get_schema` describes 43 more columns on every step.
  */
-const MAX_SINGLE_REQUEST_TOKENS = 12_000;
+const MAX_SINGLE_REQUEST_TOKENS = 15_000;
 
 /** The free tier ceiling this agent is already known to exceed. */
 const GROQ_FREE_TOKENS_PER_MINUTE = 8_000;

@@ -206,7 +206,7 @@ LIMIT ${limitOf(limit)}`,
     assumptions: [
       "The classification uses the mailing address on the appraisal roll, which is where tax bills go. It is not proof of where the owner lives.",
       "Owners behind an LLC registered agent address classify by that agent's address, which can read as LOCAL for an out of state beneficial owner.",
-      "owner_count and owners_text are not shown. The FDOR roll publishes one 30 character owner name per parcel and no co-owner column, so owner_count is 1 on every row and owners_text repeats owner_name exactly. An ET AL or ET UX suffix inside owner_name is the only additional owner signal the source carries.",
+      "owner_count and owners_text are not shown. The FDOR roll publishes one 30 character owner name per parcel and no co-owner column, so owner_count is published as NULL rather than as a constant 1, and owners_text repeats owner_name exactly. An ET AL or ET UX suffix inside owner_name is the only additional owner signal the source carries.",
     ],
     evidence: ["owner_region_class", "owner_mailing_city", "owner_mailing_state", "owner_occupied"],
     sql: (limit) => `SELECT

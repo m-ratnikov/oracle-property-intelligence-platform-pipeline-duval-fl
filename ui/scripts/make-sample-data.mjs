@@ -19,6 +19,30 @@
  *
  * Deterministic: a fixed seed means regenerating produces byte identical rows,
  * so the tests can assert on counts.
+ *
+ * FIDELITY IS THE POINT, INCLUDING WHERE IT IS UNFLATTERING.
+ *
+ * A sample whose shape drifts from the published artifact stops being a caveat and becomes a
+ * different product: a type sensitive change passes locally and fails live, a column that only
+ * exists in one of them goes untested, and a capability the pipeline does not have gets
+ * advertised. So the column list, the column TYPES, and the per column coverage below are all
+ * taken from what the pipeline actually emits for Duval:
+ *
+ *   - 131 columns in publication order (pipeline/src/features/export.ts orders the 37 canonical
+ *     Elephant columns first, then the Duval extras in derived.properties_features order, then the
+ *     twelve per family provenance pairs, source_systems, and the three UI provenance columns)
+ *   - production types: every *_fetched_at except the canonical `fetched_at` is VARCHAR,
+ *     last_sale_date is VARCHAR, and every money column is DOUBLE
+ *   - production coverage: appraisal and business 100%, geometry / transit / places / water 99.95%,
+ *     parcel_layer 99.92%, address 59.72%, sales 12.82%, structure 0.15%, permit 0%, contractor 0%
+ *
+ * THE PERMIT FAMILY IS ZERO, NOT SMALL. The JaxEPICS permit API sits behind an Akamai WAF that
+ * answers every request with 403, including from a US runner. The pipeline ingests no permit rows
+ * at all and records that honestly in dataset-coverage.json (implemented: true, constrained: true,
+ * a reason naming the WAF, a last_skip_reason and three limitation strings). This sample therefore
+ * publishes no permit_source, no permit counts and no PERMIT roof basis, and its own coverage
+ * snapshot carries the constrained shape, so the "source blocked" rendering is exercised by the
+ * sample runtime rather than only by a hand written fixture.
  */
 
 import { mkdir, writeFile, rm } from "node:fs/promises";
@@ -51,6 +75,26 @@ const pick = (items) => items[Math.floor(rand() * items.length)];
 const between = (min, max) => min + rand() * (max - min);
 const intBetween = (min, max) => Math.floor(between(min, max + 1));
 const chance = (probability) => rand() < probability;
+/** Draw between min and max, biased towards min. exponent 1 is uniform, larger is more skewed. */
+const skewed = (min, max, exponent) => min + (max - min) * rand() ** exponent;
+/** Log uniform draw: the shape money, floor area and lot size actually have. */
+const logBetween = (min, max) => Math.exp(between(Math.log(min), Math.log(max)));
+const digits = (count) => {
+  let out = "";
+  while (out.length < count) out += "0123456789"[Math.floor(rand() * 10)];
+  return out;
+};
+
+/** Pick from [value, weight] pairs. Weights are the published row counts, so they need no scaling. */
+function weighted(entries) {
+  const total = entries.reduce((sum, entry) => sum + entry[1], 0);
+  let roll = rand() * total;
+  for (const [value, weight] of entries) {
+    roll -= weight;
+    if (roll < 0) return value;
+  }
+  return entries[entries.length - 1][0];
+}
 
 /* ----------------------------------------------------------- vocabularies */
 
@@ -63,12 +107,13 @@ const STREET_NAMES = [
   "MERRILL RD", "FORT CAROLINE RD", "DUNN AVE", "NORWOOD AVE", "SOUTEL DR",
 ];
 
+/** Situs city shares, from the published address_city breakdown. */
 const CITIES = [
-  { city: "JACKSONVILLE", zips: ["32202", "32204", "32205", "32206", "32207", "32208", "32210", "32211", "32216", "32217", "32218", "32221", "32224", "32225", "32246", "32256", "32257", "32277"] },
-  { city: "JACKSONVILLE BEACH", zips: ["32250"] },
-  { city: "ATLANTIC BEACH", zips: ["32233"] },
-  { city: "NEPTUNE BEACH", zips: ["32266"] },
-  { city: "BALDWIN", zips: ["32234"] },
+  { city: "JACKSONVILLE", weight: 381193, zips: ["32202", "32204", "32205", "32206", "32207", "32208", "32210", "32211", "32216", "32217", "32218", "32221", "32224", "32225", "32246", "32256", "32257", "32277"] },
+  { city: "JACKSONVILLE BEACH", weight: 12678, zips: ["32250"] },
+  { city: "ATLANTIC BEACH", weight: 6195, zips: ["32233"] },
+  { city: "NEPTUNE BEACH", weight: 2969, zips: ["32266"] },
+  { city: "BALDWIN", weight: 934, zips: ["32234"] },
 ];
 
 const SUBDIVISIONS = [
@@ -77,34 +122,79 @@ const SUBDIVISIONS = [
   "OAK HILL", "NORTHSIDE ESTATES", "BARTRAM SPRINGS", "SANDALWOOD", "EMPIRE POINT",
 ];
 
-const WALL_MATERIALS = ["Concrete Block", "Wood Frame", "Brick", "Stucco", "Vinyl Siding", "Fiber Cement"];
-const ROOF_MATERIALS = ["Asphalt Shingle", "Metal", "Clay Tile", "Built Up", "Architectural Shingle", "Wood Shake"];
-const PROPERTY_TYPES = ["SingleFamily", "Condominium", "Townhouse", "MultiFamily", "VacantLand"];
-const USAGE_TYPES = ["Residential", "Residential", "Residential", "Commercial", "Industrial"];
 /**
- * The sample exists so the UI can be run and demonstrated before the pipeline publishes. That only
- * works if its SHAPE is the published shape: same columns, same basis vocabularies, same coverage
- * pattern. Where these two drift, the SAMPLE badge stops being a caveat and starts being a
- * different product. Everything below mirrors what pipeline/src/features/build.ts actually emits
- * for Duval, including the parts that are unflattering.
+ * The FDOR DOR use codes, with the published Duval row counts as weights.
+ *
+ * The roll publishes them zero padded to three characters ("001"), and the pipeline's description
+ * table is keyed on the two character form ("01"), so `coalesce(uc.description, p.dor_uc)` misses
+ * on every Duval row and `property_usage_type` publishes the CODE rather than a description. That
+ * is what the published parquet carries, so it is what this writes; inventing descriptions here
+ * would make the sample read better than the artifact it stands in for.
  */
+const DOR_USE_CODES = [
+  ["001", 297220], ["004", 26989], ["000", 20251], ["002", 9287], ["009", 7774],
+  ["008", 5171], ["080", 4826], ["017", 3660], ["010", 3383], ["096", 2891],
+  ["048", 2880], ["071", 1321], ["099", 1500], ["011", 900], ["003", 800],
+  ["040", 800], ["028", 700], ["041", 600], ["091", 500], ["070", 400],
+  ["039", 400], ["012", 300], ["021", 300], ["027", 300],
+];
+
+/** Use codes with no building on the parcel, so built_year / eff_year_built are absent. */
+const VACANT_USE_CODES = new Set(["000", "010", "040", "070", "080", "096", "099"]);
+
+/** The DOR use code groups, mirroring dorUseGroup() in pipeline/src/features/rules.ts. */
+function dorUseGroup(code) {
+  const n = Number.parseInt(code, 10);
+  if (Number.isNaN(n)) return null;
+  if (n <= 9) return "RESIDENTIAL";
+  if (n <= 39) return "COMMERCIAL";
+  if (n <= 49) return "INDUSTRIAL";
+  if (n <= 69) return "AGRICULTURAL";
+  if (n <= 79) return "INSTITUTIONAL";
+  if (n <= 89) return "GOVERNMENTAL";
+  return "MISCELLANEOUS";
+}
+
+/** The appraiser's own use code, published beside the DOR one. "00" on 94.9% of the roll. */
+const PA_USE_CODES = [
+  ["00", 383274], ["91", 10270], ["92", 2741], ["40", 2339], ["94", 1493],
+  ["93", 1224], ["10", 973], ["42", 643], ["97", 569], ["99", 315], ["01", 86], ["96", 54],
+];
 
 /**
- * Roof bases in publication order of confidence. PERMIT appears only where the JaxEPICS
- * enumeration has reached that folio, which for most of the roll it has not, so the two proxies
- * dominate exactly as they do in the published parquet.
+ * Roof bases, in the vocabulary roof_age_basis publishes.
+ *
+ * PERMIT is deliberately absent. It is only reachable when a re-roof permit reconciles to the
+ * folio, and the JaxEPICS permit source ingests zero rows (Akamai WAF, see the file header), so no
+ * published Duval row carries it. ACT_YR_BLT_PROXY is absent for a different reason: the roll
+ * publishes EFF_YR_BLT whenever it publishes ACT_YR_BLT, so the effective year always wins the
+ * CASE and the published parquet has 359,129 EFF_YR_BLT_PROXY rows and none of the other two.
+ * The rule text on the roof card still names all three, because a reader has to be able to tell
+ * which of them would have been a roof date.
  */
 const ROOF_BASES = ["EFF_YR_BLT_PROXY", "ACT_YR_BLT_PROXY", "PERMIT"];
+const PUBLISHED_ROOF_BASIS = ROOF_BASES[0];
 
-/** water_basis strings in the published form: which body, which layer, which of the two tests. */
+/**
+ * Mapped water bodies as water_basis names them: [name, type, layer, weight].
+ *
+ * A null name is not a gap: NHD publishes unnamed reservoirs, ponds and artificial paths, and
+ * water_basis falls back to the type for those, which is why the published strings include
+ * "parcel bbox within 30 m of reservoir (nhd_NHDWaterbody)". Weights are the published
+ * water_body_type shares. The first three layers are the ones water_view_major_flag counts.
+ */
 const WATER_BODIES = [
-  ["St. Johns River", "coj_stjohnsriver"],
-  ["Jacksonville rivers (COJ Jax_River)", "coj_jax_river"],
-  ["St. Johns River", "nhd_NHDArea"],
-  ["reservoir", "nhd_NHDWaterbody"],
-  ["Seaton Creek", "nhd_NHDWaterbody"],
-  ["Mink Creek", "nhd_NHDFlowline"],
+  ["Jacksonville rivers (COJ Jax_River)", "river", "coj_jax_river", 4800],
+  ["St. Johns River", "stream/river (area)", "nhd_NHDArea", 3400],
+  ["St. Johns River", "river", "coj_stjohnsriver", 1000],
+  [null, "reservoir", "nhd_NHDWaterbody", 470],
+  ["Mink Creek", "stream/river", "nhd_NHDFlowline", 80],
+  ["Seaton Creek", "stream/river", "nhd_NHDFlowline", 60],
+  ["Grandaddy Branch", "stream/river", "nhd_NHDFlowline", 60],
+  [null, "lake/pond", "nhd_NHDWaterbody", 15],
+  [null, "artificial path", "nhd_NHDFlowline", 15],
 ];
+const MAJOR_WATER_LAYERS = new Set(["coj_jax_river", "nhd_NHDArea", "coj_stjohnsriver"]);
 
 /**
  * The per family provenance contract, mirroring SOURCE_FAMILIES in
@@ -116,36 +206,52 @@ const SOURCE_FAMILIES = [
   ["appraisal", "duval_appraiser"],
   ["sales", "fdor_sdf"],
   ["geometry", "fdor_par"],
-  ["structure", "coj_pa_detail"],
+  ["structure", "duval_pa_detail"],
   ["permit", "coj_jaxepics"],
-  ["business", "fl_sunbiz"],
-  ["contractor", "fl_dbpr"],
+  ["business", "sunbiz"],
+  ["contractor", "dbpr_cilb"],
   ["transit", "jta_gtfs"],
   ["places", "overture_places"],
   ["water", "coj_nhd_hydrography"],
   ["parcel_layer", "coj_parcels"],
-  ["address", "coj_addresses"],
+  ["address", "coj_address_points"],
 ];
 
 /** Mailing towns by region class, so owner_region_class can be checked against what produced it. */
 const MAILING_BY_REGION = {
-  LOCAL: [["JACKSONVILLE", "FL", "32207"], ["JACKSONVILLE", "FL", "32210"], ["ATLANTIC BEACH", "FL", "32233"]],
-  REGIONAL: [["MIAMI", "FL", "33131"], ["ORLANDO", "FL", "32801"], ["ATLANTA", "GA", "30309"], ["CHARLESTON", "SC", "29401"]],
-  NATIONAL: [["NEW YORK", "NY", "10019"], ["DALLAS", "TX", "75201"], ["PHOENIX", "AZ", "85004"]],
+  LOCAL: [["JACKSONVILLE", "FL", "32207"], ["JACKSONVILLE", "FL", "32210"], ["JACKSONVILLE", "FL", "32256"], ["ATLANTIC BEACH", "FL", "32233"]],
+  REGIONAL: [["MIAMI", "FL", "33131"], ["ORLANDO", "FL", "32801"], ["TAMPA", "FL", "33602"], ["ATLANTA", "GA", "30309"], ["CHARLESTON", "SC", "29401"]],
+  NATIONAL: [["NEW YORK", "NY", "10019"], ["DALLAS", "TX", "75201"], ["PHOENIX", "AZ", "85004"], ["SALT LAKE CITY", "UT", "84101"], ["IRVINE", "CA", "92618"]],
   FOREIGN: [["TORONTO", "ON", null], ["LONDON", "GB", null]],
 };
 
-const TRANSIT_STOPS = [
-  "Riverside Ave at Margaret St", "San Marco Blvd at Atlantic Blvd", "Main St at 8th St",
-  "Beach Blvd at University Blvd", "Rosa Parks Transit Station", "Kings Ave Station",
-  "Atlantic Blvd at Girvin Rd", "Normandy Blvd at Cassat Ave", "Edgewood Ave at Commonwealth",
-  "Southside Blvd at Baymeadows Rd", "Lem Turner Rd at Dunn Ave", "JTA Skyway Hemming Plaza",
+const MAILING_STREETS = [
+  "PLEASANT CREEK DR", "COLDFIELD DR W", "W 28TH ST", "ELLIS RD S SUITE 120", "LITTLE FILLY CT",
+  "MACON RD", "BEACON DR", "DOGWOOD HILL DR", "SHELLCRACKER RD", "MARE AVE", "N PEARL ST",
+];
+const CARE_OF_ADDRESSES = [
+  "C/O TAX DEPARTMENT", "C/O NATIONAL PARK SERVICE", "C/O PROPERTY MANAGEMENT",
+  "C/O CORPORATE TRUST SERVICES",
 ];
 
-const STARBUCKS = [
-  "Starbucks - Riverside", "Starbucks - San Marco Square", "Starbucks - Jacksonville Beach",
-  "Starbucks - Baymeadows", "Starbucks - Town Center", "Starbucks - Mandarin",
-  "Starbucks - Downtown Laura St", "Starbucks - Atlantic Beach",
+/** Stop names in the shape the JTA GTFS feed publishes them. */
+const TRANSIT_STOPS = [
+  "River City VA Clinic", "Paradise Village", "Avenues Walk Park-n-Ride",
+  "Beach Blvd + San Pablo Rd", "Beach Blvd + Hodges Blvd", "Durbin Park Walmart",
+  "Riverside Ave + Margaret St", "Main St + 8th St", "Rosa Parks Transit Station",
+  "Kings Ave Station", "Normandy Blvd + Cassat Ave", "Lem Turner Rd + Dunn Ave",
+];
+const TRANSIT_ROUTES = ["10", "23", "30", "14", "19", "8", "FCF", "1", "17", "Baker", "18", "28"];
+/** GTFS route_type of the nearest stop: 3 is bus, 1 is the Skyway, 4 is the St Johns River Ferry. */
+const TRANSIT_ROUTE_TYPES = [["3", 403218], ["4", 385], ["1", 195], ["1,3", 15]];
+
+/** Overture place names for the Starbucks match, with their published shares. */
+const STARBUCKS_NAMES = [
+  ["Starbucks", 312975],
+  ["Starbucks Coffee Company", 80920],
+  ["starbucks (Saint Johns Town Center)", 5836],
+  ["Starbucks @ Jacksonville University", 3137],
+  ["Starbucks (Bartram Oaks Walk)", 945],
 ];
 
 const FIRST_NAMES = ["JAMES", "MARIA", "ROBERT", "LINDA", "MICHAEL", "PATRICIA", "DAVID", "JENNIFER", "WILLIAM", "ELIZABETH", "CARLOS", "ANGELA"];
@@ -156,26 +262,41 @@ const COMPANY_NAMES = [
   "NORTHBRIDGE CAPITAL INC", "FIRST COAST REALTY TRUST",
 ];
 
+/**
+ * owner_region_class shares, from the published breakdown: LOCAL 82.6%, REGIONAL 8.6%,
+ * NATIONAL 8.6%, FOREIGN 4 rows in 404,023. FOREIGN and the null class are both far below one row
+ * in 480, so they are placed on a fixed row each (see SPECIAL_ROWS) rather than rolled for: a
+ * sample that never produces them cannot show that the classifier has four outcomes and a null.
+ */
 const OWNER_REGIONS = [
-  { value: "LOCAL", weight: 0.55 },
-  { value: "REGIONAL", weight: 0.18 },
-  { value: "NATIONAL", weight: 0.2 },
-  { value: "FOREIGN", weight: 0.07 },
+  ["LOCAL", 333851],
+  ["REGIONAL", 34649],
+  ["NATIONAL", 34697],
 ];
 
-function weightedRegion() {
-  const roll = rand();
-  let cumulative = 0;
-  for (const entry of OWNER_REGIONS) {
-    cumulative += entry.weight;
-    if (roll < cumulative) return entry.value;
-  }
-  return "LOCAL";
-}
+/** FDOR sale qualification codes on the rows that carry a roll sale, with published shares. */
+const SALE_QUAL_CODES = [
+  ["01", 21656], ["11", 10360], ["14", 9143], ["30", 4210], ["05", 3721],
+  ["12", 537], ["37", 394], ["03", 325], ["98", 289], ["17", 117], ["18", 63],
+];
+
+/** FEMA flood zones and COJ zoning codes, as the COJ parcel layer publishes them. */
+const FLOOD_ZONES = [["X", 78], ["AE", 12], ["A", 4], ["0.2 PCT ANNUAL CHANCE FLOOD HAZARD", 4], ["VE", 1], ["AO", 1]];
+const ZONING_CODES = [
+  ["RLD-60", 30], ["RLD-70", 14], ["RLD-90", 8], ["RMD-A", 9], ["RMD-B", 5],
+  ["PUD", 11], ["CCG-1", 6], ["CCG-2", 3], ["CN", 3], ["CO", 2], ["IL", 4], ["IH", 2],
+  ["AGR", 2], ["RR-Acre", 2],
+];
+
+/** Structure attributes, published only for the parcels the detail-page crawl has reached. */
+const WALL_MATERIALS = ["Concrete Block", "Wood Frame", "Brick", "Stucco", "Vinyl Siding", "Fiber Cement"];
+const ROOF_MATERIALS = ["Asphalt Shingle", "Metal", "Clay Tile", "Built Up", "Architectural Shingle", "Wood Shake"];
+const ROOF_STRUCTURES = ["Wood Truss", "Wood Frame", "Steel Frame", "Concrete Deck"];
 
 /* --------------------------------------------------------------- fake ids */
 
 const BASE32 = "abcdefghijklmnopqrstuvwxyz234567";
+const HEX = "0123456789abcdef";
 
 function fakeCid(prefix, length) {
   let out = prefix;
@@ -185,6 +306,15 @@ function fakeCid(prefix, length) {
 
 function fakePropertyCid() {
   return fakeCid("bafkreisample", 59);
+}
+
+function fakeUuid() {
+  const block = (n) => {
+    let out = "";
+    while (out.length < n) out += HEX[Math.floor(rand() * 16)];
+    return out;
+  };
+  return `${block(8)}-${block(4)}-${block(4)}-${block(4)}-${block(12)}`;
 }
 
 function fakeIpnsName(label) {
@@ -201,7 +331,7 @@ function fakeSha256(seedText) {
     [...seedText].reduce((acc, char) => (acc * 33 + char.charCodeAt(0)) >>> 0, 11),
   );
   let out = "";
-  while (out.length < 64) out += "0123456789abcdef"[Math.floor(seedRand() * 16)];
+  while (out.length < 64) out += HEX[Math.floor(seedRand() * 16)];
   return out;
 }
 
@@ -209,6 +339,7 @@ function fakeSha256(seedText) {
 
 const NOW = new Date("2026-08-21T09:00:00.000Z");
 const CURRENT_YEAR = NOW.getUTCFullYear();
+const AS_OF = NOW.toISOString().slice(0, 10);
 
 const RUN_DEFS = [
   { id: "20260819T060112Z", trigger: "schedule", startedOffsetH: 51 },
@@ -223,51 +354,162 @@ function isoMinus(hours, extraMinutes = 0) {
   return new Date(NOW.getTime() - hours * 3600_000 + extraMinutes * 60_000).toISOString();
 }
 
+/**
+ * The zoneless form DuckDB casts a TIMESTAMP to, which is what every VARCHAR fetch time in the
+ * published parquet carries ("2026-08-21 07:18:09.841"). The UI reads these as UTC on purpose; see
+ * the timezone tests in ui/tests/run-history.test.ts.
+ */
+function duckStamp(iso) {
+  return iso.replace("T", " ").replace("Z", "");
+}
+
+/**
+ * One fetch time per family, not one per row.
+ *
+ * Every family here is a whole feed or a single archive, so the pipeline records the same fetch
+ * instant on every row it covers: the published parquet has one distinct value in
+ * `source_fetched_at` across all 404,023 rows. Per row jitter would be an invention.
+ */
+const FAMILY_FETCHED_AT = {
+  appraisal: isoMinus(2, -50),
+  sales: isoMinus(2, -22),
+  geometry: isoMinus(3, -5),
+  structure: isoMinus(1, -12),
+  permit: null,
+  business: isoMinus(1, -40),
+  contractor: null,
+  transit: isoMinus(2, -8),
+  places: isoMinus(1, -55),
+  water: isoMinus(1, -30),
+  parcel_layer: isoMinus(2, -35),
+  address: isoMinus(2, -15),
+};
+
+const APPRAISAL_FETCHED_AT = FAMILY_FETCHED_AT.appraisal;
+const SOURCE_ARTIFACT = "appraisal/duval-26-preliminary-nal-2026.zip";
+const SOURCE_SHA256 = fakeSha256(SOURCE_ARTIFACT);
+const ROLL_URL =
+  "https://floridarevenue.com/property/dataportal/Documents/PTO%20Data%20Portal/Tax%20Roll%20Data%20Files/NAL/2026P/Duval%2026%20Preliminary%20NAL%202026.zip";
+
 /* ------------------------------------------------------------ parcel rows */
 
+/**
+ * Membership at an exact rate, rather than at an expected one.
+ *
+ * Rolling a 12.82% probability 480 times lands on 16.0% often enough to matter: the sample would
+ * advertise a quarter more sale coverage than the published artifact has, and a reviewer comparing
+ * the two would be right to call it flattering. `stride` is coprime with ROWS, so
+ * `(index * stride) % ROWS` is a permutation of 0..ROWS-1 and exactly round(ROWS * rate) rows
+ * qualify, scattered rather than clustered. Every family coverage this file claims is therefore
+ * the published rate to within one row.
+ */
+function atRate(index, rate, stride) {
+  return ((index * stride) % ROWS) < Math.round(ROWS * rate);
+}
+
+/**
+ * Outcomes that occur in the published artifact at a rate below one row in 480.
+ *
+ * Rolling for them at the published probability would produce zero of them here and quietly delete
+ * a code path the live data exercises: the parcel with no centroid, the parcel the detail-page
+ * crawl has reached, the folio linked to a Sunbiz registration, the foreign owner, the owner with
+ * no mailing state. One row each is the closest 480 rows can get to a rate of 0.05% to 0.2%, and it
+ * keeps the null branches under test.
+ */
+const SPECIAL_ROWS = {
+  noGeometry: 246,
+  noParcelLayer: 311,
+  structure: 137,
+  sunbizTenant: 92,
+  foreignOwner: 401,
+  noOwnerState: 58,
+};
+
 function makeRow(index) {
-  const cityEntry = pick(CITIES);
+  const cityEntry = weighted(CITIES.map((entry) => [entry, entry.weight]));
   const zip = pick(cityEntry.zips);
-  const folio = String(100000 + index * 7).padStart(6, "0") + String(intBetween(0, 9999)).padStart(4, "0");
+  // Folios are the roll's RE number: ten digits and an "R" suffix, as the published parquet has it.
+  const folio = `${String(100000 + index * 7).padStart(6, "0")}${digits(4)}R`;
 
-  const latitude = Number(between(30.13, 30.58).toFixed(6));
-  const longitude = Number(between(-82.05, -81.38).toFixed(6));
+  // 210 of 404,023 parcels are in the roll but missing from the PAR shapefile, so they carry no
+  // centroid and every distance derived from one is NULL rather than 0.
+  const hasGeometry = index !== SPECIAL_ROWS.noGeometry;
+  const latitude = hasGeometry ? Number(between(30.13, 30.58).toFixed(6)) : null;
+  const longitude = hasGeometry ? Number(between(-82.05, -81.38).toFixed(6)) : null;
 
-  const propertyType = pick(PROPERTY_TYPES);
-  const isVacant = propertyType === "VacantLand";
-  const builtYear = isVacant ? null : intBetween(1920, 2024);
+  const dorUc = weighted(DOR_USE_CODES);
+  const paUc = weighted(PA_USE_CODES);
+  const propertyType = dorUseGroup(dorUc);
+  // coalesce(uc.description, p.dor_uc): the description table is keyed on two characters and the
+  // roll publishes three, so the published value is the code. See DOR_USE_CODES above.
+  const propertyUsageType = dorUc;
 
-  const lotAcre = Number(between(0.08, 2.4).toFixed(4));
-  const lotSqft = Math.round(lotAcre * 43560);
-  const livable = isVacant ? null : intBetween(620, 4800);
-  const total = livable === null ? null : livable + intBetween(120, 900);
+  const hasBuilding = !VACANT_USE_CODES.has(dorUc) && chance(0.97);
+  const builtYear = hasBuilding ? intBetween(1900, 2025) : null;
+  // EFF_YR_BLT moves when the appraiser records a major improvement; it is never published without
+  // ACT_YR_BLT, which is why built_year and eff_year_built are populated on exactly the same rows.
+  const effYearBuilt =
+    builtYear === null ? null : chance(0.739) ? builtYear : intBetween(builtYear, 2025);
 
-  const marketValue = isVacant ? intBetween(18000, 220000) : intBetween(85000, 1450000);
+  const lotSqft = Math.round(logBetween(1500, 50000));
+  const lotAcre = Number((lotSqft / 43560).toFixed(4));
+  const livable = hasBuilding ? Math.round(logBetween(520, 6200)) : null;
+
+  const marketValue = hasBuilding
+    ? Math.round(logBetween(45000, 1_800_000))
+    : Math.round(logBetween(5000, 300_000));
   const landValue = Math.round(marketValue * between(0.15, 0.45));
-  const assessedValue = Math.round(marketValue * between(0.72, 0.98));
-  const avmValue = chance(0.75) ? Math.round(marketValue * between(0.9, 1.18)) : null;
+  const assessedValue = Math.round(marketValue * between(0.62, 0.95));
+  const assessedSchool = Math.min(marketValue, Math.round(assessedValue * between(1.0, 1.08)));
+
+  const buildingCount = builtYear === null ? null : weighted([[1, 349622], [2, 6556], [3, 1183], [4, 507], [5, 253]]);
+  const residentialUnits =
+    propertyType === "RESIDENTIAL" && builtYear !== null
+      ? weighted([[1, 331361], [2, 6230], [3, 995], [4, 1405], [5, 138]])
+      : null;
 
   const isCompany = chance(0.22);
-  const ownerRegion = isCompany ? (chance(0.45) ? "REGIONAL" : weightedRegion()) : weightedRegion();
-  const baseName = isCompany ? pick(COMPANY_NAMES) : `${pick(LAST_NAMES)}, ${pick(FIRST_NAMES)}`;
+  const ownerRegion =
+    index === SPECIAL_ROWS.foreignOwner
+      ? "FOREIGN"
+      : index === SPECIAL_ROWS.noOwnerState
+        ? null
+        : weighted(OWNER_REGIONS);
+  const baseName = isCompany ? pick(COMPANY_NAMES) : `${pick(LAST_NAMES)} ${pick(FIRST_NAMES)}`;
   const hasAdditionalOwners = !isCompany && chance(0.09);
   const ownerName = hasAdditionalOwners ? `${baseName} ET AL` : baseName;
+  // FIDU_NAME is empty for every Duval parcel, so owners_text equals owner_name on every row.
   const ownersText = ownerName;
-  const ownerOccupied = isCompany ? false : ownerRegion === "LOCAL" ? chance(0.72) : chance(0.08);
-  const [mailCity, mailState, mailZip] = pick(MAILING_BY_REGION[ownerRegion]);
+  const ownerOccupied = isCompany ? false : ownerRegion === "LOCAL" ? chance(0.78) : chance(0.06);
+  const homesteadFlag = ownerOccupied ? chance(0.95) : chance(0.15);
+  const taxableValue = Math.max(0, assessedValue - (homesteadFlag ? 50000 : 0));
+  // owner_region_class is NULL exactly when the roll carries no owner state, and the mailing
+  // address columns the classifier read go with it.
+  const [mailCity, mailState, mailZip] =
+    ownerRegion === null ? [pick(["JACKSONVILLE", "ORANGE PARK"]), null, null] : pick(MAILING_BY_REGION[ownerRegion]);
+  const ownerMailingAddress = chance(0.02)
+    ? pick(CARE_OF_ADDRESSES)
+    : `${intBetween(100, 16990)} ${pick(MAILING_STREETS)}`;
 
   // Sales and tenure, in the published shape.
   //
-  // The FDOR roll publishes only the two most recent sales, so last_sale_date is populated on a
-  // minority of parcels; the City recorded sales file covers nearly all of them. last_sale_date_any
-  // is the later of the two and is what years_since_last_sale is measured from. The sample carries
-  // that same asymmetry on purpose: a sample where last_sale_date is well populated would let a
-  // presentation defect that only appears on real data pass every local check.
-  const rollSaleDate = chance(0.13)
-    ? new Date(NOW.getTime() - between(0.2, 9.8) * 365.25 * 86400_000).toISOString().slice(0, 10)
+  // The FDOR roll and SDF file cover only the two most recent transfers, which for the 2026
+  // preliminary roll means 2025 and 2026 and a day of month the source does not carry (every date
+  // is stored as the first of its month). last_sale_date is therefore populated on 12.8% of
+  // parcels and is never old enough to satisfy a ten year hold on its own. The COJ recorded sales
+  // file covers nearly all of them and reaches back decades, so it is what tenure is measured from
+  // on most rows. The sample carries that asymmetry on purpose: a sample where last_sale_date is
+  // well populated would let a presentation defect that only appears on real data pass every local
+  // check.
+  // 2025-01 through 2026-06: the window the 2026 preliminary roll actually publishes, and never a
+  // month later than features_as_of. A sale dated after the run would be a negative tenure.
+  const rollSaleMonth = intBetween(0, 17);
+  const rollSaleDate = atRate(index, 0.1282, 401)
+    ? `${2025 + Math.floor(rollSaleMonth / 12)}-${String((rollSaleMonth % 12) + 1).padStart(2, "0")}-01`
     : null;
+  const hasParcelLayer = index !== SPECIAL_ROWS.noParcelLayer;
   let cojSaleDate = null;
-  if (chance(0.995)) {
+  if (hasParcelLayer) {
     // The recorded sales file carries placeholder dates for transfers that predate the digital
     // record. They arrive as tenures of 127 and 226 years and must not read as findings.
     cojSaleDate = chance(0.012)
@@ -276,6 +518,12 @@ function makeRow(index) {
   }
   const lastSaleDate = rollSaleDate;
   const lastSalePrice = rollSaleDate === null ? null : Math.round(marketValue * between(0.35, 1.05));
+  const lastSaleSource = rollSaleDate === null ? null : "SDF";
+  const lastSaleQualCd = rollSaleDate === null ? null : weighted(SALE_QUAL_CODES);
+  const lastSaleOrBook = rollSaleDate === null ? null : digits(intBetween(2, 5));
+  const lastSaleOrPage = rollSaleDate === null ? null : digits(intBetween(1, 4));
+  const saleCount = rollSaleDate === null ? null : weighted([[1, 40477], [2, 8291], [3, 1780], [4, 333]]);
+
   let lastSaleDateAny = null;
   let tenureBasis = null;
   if (rollSaleDate !== null && (cojSaleDate === null || rollSaleDate >= cojSaleDate)) {
@@ -292,75 +540,114 @@ function makeRow(index) {
   if (tenureBasis === null) tenureBasis = "NO_SALE_ON_RECORD";
   const tenureSource =
     tenureBasis === "FDOR_SALE" ? "fdor_sdf" : tenureBasis === "COJ_SALESL" ? "coj_parcels" : null;
-  const saleCount = lastSaleDateAny === null ? 0 : intBetween(1, 4);
 
-  // Roof. No re-roof permit feed was harvested for this county, so every populated row is a proxy
-  // off the appraiser's effective year built, exactly as the published parquet has it.
-  let roofYearEst = null;
-  let roofAgeBasis = null;
-  if (!isVacant && chance(0.89)) {
-    const basisRoll = rand();
-    roofAgeBasis = basisRoll < 0.008 ? "PERMIT" : basisRoll < 0.03 ? "ACT_YR_BLT_PROXY" : "EFF_YR_BLT_PROXY";
-    roofYearEst =
-      roofAgeBasis === "PERMIT"
-        ? intBetween(Math.max(builtYear ?? 1990, 2005), CURRENT_YEAR)
-        : roofAgeBasis === "EFF_YR_BLT_PROXY"
-          ? intBetween(builtYear ?? 1940, CURRENT_YEAR - 1)
-          : builtYear;
-  }
+  // Roof. The permit source ingests nothing, so no row can carry a PERMIT basis and every populated
+  // row is the appraiser's effective year built standing in, exactly as the published parquet has
+  // it: 359,129 EFF_YR_BLT_PROXY rows, 44,894 NULL, nothing else.
+  const roofYearEst = effYearBuilt;
+  const roofAgeBasis = roofYearEst === null ? null : PUBLISHED_ROOF_BASIS;
   const roofAgeYears = roofYearEst === null ? null : CURRENT_YEAR - roofYearEst;
 
-  const permitCount = chance(0.34) ? intBetween(1, 9) : 0;
+  // Water. Distances are only computed within about a kilometre of a mapped shoreline, so
+  // water_dist_m is NULL on the rest and water_basis says so rather than leaving a blank. Two tests
+  // set the flag: centroid within 150 m, or parcel bounding box within 30 m, which is why a flagged
+  // parcel can carry a centroid distance far larger than 30 m.
+  let waterDist = null;
+  let waterName = null;
+  let waterType = null;
+  let waterLayer = null;
+  let waterViewFlag = null;
+  let waterViewMajorFlag = null;
+  let waterBasis = null;
+  if (hasGeometry) {
+    const measured = chance(0.5652);
+    if (!measured) {
+      waterViewFlag = false;
+      waterViewMajorFlag = false;
+      waterBasis = "no mapped water within ~1 km of centroid (COJ rivers + NHD)";
+    } else {
+      const close = chance(0.392);
+      waterDist = Number(
+        (close ? between(0.1, 150) : 150.1 + skewed(0, 2063.4, 2)).toFixed(1),
+      );
+      const boxTouch = close ? chance(0.235) : chance(0.0012);
+      [waterName, waterType, waterLayer] = weighted(
+        WATER_BODIES.map((entry) => [entry, entry[3]]),
+      );
+      waterViewFlag = close || boxTouch;
+      waterViewMajorFlag = waterViewFlag && MAJOR_WATER_LAYERS.has(waterLayer);
+      const label = waterName ?? waterType;
+      waterBasis = boxTouch
+        ? `parcel bbox within 30 m of ${label} (${waterLayer})`
+        : `centroid ${waterDist} m from shoreline of ${label} (${waterLayer})`;
+    }
+  }
 
-  // Two tests set water_view_flag: centroid within 150 m, or parcel bounding box within 30 m. The
-  // second is why a flagged parcel can carry a centroid distance far larger than 30 m.
-  const waterDist = chance(0.22) ? Number(between(0.1, 900).toFixed(1)) : Number(between(900, 12000).toFixed(1));
-  const boxTouch = waterDist <= 1700 && chance(0.24);
-  const waterViewFlag = waterDist <= 150 || boxTouch;
-  const [waterName, waterLayer] = pick(WATER_BODIES);
-  const waterBasis = !waterViewFlag
-    ? waterDist > 1000
-      ? "no mapped water within ~1 km of centroid (COJ rivers + NHD)"
-      : `centroid ${waterDist} m from shoreline of ${waterName} (${waterLayer})`
-    : boxTouch
-      ? `parcel bbox within 30 m of ${waterName} (${waterLayer})`
-      : `centroid ${waterDist} m from shoreline of ${waterName} (${waterLayer})`;
+  // Walkability. 80.8% of parcels with a centroid are within 800 m of a published stop and 37.4%
+  // are within 800 m of a Starbucks; both distances are straight line, never network distance.
+  const transitDist = hasGeometry
+    ? Number((chance(0.808) ? 1.4 + skewed(0, 798.6, 2.5) : 800.1 + skewed(0, 6236.7, 2)).toFixed(1))
+    : null;
+  const starbucksDist = hasGeometry
+    ? Number((chance(0.374) ? 1.6 + skewed(0, 798.4, 2) : 800.1 + skewed(0, 23424.9, 2.8)).toFixed(1))
+    : null;
 
-  const transitDist = chance(0.34) ? Number(between(35, 795).toFixed(1)) : Number(between(810, 9500).toFixed(1));
-  const starbucksDist = chance(0.16) ? Number(between(60, 790).toFixed(1)) : Number(between(820, 15000).toFixed(1));
+  // Businesses. The Sunbiz feed answers for every parcel once it loads, including the negative
+  // answers, so has_sunbiz_tenant and sunbiz_business_count are non-null on every row and the
+  // family provenance covers all of them. A situs address match is rare: 574 parcels in 404,023.
+  const sunbizCount = index === SPECIAL_ROWS.sunbizTenant ? 1 : 0;
+  const hasSunbiz = sunbizCount > 0;
 
-  const hasSunbiz = chance(0.09);
-  const runId = chance(0.18) ? LATEST_RUN_ID : pick(RUN_DEFS).id;
-  const fetchedAt = isoMinus(intBetween(3, 51), intBetween(0, 59));
+  // Structure. The appraiser detail pages are a slow, US-egress-only source pulled in bounded
+  // windows: 856 parcels of 404,023 have been reached, so one row in 480 carries these columns and
+  // every other row publishes NULL rather than a guess.
+  const hasStructure = index === SPECIAL_ROWS.structure;
+  const exteriorWall = hasStructure ? pick(WALL_MATERIALS) : null;
+  const roofCovering = hasStructure ? pick(ROOF_MATERIALS) : null;
+  const roofStructure = hasStructure ? pick(ROOF_STRUCTURES) : null;
+  const totalArea = hasStructure && livable !== null ? livable + intBetween(120, 900) : null;
+  const paActualYearBuilt = hasStructure ? builtYear : null;
+  const paBuildingCount = hasStructure ? (buildingCount ?? 1) : null;
 
-  // Which families actually put a value on this row. structure and contractor are deliberately
-  // empty: the appraiser detail pages are a slow bounded source and BBB terms forbid aggregation,
-  // so those columns are null and their provenance must be null too rather than claiming a source.
+  // Address points. The ERAT layer resolves to 59.7% of folios; subdivision comes from it, which is
+  // why a parcel in a named subdivision can still publish NULL here.
+  const hasAddressPoints = atRate(index, 0.5972, 137);
+  const subdivision = hasAddressPoints && chance(0.92) ? pick(SUBDIVISIONS) : null;
+  const addressPointCount = hasAddressPoints ? weighted([[1, 88], [2, 8], [3, 3], [4, 1]]) : null;
+
+  // Which families actually put a value on this row.
+  //
+  // permit and contractor are zero everywhere, and for different reasons that both have to survive
+  // into the sample: the JaxEPICS API is behind a WAF that 403s every request, so no permit row is
+  // ingested at all; and DBPR licences do ingest but no contractor record resolves to a parcel,
+  // so has_bbb_contractor stays NULL. In both cases the family provenance is NULL rather than
+  // naming a source that contributed nothing.
   const familyPresent = {
     appraisal: true,
     sales: rollSaleDate !== null,
-    geometry: true,
-    structure: false,
-    permit: permitCount > 0,
-    business: hasSunbiz,
+    geometry: hasGeometry,
+    structure: hasStructure,
+    permit: false,
+    business: true,
     contractor: false,
-    transit: true,
-    places: true,
-    water: true,
-    parcel_layer: cojSaleDate !== null,
-    address: true,
+    transit: hasGeometry,
+    places: hasGeometry,
+    water: hasGeometry,
+    parcel_layer: hasParcelLayer,
+    address: hasAddressPoints,
   };
   const provenance = {};
   const contributing = [];
   for (const [key, system] of SOURCE_FAMILIES) {
     const present = familyPresent[key] === true;
     provenance[`${key}_source`] = present ? system : null;
-    provenance[`${key}_fetched_at`] = present ? fetchedAt : null;
+    provenance[`${key}_fetched_at`] = present ? duckStamp(FAMILY_FETCHED_AT[key]) : null;
     if (present) contributing.push(system);
   }
-  const sourceSystems = [...new Set(contributing)].sort().join(", ");
+  const sourceSystems = [...new Set(contributing)].sort().join(",");
 
   return {
+    // canonical 37 columns, in elephant-query-db export order
     property_id: folio,
     property_cid: fakePropertyCid(),
     request_identifier: folio,
@@ -368,69 +655,132 @@ function makeRow(index) {
     source_system: "duval_appraiser",
     county_name: "Duval",
     state_code: "FL",
-    address_street: `${intBetween(100, 14990)} ${pick(STREET_NAMES)}`,
+    address_street: `${intBetween(100, 16990)} ${pick(STREET_NAMES)}`,
     address_city: cityEntry.city,
     address_zip: zip,
     latitude,
     longitude,
     lot_size_acre: lotAcre,
     lot_area_sqft: lotSqft,
-    exterior_wall_material: null,
-    roof_covering_material: null,
+    exterior_wall_material: exteriorWall,
+    roof_covering_material: roofCovering,
     property_type: propertyType,
-    property_usage_type: pick(USAGE_TYPES),
+    property_usage_type: propertyUsageType,
     built_year: builtYear,
     livable_floor_area: livable,
-    total_area: null,
+    total_area: totalArea,
     assessed_value: assessedValue,
     market_value: marketValue,
     land_value: landValue,
-    avm_value: avmValue,
+    // Always NULL: no automated valuation is published for Duval. The UI says so on the property
+    // page, so a populated column here would make the sample contradict its own explanation.
+    avm_value: null,
     owner_name: ownerName,
     owners_text: ownersText,
+    // Always NULL: the roll publishes one 30 character owner name and no co-owner column, so there
+    // is no owner count in the source. has_additional_owners carries the ET AL / ET UX marker.
     owner_count: null,
-    has_additional_owners: hasAdditionalOwners,
     owner_occupied: ownerOccupied,
     last_sale_date: lastSaleDate,
     last_sale_price: lastSalePrice,
-    subdivision: pick(SUBDIVISIONS),
-    has_permits: permitCount > 0,
-    permit_count: permitCount,
+    subdivision,
+    // The permit family is empty, so these are NULL rather than false and 0: "no permits ingested"
+    // and "this parcel has no permits" are different claims.
+    has_permits: null,
+    permit_count: null,
     has_sunbiz_tenant: hasSunbiz,
     has_bbb_contractor: null,
     hoa_flag: null,
-    coj_last_sale_date: cojSaleDate,
-    last_sale_date_any: lastSaleDateAny,
-    tenure_basis: tenureBasis,
-    tenure_source: tenureSource,
-    has_sale_on_record: lastSaleDateAny !== null,
-    no_sale_10y_flag: yearsSinceLastSale === null ? null : yearsSinceLastSale >= 10,
-    sale_count: saleCount,
-    years_since_last_sale: yearsSinceLastSale,
+    // Duval extras, in derived.properties_features order
+    dor_uc: dorUc,
+    pa_uc: paUc,
+    eff_year_built: effYearBuilt,
+    taxable_value: taxableValue,
+    assessed_value_school: assessedSchool,
+    homestead_flag: homesteadFlag,
+    building_count: buildingCount,
+    residential_units: residentialUnits,
+    legal_description: chance(0.62)
+      ? `${digits(2)}-${digits(intBetween(1, 3))}    ${String(intBetween(1, 54)).padStart(2, "0")}-${intBetween(1, 6)}S-${intBetween(23, 27)}E`
+      : `${String(intBetween(1, 54)).padStart(2, "0")}-${intBetween(1, 6)}S-${intBetween(23, 27)}E  ${between(0.1, 640).toFixed(3)}`,
+    neighborhood_code: digits(8),
+    census_block: `12031${digits(7)}`,
+    owner_mailing_address: ownerMailingAddress,
     owner_mailing_city: mailCity,
     owner_mailing_state: mailState,
     owner_mailing_zip: mailZip,
     owner_region_class: ownerRegion,
+    has_additional_owners: hasAdditionalOwners,
+    last_sale_source: lastSaleSource,
+    last_sale_qual_cd: lastSaleQualCd,
+    last_sale_or_book: lastSaleOrBook,
+    last_sale_or_page: lastSaleOrPage,
+    sale_count: saleCount,
+    last_sale_date_any: lastSaleDateAny,
+    tenure_basis: tenureBasis,
+    tenure_source: tenureSource,
+    has_sale_on_record: lastSaleDateAny !== null,
+    years_since_last_sale: yearsSinceLastSale,
+    no_sale_10y_flag: yearsSinceLastSale === null ? null : yearsSinceLastSale >= 10,
+    sunbiz_business_count: sunbizCount,
+    roof_permit_count: null,
+    last_roof_permit_year: null,
+    last_roof_permit_date: null,
+    last_permit_date: null,
     roof_year_est: roofYearEst,
     roof_age_basis: roofAgeBasis,
     roof_age_years: roofAgeYears,
     water_view_flag: waterViewFlag,
+    water_view_major_flag: waterViewMajorFlag,
     water_dist_m: waterDist,
+    water_body_name: waterName,
+    water_body_type: waterType,
     water_basis: waterBasis,
     nearest_transit_stop_m: transitDist,
-    nearest_transit_stop_name: pick(TRANSIT_STOPS),
+    nearest_transit_stop_id: hasGeometry ? String(intBetween(1000, 9999)) : null,
+    nearest_transit_stop_name: hasGeometry ? pick(TRANSIT_STOPS) : null,
+    nearest_transit_route_types: hasGeometry ? weighted(TRANSIT_ROUTE_TYPES) : null,
+    nearest_transit_routes: hasGeometry ? pick(TRANSIT_ROUTES) : null,
+    near_transit_800m: transitDist === null ? null : transitDist <= 800,
     nearest_starbucks_m: starbucksDist,
-    nearest_starbucks_name: pick(STARBUCKS),
-    source_url: `https://paopropertysearch.coj.net/Basic/Detail.aspx?RE=${folio}`,
-    fetched_at: fetchedAt,
-    run_id: runId,
-    source_systems: sourceSystems,
+    nearest_starbucks_id: hasGeometry ? fakeUuid() : null,
+    nearest_starbucks_name: hasGeometry ? weighted(STARBUCKS_NAMES) : null,
+    near_starbucks_800m: starbucksDist === null ? null : starbucksDist <= 800,
+    fld_zone: hasParcelLayer ? weighted(FLOOD_ZONES) : null,
+    zoning: hasParcelLayer ? weighted(ZONING_CODES) : null,
+    coj_last_sale_date: cojSaleDate,
+    address_point_count: addressPointCount,
+    roof_structure: roofStructure,
+    pa_actual_year_built: paActualYearBuilt,
+    pa_building_count: paBuildingCount,
+    coordinates_source: hasGeometry ? "fdor_par" : null,
+    source_artifact: SOURCE_ARTIFACT,
+    source_sha256: SOURCE_SHA256,
+    source_fetched_at: duckStamp(APPRAISAL_FETCHED_AT),
+    source_run_id: LATEST_RUN_ID,
+    features_run_id: LATEST_RUN_ID,
+    features_as_of: AS_OF,
     ...provenance,
+    source_systems: sourceSystems,
+    // The UI provenance contract: the roll's dataset URL, its fetch instant, the features run.
+    source_url: ROLL_URL,
+    fetched_at: APPRAISAL_FETCHED_AT,
+    run_id: LATEST_RUN_ID,
   };
 }
 
 /* ------------------------------------------------------ parquet type casts */
 
+/**
+ * The published column list and its types, in publication order.
+ *
+ * These types are read off the artifact, not chosen: every money column is DOUBLE because the roll
+ * loads as DOUBLE, `last_sale_date` is VARCHAR because the source carries year and month only, and
+ * every `<family>_fetched_at` is VARCHAR because the pipeline casts it before publishing.
+ * `fetched_at` is the single TIMESTAMP column in the query table, which is the assumption
+ * ui/lib/format.ts documents. Drifting from any of this lets a type sensitive change pass here and
+ * fail against the published parquet.
+ */
 const CASTS = [
   ["property_id", "VARCHAR"],
   ["property_cid", "VARCHAR"],
@@ -445,61 +795,104 @@ const CASTS = [
   ["latitude", "DOUBLE"],
   ["longitude", "DOUBLE"],
   ["lot_size_acre", "DOUBLE"],
-  ["lot_area_sqft", "BIGINT"],
+  ["lot_area_sqft", "DOUBLE"],
   ["exterior_wall_material", "VARCHAR"],
   ["roof_covering_material", "VARCHAR"],
   ["property_type", "VARCHAR"],
   ["property_usage_type", "VARCHAR"],
-  ["built_year", "INTEGER"],
-  ["livable_floor_area", "BIGINT"],
+  ["built_year", "BIGINT"],
+  ["livable_floor_area", "DOUBLE"],
   ["total_area", "DOUBLE"],
-  ["assessed_value", "BIGINT"],
-  ["market_value", "BIGINT"],
-  ["land_value", "BIGINT"],
-  ["avm_value", "BIGINT"],
+  ["assessed_value", "DOUBLE"],
+  ["market_value", "DOUBLE"],
+  ["land_value", "DOUBLE"],
+  ["avm_value", "DOUBLE"],
   ["owner_name", "VARCHAR"],
   ["owners_text", "VARCHAR"],
   ["owner_count", "BIGINT"],
-  ["has_additional_owners", "BOOLEAN"],
   ["owner_occupied", "BOOLEAN"],
-  ["last_sale_date", "DATE"],
-  ["last_sale_price", "BIGINT"],
+  ["last_sale_date", "VARCHAR"],
+  ["last_sale_price", "DOUBLE"],
   ["subdivision", "VARCHAR"],
   ["has_permits", "BOOLEAN"],
-  ["permit_count", "INTEGER"],
+  ["permit_count", "BIGINT"],
   ["has_sunbiz_tenant", "BOOLEAN"],
   ["has_bbb_contractor", "BOOLEAN"],
   ["hoa_flag", "BOOLEAN"],
-  ["coj_last_sale_date", "VARCHAR"],
-  ["last_sale_date_any", "VARCHAR"],
-  ["tenure_basis", "VARCHAR"],
-  ["tenure_source", "VARCHAR"],
-  ["has_sale_on_record", "BOOLEAN"],
-  ["no_sale_10y_flag", "BOOLEAN"],
-  ["sale_count", "BIGINT"],
-  ["years_since_last_sale", "INTEGER"],
+  ["dor_uc", "VARCHAR"],
+  ["pa_uc", "VARCHAR"],
+  ["eff_year_built", "INTEGER"],
+  ["taxable_value", "DOUBLE"],
+  ["assessed_value_school", "DOUBLE"],
+  ["homestead_flag", "BOOLEAN"],
+  ["building_count", "INTEGER"],
+  ["residential_units", "INTEGER"],
+  ["legal_description", "VARCHAR"],
+  ["neighborhood_code", "VARCHAR"],
+  ["census_block", "VARCHAR"],
+  ["owner_mailing_address", "VARCHAR"],
   ["owner_mailing_city", "VARCHAR"],
   ["owner_mailing_state", "VARCHAR"],
   ["owner_mailing_zip", "VARCHAR"],
   ["owner_region_class", "VARCHAR"],
+  ["has_additional_owners", "BOOLEAN"],
+  ["last_sale_source", "VARCHAR"],
+  ["last_sale_qual_cd", "VARCHAR"],
+  ["last_sale_or_book", "VARCHAR"],
+  ["last_sale_or_page", "VARCHAR"],
+  ["sale_count", "BIGINT"],
+  ["last_sale_date_any", "VARCHAR"],
+  ["tenure_basis", "VARCHAR"],
+  ["tenure_source", "VARCHAR"],
+  ["has_sale_on_record", "BOOLEAN"],
+  ["years_since_last_sale", "INTEGER"],
+  ["no_sale_10y_flag", "BOOLEAN"],
+  ["sunbiz_business_count", "BIGINT"],
+  ["roof_permit_count", "BIGINT"],
+  ["last_roof_permit_year", "INTEGER"],
+  ["last_roof_permit_date", "VARCHAR"],
+  ["last_permit_date", "VARCHAR"],
   ["roof_year_est", "INTEGER"],
   ["roof_age_basis", "VARCHAR"],
   ["roof_age_years", "INTEGER"],
   ["water_view_flag", "BOOLEAN"],
+  ["water_view_major_flag", "BOOLEAN"],
   ["water_dist_m", "DOUBLE"],
+  ["water_body_name", "VARCHAR"],
+  ["water_body_type", "VARCHAR"],
   ["water_basis", "VARCHAR"],
   ["nearest_transit_stop_m", "DOUBLE"],
+  ["nearest_transit_stop_id", "VARCHAR"],
   ["nearest_transit_stop_name", "VARCHAR"],
+  ["nearest_transit_route_types", "VARCHAR"],
+  ["nearest_transit_routes", "VARCHAR"],
+  ["near_transit_800m", "BOOLEAN"],
   ["nearest_starbucks_m", "DOUBLE"],
+  ["nearest_starbucks_id", "VARCHAR"],
   ["nearest_starbucks_name", "VARCHAR"],
+  ["near_starbucks_800m", "BOOLEAN"],
+  ["fld_zone", "VARCHAR"],
+  ["zoning", "VARCHAR"],
+  ["coj_last_sale_date", "VARCHAR"],
+  ["address_point_count", "BIGINT"],
+  ["roof_structure", "VARCHAR"],
+  ["pa_actual_year_built", "INTEGER"],
+  ["pa_building_count", "BIGINT"],
+  ["coordinates_source", "VARCHAR"],
+  ["source_artifact", "VARCHAR"],
+  ["source_sha256", "VARCHAR"],
+  ["source_fetched_at", "VARCHAR"],
+  ["source_run_id", "VARCHAR"],
+  ["features_run_id", "VARCHAR"],
+  ["features_as_of", "VARCHAR"],
+  ...SOURCE_FAMILIES.flatMap(([key]) => [
+    [`${key}_source`, "VARCHAR"],
+    [`${key}_fetched_at`, "VARCHAR"],
+  ]),
+  ["source_systems", "VARCHAR"],
   ["source_url", "VARCHAR"],
   ["fetched_at", "TIMESTAMP"],
   ["run_id", "VARCHAR"],
-  ["source_systems", "VARCHAR"],
-  ...SOURCE_FAMILIES.flatMap(([key]) => [
-    [`${key}_source`, "VARCHAR"],
-    [`${key}_fetched_at`, "TIMESTAMP"],
-  ]),
 ];
 
 function forSql(path) {
@@ -533,6 +926,7 @@ async function writeParquet(rows) {
     return {
       rows: Number(countRow.rows),
       folios: Number(countRow.folios),
+      columns: CASTS.length,
       path: target,
     };
   } finally {
@@ -552,83 +946,254 @@ const ARTIFACT_DEFS = [
   { name: "catalog.json", label: "oracle-published-counties" },
 ];
 
+/**
+ * The thirteen ingestion tracks, in the shape and order the published dataset-coverage.json
+ * carries them, with the counts the last published run recorded.
+ *
+ * `permits` is the row this file exists to get right. It is implemented and attempted every run,
+ * it ingests nothing, and it says why: constrained, a reason naming the Akamai WAF, the skip reason
+ * the last run recorded, and the three limitation strings. `expected_count` is 0 rather than a
+ * total, because 0 of 0 is not full coverage, it is the absence of a measurement, and the UI reads
+ * that pair through ui/lib/coverageStatus.ts to draw a "source blocked" badge and no bar at all.
+ */
 const SOURCE_DEFS = [
   {
     source: "appraisal",
-    base: 412,
-    url: "https://floridarevenue.com/property/Pages/DataPortal_RequestAssessmentRollGISData.aspx",
-    limitations: [],
+    track: "appraisal",
+    sourceSystem: "duval_appraiser",
+    table: "parcels",
+    ingested: 404023,
+    expected: 404023,
+    url: ROLL_URL,
+    cadence: "annual roll (prelim Jul, final Oct); only the current roll is posted",
+    limitations: [
+      "FDOR posts only the current roll type; prior years by email request",
+      "No roof attributes in the bulk roll (ACT_YR_BLT/EFF_YR_BLT used as roof-age proxy)",
+      "Sale fields cover only the roll's current and prior year (2025-2026)",
+    ],
   },
   {
     source: "sales",
-    base: 96,
+    track: "sales",
+    sourceSystem: "fdor_sdf",
+    table: "sales_history",
+    ingested: 64532,
+    expected: 64532,
     url: "https://floridarevenue.com/property/Pages/DataPortal.aspx",
-    limitations: ["Sale qualification codes are published only for the current roll year."],
+    cadence: "annual (prior year + YTD); NAL SALE_*1/2 folded in",
+    limitations: [
+      "Sale dates carry year+month only (day unknown; stored as first of month)",
+      "Only 2025-2026 transfers; older tenure comes from the COJ parcels layer (SALESL*)",
+    ],
+  },
+  {
+    source: "geometry",
+    track: "geometry",
+    sourceSystem: "fdor_par",
+    table: "parcel_geometry",
+    ingested: 405716,
+    expected: 405716,
+    url: "https://floridarevenue.com/property/Pages/DataPortal_RequestAssessmentRollGISData.aspx",
+    cadence: "annual (collected Apr, published Aug)",
+    limitations: [
+      "192 MB archive; centroids computed from polygons (not rooftop points)",
+      "Parcels present in NAL but missing from the shapefile get no coordinates",
+    ],
+  },
+  {
+    source: "transit",
+    track: "transit",
+    sourceSystem: "jta_gtfs",
+    table: "transit_stops",
+    ingested: 2501,
+    expected: 2501,
+    url: "https://www.jtafla.com/developer-resources/",
+    cadence: "irregular releases (redirect to a dated media file); ETag/Last-Modified polled",
+    limitations: [
+      "No GTFS-RT; no licence text published",
+      "Walking distance is straight-line (haversine), not network distance",
+    ],
+  },
+  {
+    source: "hydrography",
+    track: "water",
+    sourceSystem: "coj_nhd_hydrography",
+    table: "water_bodies",
+    ingested: 757,
+    expected: 757,
+    url: "https://www.usgs.gov/national-hydrography",
+    cadence: "static (NHD retired 2023); AGO layers refreshed by COJ",
+    limitations: [
+      "Water view is a proximity proxy (centroid within 150 m of a mapped shoreline vertex, or parcel bbox within 30 m), not a sightline analysis; distances beyond ~1 km are not computed",
+      "NHD lake/pond polygons below 1 ha and unnamed flowlines are excluded",
+      "Parcel polygons are not stored; the parcel bounding box stands in for the polygon",
+    ],
+  },
+  {
+    source: "places",
+    track: "places",
+    sourceSystem: "overture_places",
+    table: "places",
+    ingested: 3084,
+    expected: 3084,
+    url: "https://overturemaps.org/",
+    cadence: "monthly releases; GERS ids stable across releases",
+    limitations: [
+      "Brand matching by name (Starbucks); confidence varies; CDLA-Permissive 2.0",
+      "Reading the release scans ~2.5 min of remote parquet",
+    ],
+  },
+  {
+    source: "sunbiz",
+    track: "businesses",
+    sourceSystem: "sunbiz",
+    table: "businesses",
+    ingested: 1024,
+    expected: 1024,
+    url: "https://sftp.floridados.gov/",
+    cadence: "daily; window of N days per run, processed files journaled",
+    limitations: [
+      "No county filter: rows kept when principal/mailing ZIP starts with 322 or city starts with JACKSONVILLE",
+      "Officers kept as names only; events file parsed for doc number + raw line",
+    ],
+  },
+  {
+    source: "entity_links",
+    track: "links",
+    sourceSystem: "duval_reconciliation",
+    table: "entity_links",
+    ingested: 1176361,
+    expected: 1176361,
+    url: "derived",
+    cadence: "every run after the source tracks",
+    limitations: [
+      "Address matching is exact on the normalized line 1 + ZIP5; unit-level mismatches are not linked",
+    ],
+  },
+  {
+    source: "coj_parcels",
+    track: "coj_parcels",
+    sourceSystem: "coj_parcels",
+    table: "coj_parcels",
+    ingested: 407985,
+    // One row short of the layer's published total, and the UI must print 99.9% rather than
+    // rounding it into a claim of completeness.
+    expected: 407986,
+    url: "https://maps.coj.net/coj/rest/services/CityBiz/Parcels/MapServer/0/query",
+    cadence: "at least monthly; full paged pull, idempotent by RE hash",
+    requiresUsEgress: true,
+    limitations: [
+      "US egress only (COJ hosts block non-US and cloud IPs)",
+      "Paged at 2000 rows, concurrency 2, 250 ms delay",
+    ],
   },
   {
     source: "addresses",
-    base: 58,
-    url: "https://opendata.coj.net/datasets/address-points",
-    limitations: [],
-  },
-  {
-    source: "permits",
-    base: 21,
-    url: "https://buildingpermits.coj.net/",
+    track: "coj_addresses",
+    sourceSystem: "coj_address_points",
+    table: "address_points",
+    ingested: 671814,
+    expected: 671814,
+    url: "https://maps.coj.net/coj/rest/services/ERAT/EratDashboard_3000/MapServer/41/query",
+    cadence: "continuous (EDIT_DATE >= last run)",
+    requiresUsEgress: true,
     limitations: [
-      "JaxEPICS has no bulk export. Records are enumerated in bounded windows at low concurrency, measured at roughly 1.4 permits per second.",
-      "Permits before 2004 are not exposed by the portal.",
+      "US egress only (COJ hosts block non-US and cloud IPs)",
+      "First run is a full paged pull; later runs filter EDIT_DATE",
     ],
   },
   {
     source: "contractors",
-    base: 9,
-    url: "https://www.myfloridalicense.com/DBPR/",
-    limitations: ["DBPR search is rate limited and returns at most 500 rows per query."],
+    track: "contractors",
+    sourceSystem: "dbpr_cilb",
+    table: "contractors",
+    ingested: 4050,
+    expected: 4050,
+    url: "https://www2.myfloridalicense.com/sto/file_download/extracts/cilb_certified.csv",
+    cadence: "weekly",
+    requiresUsEgress: true,
+    limitations: [
+      "HTTP 403 from non-US IPs; from a US runner with a browser UA the files download",
+      "BBB not used: terms forbid aggregation",
+    ],
   },
   {
-    source: "sunbiz",
-    base: 14,
-    url: "https://sftp.floridados.gov/",
-    limitations: ["Daily delta files only. A full corporate snapshot is published quarterly."],
+    source: "permits",
+    track: "permits",
+    sourceSystem: "coj_jaxepics",
+    table: "permits",
+    ingested: 0,
+    expected: 0,
+    url: "https://jaxepics.coj.net/Permit/View/",
+    cadence: "continuous; --window permits per run; cursor journaled",
+    requiresUsEgress: true,
+    constrained: true,
+    reason:
+      "JaxEPICS API behind Akamai WAF; search/reports require login; no open dataset; PRR is the documented path",
+    lastSkipReason: "skipped: non-US egress (HTTP 0, fetch failed)",
+    limitations: [
+      "Constrained source: JaxEPICS API behind Akamai WAF (HTTP 403 Access Denied on every /api guess, browser UA included); search/reports require login; no open permit dataset; public-records request is the documented path",
+      "US egress only; one cheap discovery + probe per run is kept as evidence (status codes recorded); enumeration runs only when a probe returns JSON",
+      "Angular shell loads chunks dynamically, so static literal discovery finds no API paths",
+    ],
   },
   {
-    source: "places",
-    base: 6,
-    url: "https://overturemaps.org/",
-    limitations: [],
-  },
-  {
-    source: "transit",
-    base: 3,
-    url: "https://www.jtafla.com/developer-resources/",
-    limitations: ["GTFS static feed. Stop changes appear only when JTA republishes the feed."],
-  },
-  {
-    source: "hydrography",
-    base: 2,
-    url: "https://www.usgs.gov/national-hydrography",
-    limitations: ["NHD waterbody polygons are generalised. Private ponds are often absent."],
+    source: "pa_detail",
+    track: "pa_detail",
+    sourceSystem: "duval_pa_detail",
+    table: "pa_detail_buildings",
+    ingested: 856,
+    expected: 398324,
+    url: "https://paopropertysearch.coj.net/Basic/Detail.aspx?RE=",
+    cadence: "continuous; --window parcels per run from a persistent seed cursor",
+    requiresUsEgress: true,
+    limitations: [
+      "US egress only (paopropertysearch.coj.net blocks non-US and cloud IPs); concurrency 2, 400 ms delay",
+      "Slow source by design: ~300 pages per run; full seed (398,324 parcels) needs many runs; throughput recorded per run",
+      "Lexicon transform runs the vendored Elephant scripts per page; owners/*.json prerequisites come from the mapping scripts on the same page",
+    ],
   },
 ];
 
+/** A source that ingests nothing every run is skipped, not completed, and the run rows say so. */
+const isBlocked = (def) => def.ingested === 0;
+
 function buildRunHistory() {
   const runs = RUN_DEFS.map((def, runIndex) => {
-    const rowScale = 1 + runIndex * 0.02;
     const sources = SOURCE_DEFS.map((source) => {
-      const rowsFetched = Math.round(source.base * 1000 * rowScale);
-      const inserted =
-        runIndex === 0 ? rowsFetched : Math.round(source.base * between(3, 40));
-      const updated = runIndex === 0 ? 0 : Math.round(source.base * between(1, 22));
-      const unchanged = Math.max(rowsFetched - inserted - updated, 0);
+      if (isBlocked(source)) {
+        return {
+          track: source.track,
+          target_table: source.table,
+          status: "skipped",
+          rows_staged: 0,
+          inserted: 0,
+          updated: 0,
+          unchanged: 0,
+          table_total_after: 0,
+          delta_vs_prev_total: 0,
+          source_sha256: null,
+          source_url: source.url,
+          skip_reason: source.lastSkipReason ?? null,
+          limitations: source.limitations,
+        };
+      }
+      // The first recorded run loads the table; later runs move a small fraction of it.
+      const total = Math.round(source.ingested * (1 - (RUN_DEFS.length - 1 - runIndex) * 0.004));
+      const inserted = runIndex === 0 ? total : Math.round(source.ingested * between(0.0005, 0.006));
+      const updated = runIndex === 0 ? 0 : Math.round(source.ingested * between(0.0002, 0.004));
+      const unchanged = Math.max(total - inserted - updated, 0);
       return {
-        source: source.source,
-        rows_fetched: rowsFetched,
+        track: source.track,
+        target_table: source.table,
+        status: "completed",
+        rows_staged: total,
         inserted,
         updated,
         unchanged,
-        delta_vs_previous: runIndex === 0 ? rowsFetched : inserted,
-        artifact_sha256: fakeSha256(`${def.id}-${source.source}`),
+        table_total_after: total,
+        delta_vs_prev_total: runIndex === 0 ? total : inserted + updated,
+        source_sha256: fakeSha256(`${def.id}-${source.source}`),
         source_url: source.url,
         limitations: source.limitations,
       };
@@ -639,7 +1204,9 @@ function buildRunHistory() {
       started_at: isoMinus(def.startedOffsetH),
       finished_at: isoMinus(def.startedOffsetH, intBetween(7, 34)),
       trigger: def.trigger,
+      status: "completed",
       git_sha: fakeSha256(def.id).slice(0, 40),
+      tracks: SOURCE_DEFS.map((source) => source.track),
       sources,
       artifacts: ARTIFACT_DEFS.map((artifact) => {
         const ipnsName = fakeIpnsName(artifact.label);
@@ -663,34 +1230,46 @@ function buildRunHistory() {
   };
 }
 
-function buildCoverage(runHistory, parcelRows) {
+/**
+ * The coverage snapshot, field for field as pipeline/src/publish writes it.
+ *
+ * Every key here exists in the published artifact, including the four the UI reads to decide
+ * whether a row's ingested / expected pair can be shown as coverage at all: `implemented`,
+ * `constrained`, `reason` and `last_skip_reason`.
+ */
+function buildCoverage(runHistory) {
   const latest = runHistory.runs[runHistory.runs.length - 1];
-  const expected = {
-    appraisal: 421000,
-    sales: 104000,
-    addresses: 62000,
-    permits: 48000,
-    contractors: 14000,
-    sunbiz: 18500,
-    places: 7100,
-    transit: 3200,
-    hydrography: 2100,
-  };
   return {
     county: "duval",
     exportedAt: NOW.toISOString(),
     note: SAMPLE_NOTE,
-    query_table_rows: parcelRows,
-    datasets: latest.sources.map((source) => ({
-      county: "duval",
-      source: source.source,
-      ingested_count: source.rows_fetched,
-      expected_count: expected[source.source] ?? null,
-      first_loaded_at: runHistory.runs[0].started_at,
-      last_loaded_at: latest.finished_at,
-      cid: fakeCid("bafybeisample", 59),
-      ipns_label: `oracle-${source.source}-duval`,
-    })),
+    datasets: SOURCE_DEFS.map((source) => {
+      const blocked = isBlocked(source);
+      return {
+        county: "duval",
+        source: source.source,
+        ingested_count: source.ingested,
+        expected_count: source.expected,
+        first_loaded_at: blocked ? null : runHistory.runs[0].started_at,
+        last_loaded_at: blocked ? null : latest.finished_at,
+        cid: blocked ? null : fakeCid("bafybeisample", 59),
+        ipns_label: blocked ? null : "duval-oracle-artifacts",
+        track: source.track,
+        source_system: source.sourceSystem,
+        source_url: source.url,
+        table: source.table,
+        implemented: true,
+        cadence: source.cadence,
+        limitations: source.limitations,
+        last_run_id: latest.run_id,
+        last_run_status: "completed",
+        requires_us_egress: source.requiresUsEgress === true,
+        last_skip_reason: source.lastSkipReason ?? null,
+        ...(source.constrained === true
+          ? { constrained: true, reason: source.reason }
+          : {}),
+      };
+    }),
   };
 }
 
@@ -892,10 +1471,40 @@ if (folios.size !== rows.length) {
   throw new Error(`duplicate folio generated: ${rows.length - folios.size} collisions`);
 }
 
+// The permit family is the one thing this file must never get wrong: the source ingests nothing,
+// so nothing derived from it may be published. Assert it rather than trusting the code above.
+const permitLeaks = rows.filter(
+  (row) =>
+    row.permit_source !== null ||
+    row.permit_fetched_at !== null ||
+    row.has_permits !== null ||
+    row.permit_count !== null ||
+    row.roof_permit_count !== null ||
+    row.last_roof_permit_year !== null ||
+    row.roof_age_basis === "PERMIT",
+);
+if (permitLeaks.length > 0) {
+  throw new Error(
+    `${permitLeaks.length} rows publish permit data, but the JaxEPICS source ingests zero rows`,
+  );
+}
+
+// No transfer can be dated after the run that read it. A sale in the future reads as a negative
+// hold on the tenure card, which is the kind of thing a reviewer finds before the tests do.
+const futureSales = rows.filter(
+  (row) =>
+    (row.last_sale_date !== null && row.last_sale_date > AS_OF) ||
+    (row.last_sale_date_any !== null && row.last_sale_date_any > AS_OF) ||
+    (row.coj_last_sale_date !== null && row.coj_last_sale_date > AS_OF),
+);
+if (futureSales.length > 0) {
+  throw new Error(`${futureSales.length} rows carry a sale dated after features_as_of (${AS_OF})`);
+}
+
 const parquet = await writeParquet(rows);
 
 const runHistory = buildRunHistory();
-const coverage = buildCoverage(runHistory, parquet.rows);
+const coverage = buildCoverage(runHistory);
 const catalog = buildCatalog(runHistory);
 const artifactsIndex = buildArtifactsIndex(runHistory);
 
@@ -909,11 +1518,13 @@ await writeFile(
 );
 const openData = await writeOpenData(rows);
 
+const blockedSources = SOURCE_DEFS.filter(isBlocked).map((source) => source.source);
+
 console.log(
   [
-    `[sample] query-table.parquet  ${parquet.rows} rows, ${parquet.folios} distinct folios`,
-    `[sample] run-history.json     ${runHistory.runs.length} runs x ${SOURCE_DEFS.length} sources`,
-    `[sample] dataset-coverage.json ${coverage.datasets.length} datasets`,
+    `[sample] query-table.parquet   ${parquet.rows} rows, ${parquet.folios} distinct folios, ${parquet.columns} columns`,
+    `[sample] run-history.json      ${runHistory.runs.length} runs x ${SOURCE_DEFS.length} sources`,
+    `[sample] dataset-coverage.json ${coverage.datasets.length} datasets, blocked: ${blockedSources.join(", ")}`,
     `[sample] catalog.json          ${catalog.counties.length} county`,
     `[sample] artifacts-index.json  ${artifactsIndex.artifacts.length} published objects`,
     `[sample] open-data             ${openData.properties} properties in ${openData.shards} shards`,

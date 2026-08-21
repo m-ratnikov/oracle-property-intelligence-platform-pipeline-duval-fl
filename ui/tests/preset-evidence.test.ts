@@ -33,6 +33,24 @@ import {
 } from "@/lib/columns";
 import { EVIDENCE_GUIDE, presetFor, PRESET_NAME_LIST } from "@/lib/agent/schema";
 import { SYSTEM_PROMPT } from "@/lib/agent/prompt";
+import { parseCoverageStatuses } from "@/lib/coverageStatus";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+/**
+ * The sample's own coverage snapshot, not a fixture written to make a point.
+ *
+ * The sample parquet and this file are generated together by ui/scripts/make-sample-data.mjs, so
+ * reading the real one is what proves the two agree: a sample that publishes permit derived
+ * columns while its coverage snapshot says the permit source ingested nothing would be caught here
+ * rather than on the deployed runtime.
+ */
+const SAMPLE_COVERAGE: unknown = JSON.parse(
+  readFileSync(resolve(process.cwd(), "public", "sample", "dataset-coverage.json"), "utf8"),
+);
+
+/** The only three values roof_age_basis can carry, and the three the roof card has to name. */
+const ROOF_BASIS_VALUES = ["PERMIT", "EFF_YR_BLT_PROXY", "ACT_YR_BLT_PROXY"];
 
 let db: PropertyDb;
 
@@ -165,9 +183,10 @@ describe("the roof rule does not claim evidence it never had", () => {
   it.each(roofPresets.map((preset) => [preset.id, preset] as const))(
     "%s never presents a roof age as a roof date without naming the basis",
     (_id, preset) => {
-      // The permit source is enumerated in bounded windows, so on any given run most or all rows
-      // are a year built proxy. Wording that implies a roof DATE is only honest if it says the
-      // PERMIT basis is what makes it one, and roof_age_basis has to be on the row to check.
+      // No published row is a permit derived roof date: the JaxEPICS permit source ingests zero
+      // rows, so every populated row is a year built proxy. Wording that implies a roof DATE is
+      // only honest if it says the PERMIT basis is what makes it one, and roof_age_basis has to be
+      // on the row to check.
       const text = `${preset.rule} ${preset.assumptions.join(" ")}`;
       expect(text, `${preset.id} does not name roof_age_basis`).toContain("roof_age_basis");
       expect(text, `${preset.id} does not say the year built proxy is not a roof date`).toMatch(
@@ -180,9 +199,58 @@ describe("the roof rule does not claim evidence it never had", () => {
   it("names all three basis values so a reader can tell a proxy row from a permit row", () => {
     const roof = presetById("roof-older-than-15")!;
     const text = `${roof.rule} ${roof.assumptions.join(" ")}`;
-    expect(text).toContain("PERMIT");
-    expect(text).toContain("EFF_YR_BLT_PROXY");
-    expect(text).toContain("ACT_YR_BLT_PROXY");
+    for (const basis of ROOF_BASIS_VALUES) {
+      expect(text, `the roof card does not name ${basis}`).toContain(basis);
+    }
+  });
+
+  it("shows no basis the card does not name, and no PERMIT basis while the source is blocked", async () => {
+    /*
+     * The other half of the assertion above, and the half that used to be missing.
+     *
+     * Naming PERMIT in the rule text is required: a reader has to know which basis WOULD have been
+     * a roof date rather than a proxy. Publishing a PERMIT row is a different thing entirely, and
+     * for this county it is not reachable. roof_age_basis only reaches PERMIT through a re-roof
+     * permit reconciled to the folio, and the JaxEPICS permit source ingests nothing at all: it is
+     * behind an Akamai WAF that answers every request with 403, which the coverage snapshot
+     * records as constrained rather than hiding.
+     *
+     * So this checks the two sides against each other, from the artifacts themselves: the sample's
+     * coverage snapshot must still describe a blocked permit source, and the sample parquet must
+     * carry no value the card does not explain, no PERMIT basis, and no permit derived column.
+     * The previous version of this file was satisfied by a sample that manufactured PERMIT rows,
+     * which meant the strongest honesty claim in the submission was contradicted by its own
+     * fallback dataset.
+     */
+    const permits = parseCoverageStatuses(SAMPLE_COVERAGE).get("permits");
+    expect(permits?.state, "the sample must model the blocked permit source").toBe("blocked");
+    expect(permits?.ingested).toBe(0);
+    expect(permits?.implemented).toBe(true);
+    expect(permits?.constrained).toBe(true);
+
+    const bases = await db.query(
+      `SELECT DISTINCT roof_age_basis AS basis FROM ${VIEW_NAME} WHERE roof_age_basis IS NOT NULL`,
+    );
+    const published = bases.rows.map((row) => String(row.basis));
+    expect(published.length, "no row carries a roof basis at all").toBeGreaterThan(0);
+    expect(
+      published.filter((basis) => !ROOF_BASIS_VALUES.includes(basis)),
+      "a basis value the roof card never explains",
+    ).toEqual([]);
+    expect(published, "a PERMIT roof basis with no permit row behind it").not.toContain("PERMIT");
+
+    const [counts] = (
+      await db.query(
+        `SELECT count(permit_source) AS sources,
+                count(permit_count) AS permit_counts,
+                count(roof_permit_count) AS roof_permits,
+                count(last_roof_permit_year) AS roof_permit_years
+         FROM ${VIEW_NAME}`,
+      )
+    ).rows;
+    for (const [column, value] of Object.entries(counts)) {
+      expect(Number(value), `${column} is populated by a source that ingested nothing`).toBe(0);
+    }
   });
 
   it("shows roof_age_basis on every returned row, so the claim is checkable", async () => {

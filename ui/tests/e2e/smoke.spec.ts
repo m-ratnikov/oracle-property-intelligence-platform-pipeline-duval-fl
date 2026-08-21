@@ -329,10 +329,13 @@ test.describe("published artifacts", () => {
      * quality story of the whole submission, so it gets its own test.
      */
     /*
-     * The snapshot is served as a fixture so this holds whether the build is pointed at the
-     * published artifacts or at the synthetic sample, which does not model a blocked source. The
-     * rows below are the published dataset-coverage.json verbatim, including the 407,985 / 407,986
-     * pair that used to round up to a tidy 100.0%.
+     * The snapshot is served as a fixture so this holds whichever artifact the build points at,
+     * and so the assertion does not silently pass on a dataset where the source happens to be
+     * healthy. The synthetic sample now models the blocked source too, copied field for field
+     * from the live coverage artifact, so the fixture and the sample agree rather than the
+     * fixture standing in for something the sample lacked. The rows below are the published
+     * dataset-coverage.json verbatim, including the 407,985 / 407,986 pair that used to round
+     * up to a tidy 100.0%.
      */
     await page.route("**/*", async (route) => {
       const request = route.request();
