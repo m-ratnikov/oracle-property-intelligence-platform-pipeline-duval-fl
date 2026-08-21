@@ -87,12 +87,13 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentResponse>
 
   const progress = options.onProgress;
   // The first wait a reader sees is this one: on a cold instance it downloads the published parquet.
-  progress?.({ phase: "started", label: "Opening the published query table" });
+  progress?.({ id: "open", phase: "started", label: "Opening the published query table" });
   const [resolved, db] = await Promise.all([
     options.model ? Promise.resolve(options.model) : resolveModel(env, options.credential, options.modelChoice),
     options.db ? Promise.resolve(options.db) : getPropertyDb(),
   ]);
   progress?.({
+    id: "open",
     phase: "finished",
     label: "Opened the published query table",
     elapsed_ms: Date.now() - started,
@@ -119,10 +120,10 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentResponse>
   const secrets = [options.credential?.apiKey];
   let result;
   try {
-    progress?.({ phase: "started", label: `Asking ${resolved.modelId} to plan the query` });
+    progress?.({ id: "model", phase: "started", label: `Asking ${resolved.modelId} to plan the query` });
     result = await agent.generate({ messages: modelMessages, abortSignal: options.abortSignal });
     // elapsed here is the whole turn so far, which is what a waiting reader wants to see
-    progress?.({ phase: "finished", label: "Answer written", elapsed_ms: Date.now() - started });
+    progress?.({ id: "model", phase: "finished", label: "Answer written", elapsed_ms: Date.now() - started });
   } catch (error: unknown) {
     const safe = safeMessage(error, secrets);
     const typed = classifyProviderError(error, safe, resolved.source);

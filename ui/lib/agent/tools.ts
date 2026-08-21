@@ -48,6 +48,12 @@ export interface ToolContext {
  * had stalled and would be a lie exactly when the reader most needs the truth.
  */
 export interface AgentProgress {
+  /**
+   * Pairs a "finished" with its "started". Without it the client has to guess which line to close,
+   * and guessing "the newest open one" put "Answer written" on top of "Asking the model", so the
+   * log read as though the answer arrived before the queries that produced it.
+   */
+  id: string;
   /** "started" fires before the work, "finished" after it, so the page can show a live spinner. */
   phase: "started" | "finished";
   /** What is happening, in the reader's language rather than the code's. */
@@ -182,6 +188,8 @@ function noteDataCaveats(trace: ToolTrace, rows: Row[]) {
 function record(trace: ToolTrace, entry: AgentToolCall) {
   trace.calls.push(entry);
   trace.onProgress?.({
+    // each tool call is its own line; it never pairs with a started event
+    id: `tool-${trace.calls.length}`,
     phase: "finished",
     label: toolLabel(entry.name),
     tool: entry.name,

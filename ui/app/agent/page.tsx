@@ -168,6 +168,7 @@ class StreamDropped extends Error {
 }
 
 interface ProgressEvent {
+  id: string;
   phase: "started" | "finished";
   label: string;
   tool?: string;
@@ -211,11 +212,34 @@ async function readAgentStream(
     else if (parsed.type === "result" && parsed.response) result = parsed.response;
   };
 
+  /*
+   * A stall watchdog. The server sends a ping every ten seconds, so silence for far longer than
+   * that means the connection is dead even though neither end has said so - and a fetch whose body
+   * never ends and never errors leaves the page waiting forever with a progress log that stopped
+   * moving. Treat it as a drop, which the caller already knows how to retry without streaming.
+   */
+  const STALL_MS = 45_000;
+  const readWithWatchdog = async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stalled = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new StreamDropped()), STALL_MS);
+    });
+    try {
+      return await Promise.race([reader.read(), stalled]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
   for (;;) {
     let chunk;
     try {
-      chunk = await reader.read();
-    } catch {
+      chunk = await readWithWatchdog();
+    } catch (error) {
+      if (error instanceof StreamDropped) {
+        void reader.cancel().catch(() => undefined);
+        throw error;
+      }
       // The connection died mid turn. Distinguished from every other failure so the caller can
       // retry without streaming rather than telling the reader the endpoint is unreachable.
       throw new StreamDropped();
@@ -271,7 +295,7 @@ export default function AgentPage() {
   const [config, setConfig] = useState<AgentConfig | null>(null);
   // Real events from the server, appended as they arrive. Never a scripted timer: a fake sequence
   // would keep animating after the work stalled, which is exactly when it must not.
-  const [progress, setProgress] = useState<{ label: string; done: boolean; detail: string | null }[]>([]);
+  const [progress, setProgress] = useState<{ id: string; label: string; done: boolean; detail: string | null }[]>([]);
   const scroller = useRef<HTMLDivElement | null>(null);
   // Which of the offered models answers the next question. Null until the config arrives, then the
   // server's own default, so the dropdown never starts on something the server would not run.
@@ -344,28 +368,28 @@ export default function AgentPage() {
       });
 
     const onProgressEvent = (event: ProgressEvent) => {
-        setProgress((current) => {
-          if (event.phase === "started") {
-            return [...current, { label: event.label, done: false, detail: null }];
-          }
-          // close the newest open line, or append if the start was never seen
-          const detail = [
-            event.row_count === null || event.row_count === undefined ? null : `${formatInt(event.row_count)} rows`,
-            event.elapsed_ms === undefined ? null : `${(event.elapsed_ms / 1000).toFixed(1)}s`,
-            event.error ? "failed" : null,
-          ]
-            .filter(Boolean)
-            .join(" · ");
-          // A tool runs INSIDE the model call, so it gets its own finished line and leaves the
-          // "asking the model" line open. Anything else closes the newest open line.
-          if (event.tool) return [...current, { label: event.label, done: true, detail: detail || null }];
-          const index = [...current].reverse().findIndex((entry) => !entry.done);
-          if (index === -1) return [...current, { label: event.label, done: true, detail: detail || null }];
-          const at = current.length - 1 - index;
-          return current.map((entry, i) =>
-            i === at ? { label: event.label, done: true, detail: detail || null } : entry,
-          );
-        });
+      setProgress((current) => {
+        const detail = [
+          event.row_count === null || event.row_count === undefined ? null : `${formatInt(event.row_count)} rows`,
+          event.elapsed_ms === undefined ? null : `${(event.elapsed_ms / 1000).toFixed(1)}s`,
+          event.error ? "failed" : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+
+        if (event.phase === "started") {
+          return [...current, { id: event.id, label: event.label, done: false, detail: null }];
+        }
+        // Close the line this event was paired with, wherever it sits. Matching by id keeps every
+        // line in the order the work actually happened.
+        const at = current.findIndex((entry) => entry.id === event.id);
+        if (at === -1) {
+          return [...current, { id: event.id, label: event.label, done: true, detail: detail || null }];
+        }
+        return current.map((entry, i) =>
+          i === at ? { ...entry, label: event.label, done: true, detail: detail || null } : entry,
+        );
+      });
     };
 
     try {
@@ -379,7 +403,7 @@ export default function AgentPage() {
         if (!(streamError instanceof StreamDropped)) throw streamError;
         setProgress((current) => [
           ...current.map((entry) => ({ ...entry, done: true })),
-          { label: "Connection dropped, asking again without the live log", done: false, detail: null },
+          { id: "retry", label: "Connection dropped, asking again without the live log", done: false, detail: null },
         ]);
         payload = (await (await ask("application/json")).json()) as AgentResponse;
       }
