@@ -23,8 +23,12 @@ export function dbprReadCsv(csvPath: string, columns: string[]): string {
   // auto_detect = false + an explicit all-VARCHAR column list skips the dialect sniffer entirely
   // (the sniffer rejects files with an unterminated quote even when delim/quote/escape are given)
   const cols = columns.map((c) => `'${c.replace(/'/g, "''")}': 'VARCHAR'`).join(", ");
+  // parallel = false is required, not a tuning choice: DuckDB's parallel scanner refuses
+  // null_padding together with quoted newlines, and these extracts have both (a ragged row and a
+  // licensee address containing a newline inside quotes). It errors out mid-file rather than
+  // degrading, which is how this failed at line 8321 of cilb_certified.csv.
   return `read_csv(${q(duckPath(csvPath))}, auto_detect = false, columns = {${cols}}, delim = ',', quote = '"', escape = '"', header = true,
-    strict_mode = false, ignore_errors = true, null_padding = true, max_line_size = 4000000)`;
+    strict_mode = false, ignore_errors = true, null_padding = true, parallel = false, max_line_size = 4000000)`;
 }
 
 /**
