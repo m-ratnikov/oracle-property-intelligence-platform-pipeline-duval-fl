@@ -100,8 +100,13 @@ jobs:
           PUBLISH: ${{ github.event.inputs.publish || 'true' }}
         run: |
           if [ -n "$FILEBASE_ACCESS_KEY" ] && [ "$PUBLISH" = "true" ]; then
-            pnpm run publish:open-data -- --publish
+            # Artifacts FIRST. These ~10 objects are what the hosted runtime and the MCP read, and
+            # they publish in a couple of minutes. The open-data set is 404k objects and takes
+            # hours; publishing it first left the runtime serving stale data behind a bulk upload
+            # it does not consume. It also must not be able to fail the artifact publish, so it
+            # runs after and its failure is reported without failing the step.
             pnpm run publish:ipfs -- --publish
+            pnpm run publish:open-data -- --publish || echo "::warning::open-data publish failed; artifacts above are published and the runtime is unaffected"
           else
             echo "Filebase secrets not configured (or publish=false): dry-run only"
             pnpm run publish:open-data

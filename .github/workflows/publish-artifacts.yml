@@ -1,0 +1,94 @@
+name: publish-artifacts
+
+# Publish ONLY the small artifacts the hosted runtime reads: query-table.parquet, the coverage
+# snapshot, run history, the entity tables, the catalog and the artifacts index. About ten objects.
+#
+# This exists because the open-data publish uploads 404k per-property files and takes hours, while
+# the runtime needs none of them. Running this gets the gateway and IPNS URLs for the UI in minutes
+# without re-ingesting anything: it restores the working set from the pipeline's cache and publishes
+# what is already on disk.
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Really upload (false = dry run, prints CIDs only)"
+        required: false
+        default: "true"
+
+# Deliberately NOT in the duval-pipeline concurrency group: the point is to run while a long
+# open-data upload is in flight. It writes different objects, and IPNS pointing is last-write-wins.
+permissions:
+  contents: read
+
+env:
+  DATA_DIR: ${{ github.workspace }}/.data
+  NODE_OPTIONS: --max-old-space-size=6144
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: pipeline
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: pipeline/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pipeline/pnpm-lock.yaml
+
+      - name: Restore the working set the pipeline already built
+        uses: actions/cache/restore@v4
+        with:
+          # same single path the pipeline saves under, so this reads the newest entry
+          path: .data
+          key: duval-data-${{ github.run_id }}
+          restore-keys: |
+            duval-data-
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Fail early if the cache had no query table
+        working-directory: ${{ github.workspace }}
+        run: |
+          if [ ! -f .data/artifacts/publish/duval/query-table.parquet ]; then
+            echo "::error::No query-table.parquet in the restored cache. Run the pipeline workflow first."
+            exit 1
+          fi
+          ls -la .data/artifacts/publish/duval/
+
+      - name: Publish artifacts to Filebase / IPFS
+        env:
+          FILEBASE_ACCESS_KEY: ${{ secrets.FILEBASE_ACCESS_KEY }}
+          FILEBASE_SECRET_KEY: ${{ secrets.FILEBASE_SECRET_KEY }}
+          FILEBASE_BUCKET_DUVAL: ${{ secrets.FILEBASE_BUCKET_DUVAL }}
+          PUBLISH: ${{ github.event.inputs.publish || 'true' }}
+        run: |
+          if [ -n "$FILEBASE_ACCESS_KEY" ] && [ "$PUBLISH" = "true" ]; then
+            pnpm run publish:ipfs -- --publish
+          else
+            echo "no Filebase secrets, or publish=false: dry run"
+            pnpm run publish:ipfs
+          fi
+
+      - name: Print the URLs to set on Vercel
+        working-directory: ${{ github.workspace }}
+        run: |
+          echo "=== publish-manifest.json ==="
+          cat .data/artifacts/publish/duval/publish-manifest.json
+
+      - name: Upload the manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: publish-manifest-${{ github.run_id }}
+          path: .data/artifacts/publish/duval/publish-manifest.json
+          if-no-files-found: warn
