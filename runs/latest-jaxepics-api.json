@@ -1,0 +1,9 @@
+{
+  "discoveredAt": "2026-08-21T08:47:58.344Z",
+  "scripts": [
+    "https://js.arcgis.com/calcite-components/3.0.3/calcite.esm.js",
+    "polyfills-5FDKUQTZ.js",
+    "main-DIQF3EFM.js"
+  ],
+  "apiPaths": []
+}
