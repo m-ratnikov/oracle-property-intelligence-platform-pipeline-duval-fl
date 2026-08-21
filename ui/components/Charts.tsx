@@ -143,23 +143,49 @@ export function LineChart({
   );
 }
 
+/**
+ * Rows in the same target table that a different pipeline track wrote. The ingested count beside the
+ * bar is scoped to the source that owns the row, so without this line those rows would be invisible
+ * rather than merely uncounted.
+ */
+function OtherTrackRows({
+  rows,
+  bySource,
+}: {
+  rows: number | null | undefined;
+  bySource: Record<string, number> | null | undefined;
+}) {
+  if (rows === null || rows === undefined || rows <= 0) return null;
+  const names = Object.keys(bySource ?? {});
+  const label = `+${formatInt(rows)} rows from other sources${names.length > 0 ? ` (${names.join(", ")})` : ""}`;
+  return <div className="mt-1 text-[11.5px] text-muted">{label}</div>;
+}
+
 /** Horizontal bars for coverage, ingested against expected. */
 export function CoverageBar({
   ingested,
   expected,
+  rowsFromOtherTracks,
+  additionalRowsBySource,
 }: {
   ingested: number | null;
   expected: number | null;
+  /** Set only where the target table is written by more than one track. */
+  rowsFromOtherTracks?: number | null;
+  additionalRowsBySource?: Record<string, number> | null;
 }) {
   if (ingested === null) {
     return <span className="na">not available</span>;
   }
   if (expected === null || expected === 0) {
     return (
-      <span className="text-[12px] text-muted">
-        {formatInt(ingested)} ingested,{" "}
-        <span className="na">no published expected total to compare against</span>
-      </span>
+      <div className="text-[12px] text-muted">
+        <span>
+          {formatInt(ingested)} ingested,{" "}
+          <span className="na">no published expected total to compare against</span>
+        </span>
+        <OtherTrackRows rows={rowsFromOtherTracks} bySource={additionalRowsBySource} />
+      </div>
     );
   }
   // Report the true ratio even when it exceeds 100 percent. More rows than the
@@ -195,6 +221,7 @@ export function CoverageBar({
       <div className="progress mt-1">
         <div style={{ width: `${barFraction * 100}%`, background: tone }} />
       </div>
+      <OtherTrackRows rows={rowsFromOtherTracks} bySource={additionalRowsBySource} />
     </div>
   );
 }

@@ -54,6 +54,14 @@ export interface CoverageDataset {
   last_loaded_at: string | null;
   cid: string | null;
   ipns_label: string | null;
+  /**
+   * Present only for a dataset whose target table is written by more than one pipeline track. The
+   * count above is scoped to the rows this source owns; these say how many rows the table holds in
+   * total and which other sources contributed the rest. Older published snapshots omit them.
+   */
+  table_rows_total: number | null;
+  rows_from_other_tracks: number | null;
+  additional_rows_by_source: Record<string, number> | null;
   extra: Record<string, unknown>;
 }
 
@@ -118,6 +126,17 @@ export function num(value: unknown): number | null {
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
+}
+
+/** A `{ name: count }` object as published, dropping any entry whose value is not a number. */
+function numMap(value: unknown): Record<string, number> | null {
+  if (!isRecord(value)) return null;
+  const out: Record<string, number> = {};
+  for (const [key, item] of Object.entries(value)) {
+    const parsed = num(item);
+    if (parsed !== null) out[key] = parsed;
+  }
+  return out;
 }
 
 function strList(value: unknown): string[] {
@@ -204,6 +223,9 @@ const KNOWN_DATASET_KEYS = new Set([
   "last_loaded_at",
   "cid",
   "ipns_label",
+  "table_rows_total",
+  "rows_from_other_tracks",
+  "additional_rows_by_source",
 ]);
 
 export function parseCoverage(input: unknown): CoverageSnapshot {
@@ -219,6 +241,9 @@ export function parseCoverage(input: unknown): CoverageSnapshot {
       last_loaded_at: str(dataset.last_loaded_at),
       cid: str(dataset.cid),
       ipns_label: str(dataset.ipns_label),
+      table_rows_total: num(dataset.table_rows_total),
+      rows_from_other_tracks: num(dataset.rows_from_other_tracks),
+      additional_rows_by_source: numMap(dataset.additional_rows_by_source),
       extra: rest(dataset, KNOWN_DATASET_KEYS),
     }));
   return {

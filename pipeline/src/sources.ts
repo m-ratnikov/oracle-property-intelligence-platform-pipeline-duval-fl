@@ -34,9 +34,25 @@ export interface SourceDef {
   probeUrl?: string;
   /** Known total in the source when published by the source itself (used as coverage expected_count fallback). */
   knownExpectedCount?: number;
+  /**
+   * SQL predicate selecting the rows this track owns. Set only where `targetTable` is written by
+   * more than one track: coverage then scopes `ingested_count` and the load window to it, so the
+   * numerator and the denominator (this track's `rows_staged`) describe the same track. Unset means
+   * the track owns every row in the table, which is the case for every other source.
+   */
+  ownedRowsFilter?: string;
   /** Known constraints, copied into run_log.limitations as data. */
   limitations: string[];
 }
+
+/**
+ * `sales_history` is written by two tracks: `sales` loads the FDOR SDF file and folds in the NAL
+ * roll sale columns, and `pa_detail` folds in sales read off the Duval PA detail pages. The
+ * `sale_source` column records which of them wrote a row, so coverage can scope each track to its
+ * own rows instead of comparing a whole-table count against one track's staged rows.
+ */
+export const SALES_TRACK_SALE_SOURCES = ["SDF", "NAL_SALE1", "NAL_SALE2"] as const;
+export const PA_DETAIL_SALE_SOURCE = "PA_DETAIL";
 
 const FDOR = "https://floridarevenue.com/property/dataportal/Documents/PTO%20Data%20Portal";
 export const COJ_PARCELS_URL = "https://maps.coj.net/coj/rest/services/CityBiz/Parcels/MapServer/0/query";
@@ -78,6 +94,7 @@ export const SOURCES: Record<TrackName, SourceDef> = {
     targetTable: "sales_history",
     implemented: true,
     requiresUsEgress: false,
+    ownedRowsFilter: `sale_source IN (${SALES_TRACK_SALE_SOURCES.map((v) => `'${v}'`).join(", ")})`,
     limitations: [
       "Sale dates carry year+month only (day unknown; stored as first of month)",
       "Only 2025-2026 transfers; older tenure comes from the COJ parcels layer (SALESL*)",

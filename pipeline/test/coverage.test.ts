@@ -52,6 +52,48 @@ describe("dataset-coverage.json", () => {
     expect(OracleDatasetCoverageSnapshotSchema.safeParse(snap).success).toBe(true);
     await db.close();
   });
+
+  it("scopes a target table written by more than one track to the rows that track owns", async () => {
+    const db = await openDb(":memory:");
+    await ensureSchema(db.conn);
+    // sales_history is fed by the sales track (SDF + the NAL roll fold) and by pa_detail
+    // (PA_DETAIL). Only the first three rows below belong to the sales track.
+    const sale = (key: string, parcel: string, saleSource: string, fetchedAt: string) =>
+      `('${key}', '${parcel}', DATE '2026-01-01', 2026, 1, 100.0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, '${saleSource}',
+        'h', 'fdor_sdf', 'u', 'a', 's', TIMESTAMP '${fetchedAt}', 'r1')`;
+    await db.conn.run(`INSERT INTO sales_history VALUES
+      ${sale("k1", "A", "SDF", "2026-08-20 10:00:00")},
+      ${sale("k2", "B", "SDF", "2026-08-20 11:00:00")},
+      ${sale("k3", "C", "NAL_SALE1", "2026-08-20 12:00:00")},
+      ${sale("k4", "D", "PA_DETAIL", "2026-08-25 09:00:00")},
+      ${sale("k5", "E", "PA_DETAIL", "2026-08-26 09:00:00")}`);
+    // the sales run staged only its own three rows, which is the denominator the row must use
+    await db.conn.run(`
+      INSERT INTO run_log_sources VALUES
+        ('r1', 'sales', 'fdor_sdf', 'sales_history', 'u', 'a', 's', 'e', 'lm', 10, 'downloaded', 3, 3, 0, 0, 0, 3, 3,
+         TIMESTAMP '2026-08-20 10:00:00', TIMESTAMP '2026-08-20 10:05:00', 'completed', '[]', NULL)`);
+
+    const snap = await buildCoverageSnapshot(db.conn, { exportedAt: "2026-08-27T00:00:00.000Z" });
+    const sales = snap.datasets.find((d) => d.source === "sales");
+    expect(sales).toMatchObject({
+      ingested_count: 3,
+      expected_count: 3,
+      table_rows_total: 5,
+      rows_from_other_tracks: 2,
+      additional_rows_by_source: { PA_DETAIL: 2 },
+      // the load window describes the SDF/NAL rows, not the later pa_detail merges
+      first_loaded_at: "2026-08-20T10:00:00Z",
+      last_loaded_at: "2026-08-20T12:00:00Z",
+    });
+    // the track that contributed the extra rows says so rather than leaving them uncounted
+    expect(snap.datasets.find((d) => d.source === "pa_detail")).toMatchObject({ sales_history_rows_contributed: 2 });
+    // a single-writer table is untouched: whole-table count, no shared-table fields
+    const appraisal = snap.datasets.find((d) => d.source === "appraisal");
+    expect(appraisal).not.toHaveProperty("table_rows_total");
+    expect(appraisal).not.toHaveProperty("rows_from_other_tracks");
+    expect(OracleDatasetCoverageSnapshotSchema.safeParse(snap).success).toBe(true);
+    await db.close();
+  });
 });
 
 describe("published-counties catalog", () => {

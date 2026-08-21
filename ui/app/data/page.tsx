@@ -117,8 +117,10 @@ export default function DataPage() {
   }, [columnCoverage]);
 
   const coverageDatasets = coverage.data?.datasets ?? [];
+  // ingested_count is scoped to the rows its source owns, so a table written by more than one track
+  // reports the rest separately. Adding both counts every stored row exactly once.
   const totalIngested = coverageDatasets.reduce(
-    (sum, dataset) => sum + (dataset.ingested_count ?? 0),
+    (sum, dataset) => sum + (dataset.ingested_count ?? 0) + (dataset.rows_from_other_tracks ?? 0),
     0,
   );
 
@@ -203,6 +205,8 @@ export default function DataPage() {
                         <CoverageBar
                           ingested={dataset.ingested_count}
                           expected={dataset.expected_count}
+                          rowsFromOtherTracks={dataset.rows_from_other_tracks}
+                          additionalRowsBySource={dataset.additional_rows_by_source}
                         />
                       </td>
                       <td className="mono text-[11.5px]">

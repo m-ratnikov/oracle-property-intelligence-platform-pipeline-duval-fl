@@ -1,4 +1,7 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { CoverageBar } from "@/components/Charts";
 import { guardSql, stripSqlComments, MAX_LIMIT, DEFAULT_LIMIT } from "@/lib/sql";
 import { resolveArtifactUrl } from "@/lib/config";
 import {
@@ -155,6 +158,40 @@ describe("lenient artifact parsers", () => {
     });
     expect(parsed.datasets[0].expected_count).toBeNull();
     expect(parsed.datasets[0].extra.throughput).toBe("1.4/s");
+  });
+
+  it("reads the shared table fields on a dataset written by more than one track", () => {
+    const parsed = parseCoverage({
+      datasets: [
+        {
+          source: "sales",
+          ingested_count: 64532,
+          expected_count: 64532,
+          table_rows_total: 71992,
+          rows_from_other_tracks: 7460,
+          additional_rows_by_source: { PA_DETAIL: 7460, BOGUS: "not a number" },
+        },
+      ],
+    });
+    expect(parsed.datasets[0]).toMatchObject({
+      ingested_count: 64532,
+      table_rows_total: 71992,
+      rows_from_other_tracks: 7460,
+      additional_rows_by_source: { PA_DETAIL: 7460 },
+    });
+    // they are dedicated fields now, not leftovers in extra
+    expect(parsed.datasets[0].extra).toEqual({});
+  });
+
+  it("leaves the shared table fields null when an older snapshot omits them", () => {
+    const parsed = parseCoverage({
+      datasets: [{ source: "appraisal", ingested_count: 404023, expected_count: 404023 }],
+    });
+    expect(parsed.datasets[0]).toMatchObject({
+      table_rows_total: null,
+      rows_from_other_tracks: null,
+      additional_rows_by_source: null,
+    });
   });
 
   it("accepts shards as strings or objects", () => {
@@ -329,5 +366,47 @@ describe("column aware cell formatting", () => {
     expect(displayCellForColumn("built_year", null)).toBe(displayCell(null));
     expect(displayCellForColumn("hoa_flag", true)).toBe("yes");
     expect(displayCellForColumn("lot_size_acre", 0.2534)).toBe("0.2534");
+  });
+});
+
+describe("coverage bar", () => {
+  // renderToStaticMarkup can split adjacent JSX children with comment markers; strip them so the
+  // assertions can name the text a reader actually sees.
+  const render = (props: Parameters<typeof CoverageBar>[0]) =>
+    renderToStaticMarkup(createElement(CoverageBar, props)).replace(/<!--.*?-->/g, "");
+
+  it("names the rows another track contributed to the same table", () => {
+    const html = render({
+      ingested: 64532,
+      expected: 64532,
+      rowsFromOtherTracks: 7460,
+      additionalRowsBySource: { PA_DETAIL: 7460 },
+    });
+    expect(html).toContain("64,532 / 64,532");
+    expect(html).toContain("100.0%");
+    expect(html).toContain("+7,460 rows from other sources (PA_DETAIL)");
+  });
+
+  it("says nothing extra when one track owns the whole table", () => {
+    const html = render({ ingested: 404023, expected: 404023 });
+    expect(html).not.toContain("rows from other sources");
+  });
+
+  it("still shows the extra rows when the source publishes no expected total", () => {
+    const html = render({
+      ingested: 1200,
+      expected: null,
+      rowsFromOtherTracks: 40,
+      additionalRowsBySource: { PA_DETAIL: 40 },
+    });
+    expect(html).toContain("no published expected total to compare against");
+    expect(html).toContain("+40 rows from other sources (PA_DETAIL)");
+  });
+
+  it("still reports a ratio above 100 percent instead of clamping it away", () => {
+    // the honest handling of a real over-count is kept; the fix removes the bogus ratio at source
+    const html = render({ ingested: 71992, expected: 64532 });
+    expect(html).toContain("111.6%");
+    expect(html).toContain("width:100%");
   });
 });

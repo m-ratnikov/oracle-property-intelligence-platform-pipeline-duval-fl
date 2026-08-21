@@ -6,6 +6,7 @@ import { PIPELINE_DIR } from "../config.js";
 import { all, getTrackState, q, scalar, setTrackState } from "../db.js";
 import { downloadArtifact, sha256File } from "../download.js";
 import { hashStaging, mergeStaging } from "../merge.js";
+import { PA_DETAIL_SALE_SOURCE } from "../sources.js";
 import { SALE_KEY_SQL } from "./sales.js";
 import { BROWSER_UA, mapLimit, sleep } from "./http.js";
 import { normalizeRoofCover, parsePaDetail, type PaDetail } from "./pa_detail_parse.js";
@@ -202,7 +203,7 @@ export const runPaDetail: TrackRunner = async (ctx, source) => {
            parcel_id, sale_date, year(sale_date) AS sale_year, month(sale_date) AS sale_month, sale_price, or_book, or_page, NULL::VARCHAR AS clerk_no,
            CASE WHEN upper(coalesce(qualified, '')) LIKE 'Q%' THEN 'Q' WHEN upper(coalesce(qualified, '')) LIKE 'U%' THEN 'U' ELSE NULL END AS qual_cd,
            CASE WHEN upper(coalesce(vacant_improved, '')) LIKE 'V%' THEN 'V' WHEN upper(coalesce(vacant_improved, '')) LIKE 'I%' THEN 'I' ELSE NULL END AS vi_cd,
-           NULL::VARCHAR AS sale_change_cd, NULL::VARCHAR AS multi_parcel, deed_instrument AS sale_id_cd, 'PA_DETAIL' AS sale_source
+           NULL::VARCHAR AS sale_change_cd, NULL::VARCHAR AS multi_parcel, deed_instrument AS sale_id_cd, ${q(PA_DETAIL_SALE_SOURCE)} AS sale_source
     FROM staging.pa_detail_sales_k
     WHERE sale_key NOT IN (SELECT sale_key FROM sales_history)`);
   const hsh = await hashStaging(ctx.conn, "staging.sales_history_pa", prov);

@@ -109,7 +109,7 @@ describe("provider registry integrity", () => {
     expect(findProvider("google")?.id).toBe("google");
     expect(findProvider("not-a-provider")).toBeNull();
     expect(findProvider(null)).toBeNull();
-    expect(findModel("google", "gemini-2.5-flash")?.free).toBe(true);
+    expect(findModel("google", "gemini-3.5-flash")?.free).toBe(true);
     expect(findModel("google", "gpt-4")).toBeNull();
     expect(isSupported("anthropic", "claude-opus-5")).toBe(true);
     expect(isSupported("anthropic", "claude-opus-4")).toBe(false);
@@ -145,7 +145,7 @@ describe("provider registry integrity", () => {
     const anthropic = await resolveModel({}, { provider: "anthropic", modelId: "claude-opus-5", apiKey: FAKE_KEY });
     expect(anthropic.instructions("s")).toHaveProperty("providerOptions.anthropic.cacheControl");
 
-    const google = await resolveModel({}, { provider: "google", modelId: "gemini-2.5-flash", apiKey: FAKE_KEY });
+    const google = await resolveModel({}, { provider: "google", modelId: "gemini-3.5-flash", apiKey: FAKE_KEY });
     expect(google.instructions("s")).not.toHaveProperty("providerOptions");
   });
 });
@@ -160,10 +160,10 @@ describe("credential headers", () => {
       headers({
         [KEY_HEADER]: FAKE_KEY,
         [PROVIDER_HEADER]: "google",
-        [MODEL_HEADER]: "gemini-2.5-flash",
+        [MODEL_HEADER]: "gemini-3.5-flash",
       }),
     );
-    expect(credential).toEqual({ provider: "google", modelId: "gemini-2.5-flash", apiKey: FAKE_KEY });
+    expect(credential).toEqual({ provider: "google", modelId: "gemini-3.5-flash", apiKey: FAKE_KEY });
   });
 
   it("falls back to the provider's free default when no model is named", () => {

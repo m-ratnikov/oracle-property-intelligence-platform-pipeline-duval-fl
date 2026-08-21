@@ -134,23 +134,25 @@ export const PROVIDERS: readonly ProviderDefinition[] = [
     envKeys: ["GOOGLE_GENERATIVE_AI_API_KEY", "GOOGLE_API_KEY"],
     models: [
       {
+        id: "gemini-3.5-flash",
+        label: "Gemini 3.5 Flash",
+        free: true,
+        notes:
+          "MEASURED 2026-08-21 against the deployed agent: the only Gemini id here that completed a full question. Answers took 25 s to 116 s depending on free tier queueing, then returned 429 once the per minute quota was spent. Listed first because defaultModelFor picks the first free model.",
+      },
+      {
+        id: "gemini-3.6-flash",
+        label: "Gemini 3.6 Flash",
+        free: true,
+        notes:
+          "The id Google's own 404 for gemini-2.5-flash tells you to move to. MEASURED 2026-08-21: returned \"This model is currently experiencing high demand\" on every attempt and failed the request after three retries. Worth retrying later; not dependable for a demo.",
+      },
+      {
         id: "gemini-3.7-flash",
         label: "Gemini 3.7 Flash",
         free: true,
         notes:
-          "Latest stable Flash, documented for agentic workflows and multi step tool execution. Free tier request and token caps are per model and visible in AI Studio.",
-      },
-      {
-        id: "gemini-3.5-flash",
-        label: "Gemini 3.5 Flash",
-        free: true,
-        notes: "Older Flash kept for high throughput. Free of charge on the same free tier.",
-      },
-      {
-        id: "gemini-2.5-flash",
-        label: "Gemini 2.5 Flash",
-        free: true,
-        notes: "Long lived, widely tested Flash. Free of charge, useful as a fallback if a newer id is rejected.",
+          "MEASURED 2026-08-21: the provider call failed with an EMPTY error message and the SDK retried until the serverless function hit its 300 s ceiling. Kept listed because it may simply not be enabled on every account, but do not make it a default.",
       },
       {
         id: "gemini-2.5-pro",
@@ -167,8 +169,8 @@ export const PROVIDERS: readonly ProviderDefinition[] = [
     freeTier: {
       available: true,
       summary:
-        "New accounts start on the free tier with no billing account and no card. Gemini Flash input and output tokens are listed as free of charge, subject to per model rate limits.",
-      source: "https://ai.google.dev/gemini-api/docs/pricing",
+        "New accounts start on the free tier with no billing account and no card. Flash input and output tokens are listed as free of charge, subject to per model rate limits that are per minute as well as per day: this agent spends 3 to 6 model calls per question, so two questions in quick succession can trip the per minute quota and return 429. Model ids move quickly here - gemini-2.5-flash is already refused for new users - so treat any id as verifiable rather than permanent.",
+      source: "https://ai.google.dev/gemini-api/docs/rate-limits",
       readOn: FREE_TIER_VERIFIED_ON,
     },
   },

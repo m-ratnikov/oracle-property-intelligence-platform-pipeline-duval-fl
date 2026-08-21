@@ -1,8 +1,8 @@
 import type { DuckDBConnection } from "@duckdb/node-api";
 import { z } from "zod";
 import { COUNTY } from "../config.js";
-import { all, count, one, q } from "../db.js";
-import { SOURCES, type TrackName } from "../sources.js";
+import { all, count, ident, one, q, scalar, tableColumns } from "../db.js";
+import { PA_DETAIL_SALE_SOURCE, SOURCES, type TrackName } from "../sources.js";
 
 // ---------------------------------------------------------------------------
 // Schemas copied from elephant-mcp src/types/oracleOpenData.ts (the consumer contract).
@@ -29,6 +29,49 @@ export const OracleDatasetCoverageSnapshotSchema = z
   })
   .passthrough();
 export type OracleDatasetCoverageSnapshot = z.infer<typeof OracleDatasetCoverageSnapshotSchema>;
+
+async function countWhere(conn: DuckDBConnection, table: string, predicate: string): Promise<number> {
+  return Number(await scalar<string | number>(conn, `SELECT count(*) FROM ${table} WHERE ${predicate}`));
+}
+
+/**
+ * Column naming which track wrote a row, on a table fed by more than one track (`sales_history` has
+ * `sale_source`). Found by convention rather than by name so the rule holds for the next such table;
+ * the provenance columns describe the artifact, not the track, and none of them end in `_source`.
+ */
+async function writerColumn(conn: DuckDBConnection, table: string): Promise<string | null> {
+  const cols = await tableColumns(conn, "main", table);
+  return cols.find((c) => c.endsWith("_source")) ?? null;
+}
+
+/**
+ * Rows in a shared target table that this track does not own. Reported alongside the scoped
+ * `ingested_count` so the extra rows stay visible as enrichment instead of silently inflating a
+ * coverage ratio that compares them against one track's expected total.
+ */
+async function sharedTableNotes(
+  conn: DuckDBConnection,
+  table: string,
+  ownedRowsFilter: string,
+): Promise<Record<string, unknown>> {
+  const notOwned = `NOT coalesce(${ownedRowsFilter}, false)`;
+  const tableRowsTotal = await count(conn, table);
+  const rowsFromOtherTracks = await countWhere(conn, table, notOwned);
+  const bySource: Record<string, number> = {};
+  const writer = await writerColumn(conn, table);
+  if (writer !== null && rowsFromOtherTracks > 0) {
+    const rows = await all<{ writer_value: string | null; n: string | number }>(
+      conn,
+      `SELECT ${ident(writer)} AS writer_value, count(*) AS n FROM ${table} WHERE ${notOwned} GROUP BY 1 ORDER BY 1`,
+    );
+    for (const r of rows) bySource[r.writer_value ?? "unknown"] = Number(r.n);
+  }
+  return {
+    table_rows_total: tableRowsTotal,
+    rows_from_other_tracks: rowsFromOtherTracks,
+    additional_rows_by_source: bySource,
+  };
+}
 
 async function extraNotes(conn: DuckDBConnection, track: TrackName): Promise<Record<string, unknown>> {
   const n = async (sql: string) => Number((await one<{ n: string | number }>(conn, sql)).n);
@@ -62,6 +105,14 @@ async function extraNotes(conn: DuckDBConnection, track: TrackName): Promise<Rec
         : { constrained: true, reason: "JaxEPICS API behind Akamai WAF; search/reports require login; no open dataset; PRR is the documented path" };
     case "coj_parcels":
       return (await count(conn, "coj_parcels")) > 0 ? { matched_to_nal: await n("SELECT count(*) AS n FROM coj_parcels WHERE parcel_id IS NOT NULL") } : {};
+    case "pa_detail":
+      // the track also folds detail-page sales into sales_history, which its own ingested_count
+      // (buildings) does not show; report the contribution rather than leave it uncounted
+      return {
+        sales_history_rows_contributed: await n(
+          `SELECT count(*) AS n FROM sales_history WHERE sale_source = ${q(PA_DETAIL_SALE_SOURCE)}`,
+        ),
+      };
     default:
       return {};
   }
@@ -73,9 +124,11 @@ export interface CoverageArtifactRef {
 }
 
 /**
- * One coverage row per registered source. `ingested_count` is the live table count;
- * `expected_count` is what the latest completed run saw in the source (rows staged), or the parcel
- * count for per-parcel enrichments; unimplemented sources report 0 / null so MCP consumers see the gap.
+ * One coverage row per registered source. `ingested_count` is the live table count, narrowed to the
+ * rows the track owns where the target table is written by more than one track (`ownedRowsFilter`),
+ * so it stays comparable with `expected_count`, which is what the latest completed run saw in the
+ * source (rows staged), or the parcel count for per-parcel enrichments; unimplemented sources report
+ * 0 / null so MCP consumers see the gap.
  */
 export async function buildCoverageSnapshot(
   conn: DuckDBConnection,
@@ -84,7 +137,9 @@ export async function buildCoverageSnapshot(
   const datasets: OracleDatasetCoverageRow[] = [];
   const parcelCount = await count(conn, "parcels");
   for (const source of Object.values(SOURCES)) {
-    const ingested = await count(conn, source.targetTable);
+    const owned = source.ownedRowsFilter;
+    const ingested =
+      owned === undefined ? await count(conn, source.targetTable) : await countWhere(conn, source.targetTable, owned);
     const latest = await all<{ rows_staged: string | number | null; run_id: string; status: string; finished_at: string | null }>(
       conn,
       `SELECT rows_staged, run_id, status, finished_at::VARCHAR AS finished_at FROM run_log_sources
@@ -125,7 +180,8 @@ export async function buildCoverageSnapshot(
       const range = await one<{ first_loaded: string | null; last_loaded: string | null }>(
         conn,
         `SELECT strftime(min(${tsCol}), '%Y-%m-%dT%H:%M:%SZ') AS first_loaded,
-                strftime(max(${tsCol}), '%Y-%m-%dT%H:%M:%SZ') AS last_loaded FROM ${source.targetTable}`,
+                strftime(max(${tsCol}), '%Y-%m-%dT%H:%M:%SZ') AS last_loaded FROM ${source.targetTable}
+         ${owned === undefined ? "" : `WHERE ${owned}`}`,
       );
       first = range.first_loaded;
       lastLoaded = range.last_loaded;
@@ -153,6 +209,7 @@ export async function buildCoverageSnapshot(
       requires_us_egress: source.requiresUsEgress,
       last_skip_reason: lastSkip,
       ...(source.track === "geometry" ? { parcels_total: parcelCount, parcels_with_coordinates: parcelsWithCoordinates } : {}),
+      ...(owned === undefined ? {} : await sharedTableNotes(conn, source.targetTable, owned)),
       ...(await extraNotes(conn, source.track)),
     });
   }
