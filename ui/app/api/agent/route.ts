@@ -25,7 +25,10 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// A tool-calling answer runs 30-90 s, and the ceiling counts streaming time too, so 60 s
+// truncated the slower questions. 300 s is the Vercel Hobby maximum with Fluid compute
+// (default and maximum on that plan), which is the tightest platform we deploy to.
+export const maxDuration = 300;
 
 export type { AgentResponse, AgentToolCall, AgentEvidenceRow } from "@/lib/agent/types";
 
