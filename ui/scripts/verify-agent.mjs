@@ -21,12 +21,18 @@ const body = await page.locator("body").innerText();
 console.log("run history badge:", /published run history|sample run history/i.test(body));
 
 await page.getByRole("button", { name: /Which properties have roofs older/ }).click();
-const resp = await page.waitForResponse(
-  (r) => r.url().includes("/api/agent") && r.request().method() === "POST",
+
+// The answer streams as NDJSON, so the response body cannot be read after the fact. Watch the page
+// instead, which is what a visitor sees anyway.
+const started = Date.now();
+await page.waitForFunction(
+  () => /of\s+404,023|AGENT ERROR|properties in Duval/i.test(document.body.innerText),
+  undefined,
   { timeout: 300_000 },
 );
-const json = await resp.json();
-console.log(`answer: ${resp.status()} status=${json.status} evidence=${(json.evidence ?? []).length}`);
+const text = await page.locator("body").innerText();
+console.log(`answered in ${Math.round((Date.now() - started) / 1000)}s, error shown: ${/AGENT ERROR/i.test(text)}`);
+console.log("evidence panel present:", /Evidence \(\d+ parcels\)/i.test(text));
 
 console.log("network failures:", failures.length);
 for (const f of [...new Set(failures)].slice(0, 8)) console.log("  " + f);

@@ -537,34 +537,33 @@ export default function AgentPage() {
               </button>
             </form>
           </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-border pt-3">
+          <EngineStatus compact />
+          {choices.length > 0 ? (
+            <label className="flex flex-wrap items-center gap-1.5 text-[11.5px] text-faint">
+              model
+              <select
+                className="field"
+                value={model ?? ""}
+                onChange={(event) => setModel(event.target.value)}
+                disabled={pending}
+                aria-label="Model"
+              >
+                {choices.map((choice) => (
+                  <option key={choice.id} value={choice.id}>
+                    {choice.label}
+                  </option>
+                ))}
+              </select>
+              {providerLabel ? <span className="mono text-muted">{providerLabel}</span> : null}
+            </label>
+          ) : config && !config.configured ? (
+            <span className="badge badge-warn">no model configured</span>
+          ) : null}
+          <FreshnessBadge freshness={freshness} />
         </div>
-
-      <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-border pt-3">
-        <EngineStatus compact />
-        {choices.length > 0 ? (
-          <label className="flex flex-wrap items-center gap-1.5 text-[11.5px] text-faint">
-            model
-            <select
-              className="field"
-              value={model ?? ""}
-              onChange={(event) => setModel(event.target.value)}
-              disabled={pending}
-              aria-label="Model"
-            >
-              {choices.map((choice) => (
-                <option key={choice.id} value={choice.id}>
-                  {choice.label}
-                </option>
-              ))}
-            </select>
-            {providerLabel ? <span className="mono text-muted">{providerLabel}</span> : null}
-          </label>
-        ) : config && !config.configured ? (
-          <span className="badge badge-warn">no model configured</span>
-        ) : null}
-        <FreshnessBadge freshness={freshness} />
-      </div>
-
+        </div>
 
         <aside className="space-y-4">
           <div className="card">
