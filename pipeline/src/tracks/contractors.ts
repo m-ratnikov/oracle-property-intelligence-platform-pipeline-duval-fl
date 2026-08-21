@@ -30,8 +30,7 @@ export function dbprReadCsv(csvPath: string, columns: string[]): string {
 /** Read the header line of a CSV (comma separated, quotes stripped) without DuckDB. */
 export function readCsvHeader(csvPath: string): string[] {
   const buf = readFileSync(csvPath, { encoding: "utf8", flag: "r" });
-  const firstLine = buf.slice(0, buf.indexOf("\n") === -1 ? buf.length : buf.indexOf("\n")).replace(/
-$/, "");
+  const firstLine = buf.slice(0, buf.indexOf("\n") === -1 ? buf.length : buf.indexOf("\n")).replace(/$/, "");
   const out: string[] = [];
   let cur = "";
   let inQ = false;
