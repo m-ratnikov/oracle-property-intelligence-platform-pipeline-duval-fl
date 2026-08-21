@@ -20,8 +20,18 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["@duckdb/duckdb-wasm", "@duckdb/node-api"],
   // The agent route reads the sample parquet and sample JSON from disk when no
   // artifact URL is configured, so those files have to travel with the function.
+  // @duckdb/node-bindings resolves a per-platform package and requires its `duckdb.node`.
+  // That binary then dynamically links a shared library sitting next to it (libduckdb.so on
+  // Linux, duckdb.dll on Windows). Next traces the .node it can see in the require() call but
+  // not the .so the loader pulls in later, so on Vercel the route died at module load with
+  // "libduckdb.so: cannot open shared object file". Trace the whole Linux platform package.
+  // Both spellings are listed because pnpm installs it as a symlink into .pnpm.
   outputFileTracingIncludes: {
-    "/api/agent": ["./public/sample/**/*"],
+    "/api/agent": [
+      "./public/sample/**/*",
+      "./node_modules/@duckdb/node-bindings-linux-x64/**/*",
+      "./node_modules/.pnpm/@duckdb+node-bindings-linux-x64@*/node_modules/@duckdb/node-bindings-linux-x64/**/*",
+    ],
   },
   async headers() {
     return [
