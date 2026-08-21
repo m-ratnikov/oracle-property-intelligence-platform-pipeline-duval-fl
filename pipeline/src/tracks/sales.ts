@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { all, duckPath, q, scalar } from "../db.js";
 import { downloadArtifact } from "../download.js";
 import { assertHeader, hashStaging, mergeStaging } from "../merge.js";
+import { SALES_TRACK_SALE_SOURCES } from "../sources.js";
 import type { TrackRunner } from "./types.js";
 import { startResult } from "./types.js";
 import { extractEntry } from "./zip.js";
@@ -129,7 +130,14 @@ export const runSales: TrackRunner = async (ctx, source) => {
     FROM parcels p
     WHERE h.sale_source LIKE 'NAL_%' AND p.parcel_id = h.parcel_id`);
 
-  result.merge = await mergeStaging(ctx.conn, { target: "sales_history", staging: hashed, keys: ["sale_key"] });
+  // sales_history also holds rows folded in by the pa_detail track. This staging table is the whole
+  // of what SDF plus the NAL roll offered, and nothing more, so it can only speak for its own rows.
+  result.merge = await mergeStaging(ctx.conn, {
+    target: "sales_history",
+    staging: hashed,
+    keys: ["sale_key"],
+    authoritativeScope: `t.sale_source IN (${SALES_TRACK_SALE_SOURCES.map((v) => q(v)).join(", ")})`,
+  });
   log.info("merged", { table: "sales_history", ...result.merge });
   result.status = "completed";
   result.finishedAt = new Date().toISOString();

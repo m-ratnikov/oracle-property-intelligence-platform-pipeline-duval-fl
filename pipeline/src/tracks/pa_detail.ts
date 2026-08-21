@@ -185,30 +185,51 @@ export const runPaDetail: TrackRunner = async (ctx, source) => {
   await ctx.conn.run(`CREATE OR REPLACE TABLE staging.pa_detail_sales_k AS
     SELECT md5(concat_ws('|', parcel_id, sale_date::VARCHAR, coalesce(or_book, ''), coalesce(or_page, ''), coalesce(sale_price::BIGINT::VARCHAR, ''))) AS pa_sale_key, * FROM staging.pa_detail_sales
     WHERE sale_date IS NOT NULL QUALIFY row_number() OVER (PARTITION BY pa_sale_key) = 1`);
+  // The parcels this run actually re-read and parsed. Each run stages one bounded window, so this
+  // is the only set the three merges below can speak for: outside it, "not in staging" just means
+  // "not read this run". Empty when nothing parsed, which scopes the missing counts to zero.
+  await ctx.conn.run("CREATE OR REPLACE TABLE staging.pa_detail_window_parcels (parcel_id VARCHAR)");
+  const windowParcels = parsed.map((o) => `(${q(o.re)})`);
+  for (let i = 0; i < windowParcels.length; i += 500) {
+    await ctx.conn.run(`INSERT INTO staging.pa_detail_window_parcels VALUES ${windowParcels.slice(i, i + 500).join(",")}`);
+  }
+  const inWindow = "t.parcel_id IN (SELECT parcel_id FROM staging.pa_detail_window_parcels)";
   result.rowsStaged = parsed.length;
   const fetchedAt = new Date().toISOString();
   const prov = { sourceSystem: source.sourceSystem, sourceUrl: PA_DETAIL_URL, sourceArtifact: "pa_detail/html/<re>.html", sourceSha256: null, fetchedAt, runId: ctx.runId };
   const hb = await hashStaging(ctx.conn, "staging.pa_detail_buildings_k", prov);
   await ctx.conn.run(`UPDATE ${hb} SET source_url = ${q(PA_DETAIL_URL)} || parcel_id, source_artifact = 'pa_detail/html/' || parcel_id || '.html', source_sha256 = html_sha256`);
   await ctx.conn.run(`ALTER TABLE ${hb} DROP COLUMN html_sha256`);
-  result.merge = await mergeStaging(ctx.conn, { target: "pa_detail_buildings", staging: hb, keys: ["building_key"] });
+  result.merge = await mergeStaging(ctx.conn, { target: "pa_detail_buildings", staging: hb, keys: ["building_key"], authoritativeScope: inWindow });
   const hs = await hashStaging(ctx.conn, "staging.pa_detail_sales_k", prov);
   await ctx.conn.run(`UPDATE ${hs} SET source_url = ${q(PA_DETAIL_URL)} || parcel_id, source_artifact = 'pa_detail/html/' || parcel_id || '.html', source_sha256 = html_sha256`);
   await ctx.conn.run(`ALTER TABLE ${hs} DROP COLUMN html_sha256`);
-  result.notes.salesMerge = await mergeStaging(ctx.conn, { target: "pa_detail_sales", staging: hs, keys: ["pa_sale_key"] });
+  result.notes.salesMerge = await mergeStaging(ctx.conn, { target: "pa_detail_sales", staging: hs, keys: ["pa_sale_key"], authoritativeScope: inWindow });
 
   // fold PA sales into sales_history (same natural key as SDF/NAL so duplicates collapse; PA wins on conflict? no: SDF precedence kept by merge on existing keys)
-  await ctx.conn.run(`CREATE OR REPLACE TABLE staging.sales_history_pa AS
+  // _all is every PA sale in this window, before the precedence filter. The merge stages only the
+  // new keys, so this complete set is what says whether a row we already hold is still on the page.
+  await ctx.conn.run(`CREATE OR REPLACE TABLE staging.sales_history_pa_all AS
     SELECT ${SALE_KEY_SQL({ parcel: "parcel_id", yr: "year(sale_date)", mo: "month(sale_date)", book: "or_book", page: "or_page", clerk: "NULL", price: "sale_price" })} AS sale_key,
            parcel_id, sale_date, year(sale_date) AS sale_year, month(sale_date) AS sale_month, sale_price, or_book, or_page, NULL::VARCHAR AS clerk_no,
            CASE WHEN upper(coalesce(qualified, '')) LIKE 'Q%' THEN 'Q' WHEN upper(coalesce(qualified, '')) LIKE 'U%' THEN 'U' ELSE NULL END AS qual_cd,
            CASE WHEN upper(coalesce(vacant_improved, '')) LIKE 'V%' THEN 'V' WHEN upper(coalesce(vacant_improved, '')) LIKE 'I%' THEN 'I' ELSE NULL END AS vi_cd,
            NULL::VARCHAR AS sale_change_cd, NULL::VARCHAR AS multi_parcel, deed_instrument AS sale_id_cd, ${q(PA_DETAIL_SALE_SOURCE)} AS sale_source
-    FROM staging.pa_detail_sales_k
-    WHERE sale_key NOT IN (SELECT sale_key FROM sales_history)`);
+    FROM staging.pa_detail_sales_k`);
+  await ctx.conn.run(`CREATE OR REPLACE TABLE staging.sales_history_pa AS
+    SELECT * FROM staging.sales_history_pa_all WHERE sale_key NOT IN (SELECT sale_key FROM sales_history)`);
   const hsh = await hashStaging(ctx.conn, "staging.sales_history_pa", prov);
   await ctx.conn.run(`UPDATE ${hsh} SET source_url = ${q(PA_DETAIL_URL)} || parcel_id, source_artifact = 'pa_detail/html/' || parcel_id || '.html'`);
-  result.notes.salesHistoryMerge = await mergeStaging(ctx.conn, { target: "sales_history", staging: hsh, keys: ["sale_key"] });
+  result.notes.salesHistoryMerge = await mergeStaging(ctx.conn, {
+    target: "sales_history",
+    staging: hsh,
+    keys: ["sale_key"],
+    // a row this track wrote, for a parcel it just re-read, that the page no longer lists. The
+    // staging above is a delta (keys already held are kept back so SDF wins), so the complete window
+    // set decides whether a row is gone rather than merely already loaded.
+    authoritativeScope: `t.sale_source = ${q(PA_DETAIL_SALE_SOURCE)} AND ${inWindow}
+      AND t.sale_key NOT IN (SELECT sale_key FROM staging.sales_history_pa_all)`,
+  });
 
   await setTrackState(ctx.conn, source.track, STATE_CURSOR, String(cursor + seedRows.length), ctx.runId);
   result.notes.cursorEnd = cursor + seedRows.length;

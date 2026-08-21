@@ -53,12 +53,24 @@ export async function hashStaging(
  * missing-in-source counts. Unchanged rows keep their original provenance (fetched_at / run_id say
  * when that row version was last loaded). Rows missing from the new source snapshot are kept
  * (counted, not deleted) so a partial source window never erases history.
+ *
+ * `missingInSource` only means "the source dropped a row we hold" while two things are true: this
+ * staging table is the whole of what the source offered, and this track is the only writer of the
+ * target. Neither holds everywhere here. `sales_history` is written by the sales track and by
+ * pa_detail, so each would count the other's rows as missing, and the pa_detail merges stage one
+ * bounded window per run, so every row loaded by an earlier window would count as missing too.
+ * `authoritativeScope` fixes that: it is a SQL predicate over the target row (alias `t`) naming the
+ * rows this staging table is authoritative over, and it narrows the missing count to those rows
+ * only. It deliberately touches nothing else - inserted / updated / unchanged and the delete and
+ * insert behaviour are all unscoped, because the merge really is authoritative over any key it
+ * stages, wherever that row came from. `totalBefore` / `totalAfter` stay whole-table counts: the
+ * run log calls them table totals and that is what they should say.
  */
 export async function mergeStaging(
   conn: DuckDBConnection,
-  opts: { target: string; staging: string; keys: string[] },
+  opts: { target: string; staging: string; keys: string[]; authoritativeScope?: string },
 ): Promise<MergeStats> {
-  const { target, staging, keys } = opts;
+  const { target, staging, keys, authoritativeScope } = opts;
   const [stgSchema, stgTable] = staging.includes(".") ? staging.split(".") : ["main", staging];
   const stagingCols = await tableColumns(conn, stgSchema ?? "main", stgTable ?? staging);
   const targetCols = await tableColumns(conn, "main", target);
@@ -93,13 +105,14 @@ export async function mergeStaging(
   const staged = Number(await scalar<string | number>(conn, `SELECT count(*) FROM ${staging}`));
 
   const firstKey = ident(keys[0] ?? "");
+  const inScope = authoritativeScope === undefined ? "TRUE" : `coalesce(${authoritativeScope}, false)`;
   const stats = await one<Record<string, string | number>>(
     conn,
     `SELECT
        count(*) FILTER (WHERE t.${firstKey} IS NULL AND s.${firstKey} IS NOT NULL) AS inserted,
        count(*) FILTER (WHERE t.${firstKey} IS NOT NULL AND s.${firstKey} IS NOT NULL AND t.row_hash <> s.row_hash) AS updated,
        count(*) FILTER (WHERE t.${firstKey} IS NOT NULL AND s.${firstKey} IS NOT NULL AND t.row_hash = s.row_hash) AS unchanged,
-       count(*) FILTER (WHERE s.${firstKey} IS NULL AND t.${firstKey} IS NOT NULL) AS missing
+       count(*) FILTER (WHERE s.${firstKey} IS NULL AND t.${firstKey} IS NOT NULL AND ${inScope}) AS missing
      FROM ${staging} s FULL OUTER JOIN ${target} t ON ${keyEq("s", "t", keys)}`,
   );
 
