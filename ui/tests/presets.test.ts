@@ -21,6 +21,7 @@ import {
   missingColumns,
   propertyByIdSql,
   searchPropertiesSql,
+  statsSql,
   TOTAL_ALIAS,
 } from "@/lib/sql";
 import { ALL_EXPECTED_COLUMNS, CANONICAL_COLUMNS } from "@/lib/columns";
@@ -176,6 +177,32 @@ describe("the six questions", () => {
     expect(Number(counts.combined_rows)).toBeGreaterThan(0);
     expect(Number(counts.combined_rows)).toBeLessThanOrEqual(Number(counts.roof_rows));
     expect(Number(counts.combined_rows)).toBeLessThanOrEqual(Number(counts.hold_rows));
+  });
+
+  it("the headline count under each result agrees with the rows the rule returns", async () => {
+    // The grid is capped by a limit, so the count shown beside it comes from a separate statement.
+    // If the two ever drifted apart the page would report a number its own rows contradict.
+    for (const preset of PRESETS) {
+      const [stat] = await rows(statsSql(preset));
+      const [check] = await rows(
+        `SELECT count(*) AS c FROM (${preset.sql(1_000_000).replace(/\s+LIMIT\s+\d+\s*$/i, "")})`,
+      );
+      expect(Number(stat.matching_parcels), `${preset.id} count`).toBe(Number(check.c));
+      expect(Number(stat.total_parcels)).toBeGreaterThan(Number(stat.matching_parcels) - 1);
+      // every column the rule declares gets a coverage figure, which is what explains an empty result
+      for (const column of preset.requires) {
+        expect(stat, `${preset.id} coverage of ${column}`).toHaveProperty(`coverage_${column}`);
+      }
+    }
+  });
+
+  it("reports a zero coverage column rather than a bare empty result", async () => {
+    // A rule whose column is entirely null must be distinguishable from a rule that truly matches
+    // nothing: the coverage figure is the only thing that separates them on screen.
+    const preset = PRESETS[0];
+    const [stat] = await rows(statsSql(preset));
+    const covered = preset.requires.filter((column) => Number(stat[`coverage_${column}`]) > 0);
+    expect(covered).toEqual(preset.requires);
   });
 });
 

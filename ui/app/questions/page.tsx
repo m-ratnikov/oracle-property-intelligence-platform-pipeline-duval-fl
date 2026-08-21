@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useEngineBoot, useSql } from "@/lib/hooks";
-import { COMBINED_QUESTIONS, SIX_QUESTIONS, DEFAULT_LIMIT, missingColumns } from "@/lib/sql";
+import { COMBINED_QUESTIONS, SIX_QUESTIONS, DEFAULT_LIMIT, missingColumns, statsSql } from "@/lib/sql";
 import type { QuestionPreset } from "@/lib/sql";
 import type { ColumnMeta } from "@/lib/duckdb";
 import { formatInt } from "@/lib/format";
@@ -22,6 +22,9 @@ function QuestionCard({
   index: number;
 }) {
   const { result, error, running, run } = useSql();
+  // A second, independent query for the totals. The grid is capped by `limit` so its row count says
+  // nothing about how many parcels the rule actually matches, which is the number the question asks for.
+  const { result: stats, run: runStats } = useSql();
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
   const [showSql, setShowSql] = useState(false);
 
@@ -32,6 +35,20 @@ function QuestionCard({
 
   const statement = preset.sql(limit);
   const runnable = ready && missing.length === 0;
+
+  // DuckDB hands counts back as BigInt over the WASM bridge, so normalise before doing arithmetic.
+  const summary = useMemo(() => {
+    const row = stats?.rows[0];
+    if (row === undefined) return null;
+    const toCount = (value: unknown): number => (typeof value === "bigint" ? Number(value) : Number(value ?? 0));
+    const total = toCount(row.total_parcels);
+    return {
+      total,
+      matching: toCount(row.matching_parcels),
+      // required columns that carry no value at all in this artifact
+      empty: preset.requires.filter((column) => toCount(row[`coverage_${column}`]) === 0),
+    };
+  }, [stats, preset]);
 
   return (
     <article className="card" id={preset.id} data-testid={`question-${preset.id}`}>
@@ -60,7 +77,10 @@ function QuestionCard({
               type="button"
               className="btn btn-primary"
               disabled={!runnable || running}
-              onClick={() => void run(statement)}
+              onClick={() => {
+                void run(statement);
+                void runStats(statsSql(preset));
+              }}
             >
               {running ? "running..." : "run"}
             </button>
@@ -110,11 +130,45 @@ function QuestionCard({
             emptyMessage="No parcels in the published artifact match this rule."
             maxHeight="440px"
           />
-          <p className="mt-1.5 text-[11.5px] text-faint">
-            {formatInt(result.rows.length)} rows in {result.elapsedMs.toFixed(0)} ms, limit{" "}
-            {formatInt(limit)}. Every row carries the source system, the source URL and the
-            collection timestamp behind it.
-          </p>
+          {summary === null ? (
+            <p className="mt-1.5 text-[11.5px] text-faint">
+              {formatInt(result.rows.length)} rows in {result.elapsedMs.toFixed(0)} ms, limit{" "}
+              {formatInt(limit)}. Every row carries the source system, the source URL and the
+              collection timestamp behind it.
+            </p>
+          ) : (
+            <p className="mt-1.5 text-[11.5px] text-faint">
+              <span className="text-text">
+                {formatInt(summary.matching)} of {formatInt(summary.total)} published parcels match
+                this rule
+              </span>
+              , showing the first {formatInt(result.rows.length)} in{" "}
+              {result.elapsedMs.toFixed(0)} ms (limit {formatInt(limit)}). Every row carries the
+              source system, the source URL and the collection timestamp behind it.
+            </p>
+          )}
+
+          {summary !== null && summary.matching === 0 ? (
+            <div className="mt-2">
+              <Callout tone="warn" title="Nothing matches, and here is why">
+                {summary.empty.length > 0 ? (
+                  <>
+                    The rule reads{" "}
+                    <span className="mono">{summary.empty.join(", ")}</span>, and{" "}
+                    {summary.empty.length === 1 ? "that column is" : "those columns are"} empty for
+                    all {formatInt(summary.total)} parcels in this artifact. The source that fills{" "}
+                    {summary.empty.length === 1 ? "it" : "them"} has not landed in the published
+                    run, so this is a coverage gap and not a finding of zero.
+                  </>
+                ) : (
+                  <>
+                    Every column the rule needs is populated, so no parcel in this artifact genuinely
+                    satisfies the threshold. The Data page shows the distribution behind each column.
+                  </>
+                )}
+              </Callout>
+            </div>
+          ) : null}
         </div>
       ) : (
         <div className="px-4 pb-4 text-[12.5px] text-faint">

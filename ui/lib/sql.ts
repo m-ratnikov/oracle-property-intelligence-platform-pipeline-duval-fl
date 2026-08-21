@@ -34,6 +34,11 @@ export interface QuestionPreset {
   rule: string;
   /** Columns that must exist in the published parquet for this preset to run. */
   requires: string[];
+  /**
+   * The rule as a bare WHERE clause. The row query and the coverage query are built from this same
+   * string, so the count under a result can never drift from the rows above it.
+   */
+  predicate: string;
   /** Honest notes about what the rule cannot see. */
   assumptions: string[];
   /** Columns that carry the evidence, highlighted in the result grid. */
@@ -59,6 +64,7 @@ const WATER_PREDICATE = `water_view_flag IS NOT NULL AND CAST(water_view_flag AS
 export const PRESETS: QuestionPreset[] = [
   {
     id: "roof-older-than-15",
+    predicate: ROOF_PREDICATE,
     label: "Roof older than 15 years",
     question: "Which properties have roofs older than 15 years?",
     rule: `Keep a parcel when the estimated roof year is 15 or more years before today. roof_year_est is the pipeline's best estimate of when the current roof went on, and roof_age_basis says where that estimate came from (a re-roof permit, an appraiser roof field, or the year built used as a proxy).`,
@@ -87,6 +93,7 @@ LIMIT ${limitOf(limit)}`,
   },
   {
     id: "water-view",
+    predicate: WATER_PREDICATE,
     label: "View of water",
     question: "Which properties have a view of water?",
     rule: `Keep a parcel where water_view_flag is true. The pipeline sets that flag from the parcel centroid's distance to a mapped water body (water_dist_m) and records the method in water_basis.`,
@@ -114,6 +121,7 @@ LIMIT ${limitOf(limit)}`,
   },
   {
     id: "no-sale-10-years",
+    predicate: HOLD_PREDICATE,
     label: "No ownership change in 10+ years",
     question: "Which properties have not exchanged ownership in more than 10 years?",
     rule: `Keep a parcel where years_since_last_sale is 10 or more. years_since_last_sale is measured from last_sale_date, the most recent recorded transfer the pipeline found for that folio.`,
@@ -140,6 +148,7 @@ LIMIT ${limitOf(limit)}`,
   },
   {
     id: "regional-owners",
+    predicate: REGIONAL_PREDICATE,
     label: "Regional owners",
     question: "Which properties have regional owners?",
     rule: `Keep a parcel where owner_region_class is REGIONAL. The pipeline classifies each owner's mailing address against the parcel: LOCAL when the mailing address is inside the county, REGIONAL when it is elsewhere in the south east (FL, GA, SC, AL), NATIONAL for the rest of the United States, FOREIGN otherwise.`,
@@ -167,6 +176,7 @@ LIMIT ${limitOf(limit)}`,
   },
   {
     id: "near-transit",
+    predicate: TRANSIT_PREDICATE,
     label: "Walking distance to transit",
     question: "Which properties are within walking distance of public transportation?",
     rule: `Keep a parcel whose nearest published transit stop is ${WALK_DISTANCE_M} m or less from the parcel centroid, measured as a great circle (haversine) distance. ${WALK_DISTANCE_M} m is the usual 10 minute walk threshold.`,
@@ -194,6 +204,7 @@ LIMIT ${limitOf(limit)}`,
   },
   {
     id: "near-starbucks",
+    predicate: STARBUCKS_PREDICATE,
     label: "Walking distance to Starbucks",
     question: "Which properties are within walking distance of a Starbucks?",
     rule: `Keep a parcel whose nearest Starbucks is ${WALK_DISTANCE_M} m or less from the parcel centroid, measured as a great circle (haversine) distance against the published places table.`,
@@ -220,6 +231,7 @@ LIMIT ${limitOf(limit)}`,
   },
   {
     id: "roof-and-long-hold",
+    predicate: `${ROOF_PREDICATE} AND ${HOLD_PREDICATE}`,
     label: "Roof over 15 years AND no sale in 10 years",
     question:
       "Which properties have roofs older than 15 years and have not exchanged ownership in more than 10 years?",
@@ -252,6 +264,7 @@ LIMIT ${limitOf(limit)}`,
   },
   {
     id: "transit-and-regional",
+    predicate: `${TRANSIT_PREDICATE} AND ${REGIONAL_PREDICATE}`,
     label: "Near transit AND regional owner",
     question: "Which properties are near public transportation and also have regional owners?",
     rule: `Both rules at once: the nearest transit stop is ${WALK_DISTANCE_M} m or less and owner_region_class is REGIONAL. This is the second agent prompt in the demo transcript.`,
@@ -288,6 +301,23 @@ LIMIT ${limitOf(limit)}`,
 
 export const SIX_QUESTIONS = PRESETS.filter((preset) => !preset.combined);
 export const COMBINED_QUESTIONS = PRESETS.filter((preset) => preset.combined);
+
+/**
+ * One query that answers "how many parcels actually match, out of how many published" plus, for
+ * every column the rule depends on, how many rows carry a value at all. A rule that returns nothing
+ * because a source has not loaded yet looks identical to a rule that legitimately matches nothing;
+ * the coverage counts are what tell those two apart on screen.
+ */
+export function statsSql(preset: QuestionPreset): string {
+  const coverage = preset.requires
+    .map((column) => `  count(${column}) AS "coverage_${column}"`)
+    .join(",\n");
+  const coverageClause = coverage.length > 0 ? `,\n${coverage}` : "";
+  return `SELECT
+  count(*) AS total_parcels,
+  count(*) FILTER (WHERE ${preset.predicate}) AS matching_parcels${coverageClause}
+FROM ${VIEW_NAME}`;
+}
 
 export function presetById(id: string): QuestionPreset | undefined {
   return PRESETS.find((preset) => preset.id === id);
