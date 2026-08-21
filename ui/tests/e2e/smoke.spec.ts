@@ -172,7 +172,7 @@ test.describe("agent shell", () => {
     await page.goto("/agent");
     // Nothing stored in this browser and no server key: the page says so and
     // offers the way in, rather than a badge naming one vendor's env var.
-    await expect(page.getByText("no model configured")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("no model configured", { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("link", { name: "add your own key" })).toBeVisible();
 
     await page.getByRole("button", { name: /Which properties have roofs older/ }).click();
@@ -187,17 +187,18 @@ test.describe("model settings", () => {
     await page.goto("/settings");
 
     // The registry drives the UI, so every provider the server supports is here.
-    await expect(page.getByText("Google AI Studio (Gemini)")).toBeVisible();
-    await expect(page.getByText("Vercel AI Gateway")).toBeVisible();
-    await expect(page.getByText("Amazon Bedrock")).toBeVisible();
-    await expect(page.getByText("nothing configured")).toBeVisible();
+    for (const label of ["Google AI Studio (Gemini)", "Groq", "Cerebras", "Vercel AI Gateway", "Anthropic", "Amazon Bedrock"]) {
+      await expect(page.getByText(label).first()).toBeVisible();
+    }
+    await expect(page.getByText("nothing configured", { exact: true })).toBeVisible();
 
     // The warning has to be in plain words, not buried in a tooltip.
     await expect(page.getByText(/saved in .*localStorage.* in this browser/i).first()).toBeVisible();
 
-    await page.getByRole("textbox").fill("test-key-not-a-real-credential-0000");
+    // The key field is a password input, so it is deliberately not a textbox role.
+    await page.locator('input[type="password"]').fill("test-key-not-a-real-credential-0000");
     await page.getByRole("button", { name: "save to this browser" }).click();
-    await expect(page.getByText("your key")).toBeVisible();
+    await expect(page.getByText("your key", { exact: true })).toBeVisible();
 
     // Stored in this browser, and nowhere else.
     const stored = await page.evaluate(() => window.localStorage.getItem("duval-oracle.agent.llm"));
@@ -205,11 +206,11 @@ test.describe("model settings", () => {
 
     // The agent page reads the same store and names the model that will answer.
     await page.goto("/agent");
-    await expect(page.getByText("google:gemini-3.7-flash")).toBeVisible();
+    await expect(page.getByText("google:gemini-3.7-flash", { exact: true })).toBeVisible();
 
     await page.goto("/settings");
     await page.getByRole("button", { name: "clear stored key" }).click();
-    await expect(page.getByText("nothing configured")).toBeVisible();
+    await expect(page.getByText("nothing configured", { exact: true })).toBeVisible();
     expect(await page.evaluate(() => window.localStorage.getItem("duval-oracle.agent.llm"))).toBeNull();
   });
 });
