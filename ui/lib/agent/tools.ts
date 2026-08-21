@@ -337,11 +337,16 @@ export function createAgentTools(context: ToolContext, trace: ToolTrace) {
         .min(1)
         .max(PRESET_MAX_LIMIT)
         .optional()
-        .describe(`Row cap, 1 to ${PRESET_MAX_LIMIT}. Default ${PRESET_DEFAULT_LIMIT}.`),
+        .describe(
+          `Row cap, up to ${PRESET_MAX_LIMIT}. Use it to ask for MORE than the default ${PRESET_DEFAULT_LIMIT}; a smaller number is ignored, because these rows are the evidence handed to the caller and shrinking them to suit an inline table would throw away the proof.`,
+        ),
     }),
     execute: async ({ name, limit }) => {
       const started = Date.now();
-      const effectiveLimit = Math.min(limit ?? PRESET_DEFAULT_LIMIT, PRESET_MAX_LIMIT);
+      // Floored, not just capped. The model asks for a small limit when it only intends to print a
+      // few rows, but this result IS the evidence returned alongside the answer, so a display
+      // preference must not shrink the proof. Asking for more than the default still works.
+      const effectiveLimit = Math.min(Math.max(limit ?? PRESET_DEFAULT_LIMIT, PRESET_DEFAULT_LIMIT), PRESET_MAX_LIMIT);
       const input = { name, limit: effectiveLimit };
       try {
         const preset = presetFor(name);

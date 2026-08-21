@@ -129,9 +129,11 @@ describe("agent loop with a mocked model", () => {
     expect(response.tool_calls).toHaveLength(1);
     const call = response.tool_calls[0];
     expect(call.name).toBe("preset_question");
-    expect(call.input).toEqual({ name: "roof15_and_no_sale10y", limit: 5 });
+    // the transcript records the limit that actually ran, not the one asked for: a request below
+    // the default is floored so the evidence set survives
+    expect(call.input).toEqual({ name: "roof15_and_no_sale10y", limit: 25 });
     expect(call.row_count).toBeGreaterThan(0);
-    expect(call.row_count).toBeLessThanOrEqual(5);
+    expect(call.row_count).toBeLessThanOrEqual(25);
     expect(call.total_matched).toBeGreaterThanOrEqual(call.row_count ?? 0);
     expect(call.elapsed_ms).toBeGreaterThanOrEqual(0);
     expect(call.output_summary).toContain("roof-and-long-hold");

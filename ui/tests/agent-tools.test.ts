@@ -8,7 +8,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { existsSync } from "node:fs";
 import { openPropertyDb, SAMPLE_PARQUET_PATH, resolveQueryTableSource, toPlain, type PropertyDb } from "@/lib/agent/db";
-import { createAgentTools, newTrace, predicateOf, withoutTrailingLimit, RUN_SQL_MAX_LIMIT, type ToolTrace } from "@/lib/agent/tools";
+import { createAgentTools, newTrace, predicateOf, withoutTrailingLimit, RUN_SQL_MAX_LIMIT, PRESET_DEFAULT_LIMIT, type ToolTrace } from "@/lib/agent/tools";
 import { PRESET_NAME_LIST, presetFor } from "@/lib/agent/schema";
 import { ALL_EXPECTED_COLUMNS } from "@/lib/columns";
 
@@ -146,9 +146,11 @@ describe("preset_question", () => {
       evidence_columns: string[];
       rule: string;
       assumptions: string[];
+      // 10 is deliberately below the default: the floor should ignore it, because these rows are
+      // the evidence returned to the caller and a display preference must not shrink the proof.
     }>(t.preset_question, { name, limit: 10 });
     expect(output.row_count, `${name} returned no rows`).toBeGreaterThan(0);
-    expect(output.row_count).toBeLessThanOrEqual(10);
+    expect(output.row_count).toBeLessThanOrEqual(PRESET_DEFAULT_LIMIT);
     expect(output.total_matched).toBeGreaterThanOrEqual(output.row_count);
     expect(output.rule.length).toBeGreaterThan(20);
     for (const column of output.evidence_columns) expect(Object.keys(output.rows[0])).toContain(column);
