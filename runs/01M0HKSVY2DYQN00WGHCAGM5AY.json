@@ -1,0 +1,185 @@
+{
+  "run_id": "01M0HKSVY2DYQN00WGHCAGM5AY",
+  "county": "duval",
+  "started_at": "2026-08-21 07:33:11.235",
+  "finished_at": "2026-08-21 07:34:50.731",
+  "status": "completed",
+  "trigger": "workflow_dispatch",
+  "git_sha": "d6204f2a3b14a06a11f656498d62994000d4a69e",
+  "tracks": [
+    "appraisal",
+    "sales",
+    "geometry"
+  ],
+  "window": null,
+  "sources": [
+    {
+      "track": "appraisal",
+      "source_system": "duval_appraiser",
+      "target_table": "parcels",
+      "source_url": "https://floridarevenue.com/property/dataportal/Documents/PTO%20Data%20Portal/Tax%20Roll%20Data%20Files/NAL/2026P/Duval%2026%20Preliminary%20NAL%202026.zip",
+      "artifact_path": "appraisal/duval-26-preliminary-nal-2026.zip",
+      "artifact_sha256": "4ae67aa7550d9d9051c44f01a52ab335897af4959e9625e9ae1e007d77521691",
+      "artifact_etag": "\"{66BC6F3F-72F1-4C05-9B52-29AABC7DDFA8},3\"",
+      "artifact_last_modified": "Mon, 27 Jul 2026 11:06:08 GMT",
+      "artifact_bytes": 29080532,
+      "download_status": "downloaded",
+      "rows_staged": 404023,
+      "inserted": 404023,
+      "updated": 0,
+      "unchanged": 0,
+      "missing_in_source": 0,
+      "table_total_after": 404023,
+      "delta_vs_prev_total": 404023,
+      "started_at": "2026-08-21T07:33:11.269Z",
+      "finished_at": "2026-08-21T07:33:35.719Z",
+      "status": "completed",
+      "limitations": [
+        "FDOR posts only the current roll type; prior years by email request",
+        "No roof attributes in the bulk roll (ACT_YR_BLT/EFF_YR_BLT used as roof-age proxy)",
+        "Sale history limited to the two most recent sales per parcel (SALE_*1/2)"
+      ],
+      "notes": {
+        "rawCsvRows": 404023
+      },
+      "error": null
+    },
+    {
+      "track": "sales",
+      "source_system": "fdor_sdf",
+      "target_table": "sales_history",
+      "source_url": "https://floridarevenue.com/property/dataportal/Documents/PTO%20Data%20Portal/Tax%20Roll%20Data%20Files/SDF/2026P/Duval%2026%20Preliminary%20SDF%202026.zip",
+      "artifact_path": "sales/duval-26-preliminary-sdf-2026.zip",
+      "artifact_sha256": "741fff05d164c1e63f7e2ad8a3b0d51db81fa097cd37ea070b698404badb5402",
+      "artifact_etag": "\"{2FB4174B-986A-4F1C-AD56-21F73E584F13},3\"",
+      "artifact_last_modified": "Mon, 27 Jul 2026 11:03:47 GMT",
+      "artifact_bytes": 1122453,
+      "download_status": "downloaded",
+      "rows_staged": 64532,
+      "inserted": 64532,
+      "updated": 0,
+      "unchanged": 0,
+      "missing_in_source": 0,
+      "table_total_after": 64532,
+      "delta_vs_prev_total": 64532,
+      "started_at": "2026-08-21T07:33:35.723Z",
+      "finished_at": "2026-08-21T07:33:38.071Z",
+      "status": "completed",
+      "limitations": [
+        "Sale dates carry year+month only (day unknown; stored as first of month)",
+        "Monthly PA sales files (jacksonville.gov data offerings) rotate GUID URLs and are US-egress only; not yet wired"
+      ],
+      "notes": {
+        "sdfRows": 64532,
+        "stagedBySource": {
+          "SDF": 64532
+        }
+      },
+      "error": null
+    },
+    {
+      "track": "geometry",
+      "source_system": "fdor_par",
+      "target_table": "parcel_geometry",
+      "source_url": "https://floridarevenue.com/property/dataportal/Documents/PTO%20Data%20Portal/Map%20Data/2026F/2026F%20PAR/duval_2026Ppar.zip",
+      "artifact_path": "geometry/duval_2026ppar.zip",
+      "artifact_sha256": "ba461d7ef298801fe50fd28a880c2504e5afdcaff9384c6bf8521f9556963244",
+      "artifact_etag": "\"{DC343265-01E9-4E74-9894-75E0DA1A24FF},2\"",
+      "artifact_last_modified": "Fri, 07 Aug 2026 12:43:19 GMT",
+      "artifact_bytes": 192382098,
+      "download_status": "downloaded",
+      "rows_staged": 405716,
+      "inserted": 405716,
+      "updated": 0,
+      "unchanged": 0,
+      "missing_in_source": 0,
+      "table_total_after": 405716,
+      "delta_vs_prev_total": 405716,
+      "started_at": "2026-08-21T07:33:38.076Z",
+      "finished_at": "2026-08-21T07:34:43.981Z",
+      "status": "completed",
+      "limitations": [
+        "192 MB archive; centroids computed from polygons (not rooftop points)",
+        "Parcels present in NAL but missing from the shapefile get no coordinates"
+      ],
+      "notes": {
+        "shapefile": "duval_2026Ppar.shp",
+        "featureCount": 405716,
+        "sourceCrs": "NAD83(HARN) / Florida East (ftUS) [EPSG:2881]",
+        "readMs": 9279,
+        "parcelsWithCoordinates": 403813,
+        "parcelsTotal": 404023
+      },
+      "error": null
+    }
+  ],
+  "limitations": [
+    "appraisal: FDOR posts only the current roll type; prior years by email request",
+    "appraisal: No roof attributes in the bulk roll (ACT_YR_BLT/EFF_YR_BLT used as roof-age proxy)",
+    "appraisal: Sale history limited to the two most recent sales per parcel (SALE_*1/2)",
+    "sales: Sale dates carry year+month only (day unknown; stored as first of month)",
+    "sales: Monthly PA sales files (jacksonville.gov data offerings) rotate GUID URLs and are US-egress only; not yet wired",
+    "geometry: 192 MB archive; centroids computed from polygons (not rooftop points)",
+    "geometry: Parcels present in NAL but missing from the shapefile get no coordinates"
+  ],
+  "totals": {
+    "parcels": 404023,
+    "parcel_geometry": 405716,
+    "sales_history": 64532,
+    "permits": 0,
+    "contractors": 0,
+    "businesses": 0,
+    "places": 0,
+    "transit_stops": 0,
+    "water_bodies": 0,
+    "address_points": 0,
+    "entity_links": 0,
+    "derived.properties_features": 404023
+  },
+  "artifacts": {
+    "queryTable": {
+      "path": "query-table.parquet",
+      "rows": 404023,
+      "bytes": 29088907,
+      "sha256": "09173665408108bc1a7304dea34dc744af098a7899dac8bba9752f725a7fad6c",
+      "cid": "QmZxp9utUS3ghR7ZdbSjsCt2nWXuz37Hsyyvkt96P62NKE",
+      "cidV1": "bafybeifmwqsq2vlzz6et3hl7wt4ljhxp57igypf3vn3cfno5auje7jrhru",
+      "validationOk": true,
+      "problems": []
+    },
+    "tables": {
+      "parcels": {
+        "path": "tables/parcels.parquet",
+        "rows": 404023,
+        "bytes": 38911589,
+        "sha256": "0b42b4c5497e0cef73216feff26f8fac6a40ac4a1c305266f59a57fa48ce52ad",
+        "cid": "QmfJ9XTYJhVdioDsBrGidsp9XjxcxgLZFkum1QFV1dFaRY",
+        "cidV1": "bafybeih36kckjqo6ovood3boppxd6xnhjsdzp5rpfbzt6asjapqimdhuum"
+      },
+      "parcel_geometry": {
+        "path": "tables/parcel_geometry.parquet",
+        "rows": 405716,
+        "bytes": 25307296,
+        "sha256": "6ab8ed9108802837c28936d20ffa9500280c03c35b39711ab4e0b1360e0f962b",
+        "cid": "Qmb9bFoEmXCDng41ZxNuNhiScJrmvF23X6DhwBhULmNPbq",
+        "cidV1": "bafybeif6kkrnvgwlyfmbcr7omtrrmucezfl4nonn7qxli4bakjhk2cnkuq"
+      },
+      "sales_history": {
+        "path": "tables/sales_history.parquet",
+        "rows": 64532,
+        "bytes": 3076215,
+        "sha256": "13ac943ec76a203ae7b5a42a37de129f141b717200006d372f729be607f2b678",
+        "cid": "QmSrvEwvRD257Cd4nMvtV587ZrCnHsCuXQKoXqamTRfhqd",
+        "cidV1": "bafybeicdf655rm7wcilhh5peo2ri7m77wevtmuoooohqbqkyi4g2ibph2q"
+      }
+    },
+    "coverage": {
+      "path": "dataset-coverage.json",
+      "bytes": 8004,
+      "sha256": "eb0c49b18c340202e85582c5c966bca7ebc8e532881f96fd464559b4cd95953b",
+      "cid": "QmRFhQvSziXJQgk5RCxypsdjLuqHaXoUmxBFAtPVuU3r2z",
+      "cidV1": "bafybeibljy3l4hhzlq6q3r2gcoyq4p7kmok32y524bnhswv2orcvkeii24"
+    }
+  },
+  "error": null
+}
