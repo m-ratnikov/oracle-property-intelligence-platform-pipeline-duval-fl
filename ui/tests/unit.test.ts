@@ -240,3 +240,55 @@ describe("geo", () => {
     expect(isPlausibleDuvalPoint(null, null)).toBe(false);
   });
 });
+
+describe("run history field names match what the pipeline emits", () => {
+  // The pipeline writes `track` and `rows_staged`. Reading `source`/`rows_fetched` only made every
+  // row on the runs page read "unknown" with 0 fetched, which is the opposite of the evidence that
+  // page exists to show.
+  const realShape = {
+    county: "duval",
+    runs: [
+      {
+        run_id: "01M0HVMB6XDGHJ5R0BY64HWH8Z",
+        started_at: "2026-08-21T10:18:37Z",
+        trigger: "workflow_dispatch",
+        sources: [
+          {
+            track: "appraisal",
+            source_system: "duval_appraiser",
+            source_url: "https://example.test/nal.zip",
+            rows_staged: 404023,
+            inserted: 0,
+            updated: 0,
+            unchanged: 404023,
+            table_total_after: 404023,
+            limitations: ["FDOR posts only the current roll type"],
+          },
+          { track: "pa_detail", rows_staged: 252, inserted: 252, updated: 0, unchanged: 0, limitations: [] },
+        ],
+      },
+    ],
+  };
+
+  it("reads track and rows_staged", () => {
+    const parsed = parseRunHistory(realShape);
+    const names = parsed.runs[0]!.sources.map((s) => s.source);
+    expect(names).toEqual(["appraisal", "pa_detail"]);
+    expect(parsed.runs[0]!.sources[0]!.rows_fetched).toBe(404023);
+    // distinct source count is what the Sources tracked stat shows
+    expect(new Set(names).size).toBe(2);
+  });
+
+  it("derives a per-source delta from inserted plus updated when none is published", () => {
+    const parsed = parseRunHistory(realShape);
+    expect(parsed.runs[0]!.sources[0]!.delta_vs_previous).toBe(0);
+    expect(parsed.runs[0]!.sources[1]!.delta_vs_previous).toBe(252);
+  });
+
+  it("still reads the older field names", () => {
+    const parsed = parseRunHistory({
+      runs: [{ run_id: "r", sources: [{ source: "legacy", rows_fetched: 7, limitations: [] }] }],
+    });
+    expect(parsed.runs[0]!.sources[0]).toMatchObject({ source: "legacy", rows_fetched: 7 });
+  });
+});

@@ -146,6 +146,12 @@ const KNOWN_RUN_KEYS = new Set([
   "artifacts",
 ]);
 
+/** Sum two optional counts, keeping null when neither side reported anything. */
+function addOrNull(a: number | null, b: number | null): number | null {
+  if (a === null && b === null) return null;
+  return (a ?? 0) + (b ?? 0);
+}
+
 export function parseRunHistory(input: unknown): RunHistory {
   if (!isRecord(input)) return { county: null, generatedAt: null, runs: [] };
   const runsRaw = Array.isArray(input.runs) ? input.runs : [];
@@ -155,14 +161,19 @@ export function parseRunHistory(input: unknown): RunHistory {
     finished_at: str(run.finished_at),
     trigger: str(run.trigger),
     git_sha: str(run.git_sha),
+    // The pipeline names these `track` and `rows_staged`; earlier field names are still accepted so
+    // an older run-history.json keeps rendering. Reading only the old names made every row on the
+    // runs page say "unknown" with 0 fetched, on the page whose whole job is to evidence ingestion.
     sources: (Array.isArray(run.sources) ? run.sources : []).filter(isRecord).map((source) => ({
-      source: str(source.source) ?? "unknown",
-      rows_fetched: num(source.rows_fetched),
+      source: str(source.track) ?? str(source.source) ?? str(source.source_system) ?? "unknown",
+      rows_fetched: num(source.rows_staged) ?? num(source.rows_fetched),
       inserted: num(source.inserted),
       updated: num(source.updated),
       unchanged: num(source.unchanged),
-      delta_vs_previous: num(source.delta_vs_previous),
-      artifact_sha256: str(source.artifact_sha256),
+      // not emitted per source; the change this run made is what was inserted plus what changed
+      delta_vs_previous:
+        num(source.delta_vs_previous) ?? addOrNull(num(source.inserted), num(source.updated)),
+      artifact_sha256: str(source.source_sha256) ?? str(source.artifact_sha256),
       source_url: str(source.source_url),
       limitations: strList(source.limitations),
     })),
