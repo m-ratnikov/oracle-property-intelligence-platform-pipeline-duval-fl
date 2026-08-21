@@ -53,7 +53,7 @@ function RunDetail({
   publicationOf,
 }: {
   run: PipelineRun;
-  publicationOf: (artifact: PipelineRun["artifacts"][number]) => ArtifactPublication;
+  publicationOf: (artifact: PipelineRun["artifacts"][number], run: PipelineRun) => ArtifactPublication;
 }) {
   const limitations = run.sources.flatMap((source) =>
     source.limitations.map((limitation) => ({ source: source.source, limitation })),
@@ -142,7 +142,7 @@ function RunDetail({
               <ArtifactCard
                 key={`${run.run_id}-${artifact.name}`}
                 artifact={artifact}
-                publication={publicationOf(artifact)}
+                publication={publicationOf(artifact, run)}
               />
             ))}
           </div>
@@ -170,7 +170,7 @@ function RunRow({
   summary: RunSummary;
   open: boolean;
   onToggle: () => void;
-  publicationOf: (artifact: PipelineRun["artifacts"][number]) => ArtifactPublication;
+  publicationOf: (artifact: PipelineRun["artifacts"][number], run: PipelineRun) => ArtifactPublication;
 }) {
   const run = summary.run;
   const sourceCounts = [
@@ -258,12 +258,12 @@ export default function RunsPage() {
   const artifactsIndex = useJson(config.artifactsIndexUrl, parseArtifactsIndex);
   const [openRun, setOpenRun] = useState<string | null>(null);
 
-  const publicationOf = useMemo(
-    () => publicationLookup(artifactsIndex.data),
-    [artifactsIndex.data],
-  );
-
   const runs = useMemo(() => history.data?.runs ?? [], [history.data]);
+  // The history is part of the join: see the comment on publicationLookup.
+  const publicationOf = useMemo(
+    () => publicationLookup(artifactsIndex.data, runs),
+    [artifactsIndex.data, runs],
+  );
   const summaries = useMemo(() => summariseRuns(runs), [runs]);
   const ingestion = useMemo(() => summaries.filter((s) => s.kind === "ingestion"), [summaries]);
   const consolidation = useMemo(

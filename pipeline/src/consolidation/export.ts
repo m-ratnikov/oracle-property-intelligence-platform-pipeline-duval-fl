@@ -6,6 +6,7 @@ import { COUNTY } from "../config.js";
 import { all, count, one, q, scalar, tableExists } from "../db.js";
 import type { Logger } from "../log.js";
 import { computeCid } from "../publish/cid.js";
+import { describeQueryTableArtifact, type ExportResult, type QueryTableArtifact, type ValidationReport } from "../features/export.js";
 
 /**
  * Elephant open-data consolidation export (county-open-data-publish convention):
@@ -311,6 +312,40 @@ export async function exportConsolidation(conn: DuckDBConnection, opts: Consolid
 }
 
 /** Quick stats for run_log / status. */
+/**
+ * The `artifacts` record a consolidation pass writes to its run log.
+ *
+ * It publishes two things and must record both as published objects. The open-data index is
+ * CID-addressed under its own publish step and carries no object name in this publish plan, so it
+ * stays as it was. The query table does have one: the pass rebuilds `query-table.parquet` with
+ * property_cid filled in and republishes it, which is the copy the artifacts index ends up
+ * serving. Recording it under the same object name and CID shape as the ingestion run is what lets
+ * a reader follow the run to the bytes on the gateway.
+ */
+export async function consolidationArtifacts(opts: {
+  outDir: string;
+  stats: ConsolidationStats;
+  exported: ExportResult;
+  validation: ValidationReport;
+}): Promise<{ openData: Record<string, unknown>; queryTable: QueryTableArtifact & { propertyCidFilled: number } }> {
+  const { outDir, stats, exported, validation } = opts;
+  return {
+    openData: {
+      outDir,
+      indexCid: stats.indexCid,
+      manifestCid: stats.manifestCid,
+      propertyCount: stats.totalInState,
+      totalBytes: stats.totalBytes,
+      shards: stats.shards,
+    },
+    queryTable: {
+      ...(await describeQueryTableArtifact(exported, validation)),
+      // The reason this pass exists, kept alongside the published-object fields.
+      propertyCidFilled: validation.propertyCidFilled,
+    },
+  };
+}
+
 export async function consolidationStateStats(conn: DuckDBConnection): Promise<{ properties: number; bytes: number; lastExportedAt: string | null }> {
   if (!(await tableExists(conn, "main", "consolidation_state"))) return { properties: 0, bytes: 0, lastExportedAt: null };
   const r = await one<{ n: string | number; b: string | number | null; last: string | null }>(

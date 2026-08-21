@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { ulid } from "ulid";
 import { getPaths } from "./config.js";
-import { consolidationStateStats, exportConsolidation } from "./consolidation/export.js";
+import { consolidationArtifacts, consolidationStateStats, exportConsolidation } from "./consolidation/export.js";
 import { formatOpenDataResult, publishOpenData } from "./publish/openData.js";
 import { all, ensureSchema, openDb, q } from "./db.js";
 import { buildFeatures } from "./features/build.js";
@@ -133,14 +133,17 @@ async function main(): Promise<void> {
         const asOf = new Date().toISOString().slice(0, 10);
         await buildFeatures(db.conn, { asOf, runId });
         const qt = join(paths.publishDir, "query-table.parquet");
-        await exportQueryTable(db.conn, qt);
+        const exported = await exportQueryTable(db.conn, qt);
         const report = await validateQueryTable(db.conn, qt);
+        // Record the parquet this pass just republished as a published object, under the same name
+        // and CID shape the ingestion run uses, so it joins the published artifacts index.
+        const artifacts = await consolidationArtifacts({ outDir, stats, exported, validation: report });
         const finishedAt = new Date().toISOString();
         const sources = [{ track: "consolidation", source_system: "duval_consolidation", target_table: "consolidation_state", source_url: "derived", rows_staged: stats.candidates, inserted: stats.exported, updated: 0, unchanged: stats.unchanged, missing_in_source: 0, table_total_after: stats.totalInState, status: "completed", started_at: startedAt, finished_at: finishedAt, limitations: [], notes: { shards: stats.shards, totalBytes: stats.totalBytes, indexCid: stats.indexCid, manifestCid: stats.manifestCid, ms: stats.ms, limit, since } }];
         await db.conn.run(`INSERT INTO run_log_sources VALUES (${q(runId)}, 'consolidation', 'duval_consolidation', 'consolidation_state', 'derived', ${q(outDir)}, NULL, NULL, NULL, NULL, 'derived', ${stats.candidates}, ${stats.exported}, 0, ${stats.unchanged}, 0, ${stats.totalInState}, ${stats.exported}, ${q(startedAt)}::TIMESTAMP, ${q(finishedAt)}::TIMESTAMP, 'completed', '[]'::JSON, NULL)`);
         await db.conn.run(`UPDATE run_log SET finished_at = ${q(finishedAt)}::TIMESTAMP, status = 'completed', sources = ${q(JSON.stringify(sources))}::JSON, limitations = '[]'::JSON,
           totals = ${q(JSON.stringify({ consolidation_state: stats.totalInState, totalBytes: stats.totalBytes, shards: stats.shards }))}::JSON,
-          artifacts = ${q(JSON.stringify({ openData: { outDir, indexCid: stats.indexCid, manifestCid: stats.manifestCid, propertyCount: stats.totalInState, totalBytes: stats.totalBytes, shards: stats.shards }, queryTable: { rows: report.rows, propertyCidFilled: report.propertyCidFilled } }))}::JSON WHERE run_id = ${q(runId)}`);
+          artifacts = ${q(JSON.stringify(artifacts))}::JSON WHERE run_id = ${q(runId)}`);
         await writeRunHistoryFiles(db, paths, runId);
         process.stdout.write(formatValidation(report) + "\n");
         process.stdout.write(`\n=== CONSOLIDATION ${runId} ===\ncandidates ${stats.candidates}, exported ${stats.exported}, unchanged ${stats.unchanged}, in state ${stats.totalInState}, shards ${stats.shards}, bytes ${stats.totalBytes}, index cid ${stats.indexCid}, ${Math.round(stats.ms / 1000)} s\n`);

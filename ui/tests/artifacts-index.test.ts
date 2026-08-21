@@ -58,6 +58,20 @@ const publishedIndex = {
         "https://ipfs.filebase.io/ipns/k51qzi5uqu5dgefy44zrdzqpp6pqikkged7vea2lxu8354kfl1ah7ijrl2pwum",
     },
     {
+      name: "run-history.json",
+      key: "runs/duval/run-history.json",
+      contentType: "application/json",
+      bytes: 255381,
+      sha256: "fde53e118f78a882fdf9bb46b6290ce784937b744439d7c672363faa2c4414b2",
+      cid: "QmZ4wobcACVeMEaS45wPHNSuNykB2zjgigccmikjoEs4hE",
+      cidV1: "bafybeie7nklz3jbwaqg44nbpg6djkti32yf4eaiuo27at2xy4w642sgx5e",
+      url: "https://ipfs.filebase.io/ipfs/bafybeie7nklz3jbwaqg44nbpg6djkti32yf4eaiuo27at2xy4w642sgx5e",
+      ipnsLabel: "oracle-run-history-duval",
+      ipnsName: "k51qzi5uqu5dl3zmapadjh90auy4k6gtr6w52zg6ozeu64kzbiwwgw8k9ef6ny",
+      ipnsUrl:
+        "https://ipfs.filebase.io/ipns/k51qzi5uqu5dl3zmapadjh90auy4k6gtr6w52zg6ozeu64kzbiwwgw8k9ef6ny",
+    },
+    {
       name: "tables/parcels.parquet",
       key: "tables/duval/parcels.parquet",
       contentType: "application/vnd.apache.parquet",
@@ -139,6 +153,8 @@ const runHistory = parseRunHistory({
           path: "dataset-coverage.json",
           cid: "QmTiRGXkPeMDS5mNqT5cFDorvfvyLVjbhqdeefRY1Mauc1",
         },
+        // Listed in the index at another CID, and no later run in this history republished it.
+        runHistory: { path: "run-history.json", cid: "QmNeverPublishedRunHistoryFixture" },
       },
     },
     {
@@ -148,6 +164,15 @@ const runHistory = parseRunHistory({
       sources: [{ source: "consolidation", status: "completed" }],
       artifacts: {
         openData: { indexCid: "QmS6NTWffWMTuLErpz9gFfkvKfz3Z7V8eRxDK6C69mycxf", shards: 41 },
+        // Since the pipeline fix, the pass records the parquet it republished with property_cid
+        // filled in. This is the copy the artifacts index serves.
+        queryTable: {
+          path: "query-table.parquet",
+          rows: 404023,
+          bytes: 49535718,
+          cid: "QmVxUjpeezfmdWxMYQEMBQccNmraLcWNMqZp1JfV6MjBnW",
+          propertyCidFilled: 404023,
+        },
       },
     },
   ],
@@ -155,11 +180,22 @@ const runHistory = parseRunHistory({
 
 const ingestion = runHistory.runs.find((run) => run.kind === "ingestion");
 const consolidation = runHistory.runs.find((run) => run.kind === "consolidation");
+if (!ingestion || !consolidation) throw new Error("fixture is missing a run");
+
 const artifactNamed = (name: string): RunArtifact => {
-  const found = ingestion?.artifacts.find((artifact) => artifact.name === name);
+  const found = ingestion.artifacts.find((artifact) => artifact.name === name);
   if (!found) throw new Error(`fixture has no artifact ${name}`);
   return found;
 };
+const consolidationArtifactNamed = (name: string): RunArtifact => {
+  const found = consolidation.artifacts.find((artifact) => artifact.name === name);
+  if (!found) throw new Error(`fixture has no consolidation artifact ${name}`);
+  return found;
+};
+
+/** The lookup as the pages build it: the index plus the loaded history. */
+const lookupWithHistory = () =>
+  publicationLookup(parseArtifactsIndex(publishedIndex), runHistory.runs);
 
 describe("the join key between a run record and the published artifacts index", () => {
   it("is the published object name, which a run record carries as `path`", () => {
@@ -169,7 +205,7 @@ describe("the join key between a run record and the published artifacts index", 
     expect(artifact.name).toBe("tables.parcels");
     expect(artifact.path).toBe("tables/parcels.parquet");
 
-    const resolved = publicationLookup(parseArtifactsIndex(publishedIndex))(artifact);
+    const resolved = lookupWithHistory()(artifact, ingestion);
     expect(resolved.status).toBe("published");
     expect(resolved.url).toBe(
       "https://ipfs.filebase.io/ipfs/bafybeido7fgbfeqc22p2ra6mbcvnypxzxbu3hsa5or3gpghrfnklkzfbau",
@@ -178,17 +214,17 @@ describe("the join key between a run record and the published artifacts index", 
 
   it("is not the index's `key`, which is a bucket path no run record carries", () => {
     const keys = parseArtifactsIndex(publishedIndex).artifacts.map((entry) => entry.key);
-    const paths = ingestion?.artifacts.map((artifact) => artifact.path) ?? [];
+    const paths = ingestion.artifacts.map((artifact) => artifact.path);
     expect(keys).toContain("tables/duval/parcels.parquet");
     for (const key of keys) expect(paths).not.toContain(key);
   });
 });
 
 describe("an artifact the index lists at exactly this run's CID", () => {
-  const lookup = publicationLookup(parseArtifactsIndex(publishedIndex));
+  const lookup = lookupWithHistory();
 
   it("takes its gateway URL and IPNS name from the index", () => {
-    const resolved = lookup(artifactNamed("coverage"));
+    const resolved = lookup(artifactNamed("coverage"), ingestion);
     expect(resolved).toMatchObject({
       status: "published",
       url: "https://ipfs.filebase.io/ipfs/bafybeicp3yb4fl3i6ixgcddmlxktpo5wg346kqlaohompoyllqmxfbtrmy",
@@ -198,7 +234,7 @@ describe("an artifact the index lists at exactly this run's CID", () => {
   });
 
   it("shows no IPNS name for an entity table, because the publisher mints none", () => {
-    const resolved = lookup(artifactNamed("tables.parcels"));
+    const resolved = lookup(artifactNamed("tables.parcels"), ingestion);
     expect(resolved.status).toBe("published");
     expect(resolved.url).not.toBeNull();
     expect(resolved.ipnsName).toBeNull();
@@ -208,7 +244,7 @@ describe("an artifact the index lists at exactly this run's CID", () => {
     const html = renderToStaticMarkup(
       createElement(ArtifactCard, {
         artifact: artifactNamed("coverage"),
-        publication: lookup(artifactNamed("coverage")),
+        publication: lookup(artifactNamed("coverage"), ingestion),
       }),
     );
     expect(html).toContain(
@@ -221,34 +257,99 @@ describe("an artifact the index lists at exactly this run's CID", () => {
   });
 });
 
-describe("an artifact the index lists at a different CID", () => {
-  const lookup = publicationLookup(parseArtifactsIndex(publishedIndex));
+/**
+ * The consolidation pass republishes the query table seconds after every ingestion run, so the
+ * ingestion run's copy is superseded on every run, forever. That has to read as the pipeline
+ * working, not as a fault, or the most prominent card on the page is permanently alarming.
+ */
+describe("an artifact a later run in the history republished", () => {
+  const lookup = lookupWithHistory();
   const artifact = artifactNamed("queryTable");
 
-  it("is reported as replaced rather than papered over", () => {
-    const resolved = lookup(artifact);
-    expect(resolved.status).toBe("replaced");
-    expect(resolved.url).toBeNull();
+  it("is superseded, not replaced, and names the run that took over", () => {
+    const resolved = lookup(artifact, ingestion);
+    expect(resolved.status).toBe("superseded");
+    expect(resolved.supersededBy).toMatchObject({
+      runId: "01M0JJSM4Y61416J03ZKD44KFG",
+      kind: "consolidation",
+      servesIndexCid: true,
+    });
     expect(resolved.indexCid).toBe("QmVxUjpeezfmdWxMYQEMBQccNmraLcWNMqZp1JfV6MjBnW");
   });
 
-  it("offers no gateway URL for bytes that are not the published ones", () => {
-    const html = renderToStaticMarkup(
-      createElement(ArtifactCard, { artifact, publication: lookup(artifact) }),
+  it("still offers no gateway URL for this run's bytes, only for the copy the index serves", () => {
+    const resolved = lookup(artifact, ingestion);
+    expect(resolved.url).toBeNull();
+    expect(resolved.currentUrl).toBe(
+      "https://ipfs.filebase.io/ipfs/bafybeidrf5y2w6rmle4m3lkisqdmwt2ejhb2ryyvzpxogk4xcaerkenuu4",
     );
-    expect(html).toContain("the artifacts index publishes a different CID under this name");
-    expect(html).toContain("A later publish replaced this object");
-    // The run&#x27;s own CID must never be turned into a gateway URL.
+  });
+
+  it("says so neutrally, and links to what the index serves", () => {
+    const html = renderToStaticMarkup(
+      createElement(ArtifactCard, { artifact, publication: lookup(artifact, ingestion) }),
+    );
+    expect(html).toContain("Superseded by the consolidation pass that followed it");
+    expect(html).toContain("01M0JJSM4Y");
+    expect(html).toContain(
+      'href="https://ipfs.filebase.io/ipfs/bafybeidrf5y2w6rmle4m3lkisqdmwt2ejhb2ryyvzpxogk4xcaerkenuu4"',
+    );
+    expect(html).toContain('rel="noopener noreferrer"');
+    // Neutral, not alarming, and never a claim that nothing was published.
+    expect(html).not.toContain("text-warn");
+    expect(html).not.toContain("never published");
+    // The run's own CID is still never turned into a gateway URL.
     expect(html).not.toContain("ipfs/QmVexSr6UfhavNWkRPWf3MXpBbRvWEs7bfgkUE8Wznav3z");
+  });
+
+  it("resolves the successor's own card as published", () => {
+    const resolved = lookup(consolidationArtifactNamed("queryTable"), consolidation);
+    expect(resolved.status).toBe("published");
+    expect(resolved.url).toBe(
+      "https://ipfs.filebase.io/ipfs/bafybeidrf5y2w6rmle4m3lkisqdmwt2ejhb2ryyvzpxogk4xcaerkenuu4",
+    );
+    expect(resolved.ipnsName).toBe(
+      "k51qzi5uqu5djeq93ll0n7gsrzwfry2jmxb3xa66tcthufpjxv0c3odj1hpq4r",
+    );
+  });
+});
+
+describe("an artifact the index lists at a different CID that nothing explains", () => {
+  const lookup = lookupWithHistory();
+  const artifact = artifactNamed("runHistory");
+
+  it("keeps the warn tone, because this is the real never-published signal", () => {
+    const resolved = lookup(artifact, ingestion);
+    expect(resolved.status).toBe("replaced");
+    expect(resolved.url).toBeNull();
+    expect(resolved.supersededBy).toBeNull();
+    expect(resolved.indexCid).toBe("QmZ4wobcACVeMEaS45wPHNSuNykB2zjgigccmikjoEs4hE");
+  });
+
+  it("says plainly that this run's copy was never published", () => {
+    const html = renderToStaticMarkup(
+      createElement(ArtifactCard, { artifact, publication: lookup(artifact, ingestion) }),
+    );
+    expect(html).toContain("no later run in this history");
+    expect(html).toContain("never published");
+    expect(html).toContain("text-warn");
+    expect(html).not.toContain("Superseded by");
+  });
+
+  it("is what every mismatch degrades to when no history was loaded", () => {
+    // The lookup is honest about what it cannot know: with no runs to reason with, it does not
+    // guess that a mismatch was routine.
+    const noHistory = publicationLookup(parseArtifactsIndex(publishedIndex));
+    expect(noHistory(artifactNamed("queryTable"), ingestion).status).toBe("replaced");
   });
 });
 
 describe("an artifact the index does not list at all", () => {
-  const lookup = publicationLookup(parseArtifactsIndex(publishedIndex));
+  const lookup = lookupWithHistory();
   const artifact = artifactNamed("tables.water_bodies");
 
   it("is reported as never published, not as a missing URL", () => {
-    const resolved = lookup(artifact);
+    const resolved = lookup(artifact, ingestion);
     expect(resolved.status).toBe("unlisted");
     expect(resolved.url).toBeNull();
     expect(resolved.ipnsName).toBeNull();
@@ -256,7 +357,7 @@ describe("an artifact the index does not list at all", () => {
 
   it("says so on the card", () => {
     const html = renderToStaticMarkup(
-      createElement(ArtifactCard, { artifact, publication: lookup(artifact) }),
+      createElement(ArtifactCard, { artifact, publication: lookup(artifact, ingestion) }),
     );
     expect(html).toContain("is absent from the published artifacts index");
     expect(html).not.toContain("https://ipfs.filebase.io/ipfs/");
@@ -265,8 +366,8 @@ describe("an artifact the index does not list at all", () => {
 
 describe("an index the browser never got", () => {
   it("leaves every card exactly as it was, claiming nothing", () => {
-    const lookup = publicationLookup(null);
-    expect(lookup(artifactNamed("coverage"))).toEqual(UNKNOWN_PUBLICATION);
+    const lookup = publicationLookup(null, runHistory.runs);
+    expect(lookup(artifactNamed("coverage"), ingestion)).toEqual(UNKNOWN_PUBLICATION);
 
     const html = renderToStaticMarkup(
       createElement(ArtifactCard, { artifact: artifactNamed("coverage") }),
@@ -277,24 +378,26 @@ describe("an index the browser never got", () => {
   });
 
   it("degrades the same way when the fetch returns something that is not an index", () => {
-    const lookup = publicationLookup(parseArtifactsIndex({ error: "gateway timeout" }));
-    expect(lookup(artifactNamed("coverage")).status).toBe("unknown");
+    const lookup = publicationLookup(
+      parseArtifactsIndex({ error: "gateway timeout" }),
+      runHistory.runs,
+    );
+    expect(lookup(artifactNamed("coverage"), ingestion).status).toBe("unknown");
   });
 });
 
 describe("an artifact with no published object name", () => {
   it("is never reported as unpublished, because there is nothing to look it up by", () => {
-    const openData = consolidation?.artifacts[0];
-    expect(openData?.name).toBe("openData");
-    expect(openData?.path).toBeNull();
+    const openData = consolidationArtifactNamed("openData");
+    expect(openData.path).toBeNull();
 
-    const lookup = publicationLookup(parseArtifactsIndex(publishedIndex));
-    expect(lookup(openData as RunArtifact).status).toBe("unknown");
+    const lookup = lookupWithHistory();
+    expect(lookup(openData, consolidation).status).toBe("unknown");
 
     const html = renderToStaticMarkup(
       createElement(ArtifactCard, {
-        artifact: openData as RunArtifact,
-        publication: lookup(openData as RunArtifact),
+        artifact: openData,
+        publication: lookup(openData, consolidation),
       }),
     );
     expect(html).not.toContain("absent from the published artifacts index");
@@ -302,7 +405,7 @@ describe("an artifact with no published object name", () => {
 });
 
 describe("a dry-run index, whose IPNS fields are all null", () => {
-  const lookup = publicationLookup(parseArtifactsIndex(dryRunIndex));
+  const lookup = publicationLookup(parseArtifactsIndex(dryRunIndex), runHistory.runs);
 
   it("still resolves the gateway URL, and simply has no IPNS name to show", () => {
     // The dry-run index lists the same CID the published one does, so this joins.
@@ -310,7 +413,7 @@ describe("a dry-run index, whose IPNS fields are all null", () => {
       ...artifactNamed("queryTable"),
       cid: "QmVxUjpeezfmdWxMYQEMBQccNmraLcWNMqZp1JfV6MjBnW",
     };
-    const resolved = lookup(artifact);
+    const resolved = lookup(artifact, ingestion);
     expect(resolved.status).toBe("published");
     expect(resolved.url).toBe(
       "https://ipfs.filebase.io/ipfs/bafybeidrf5y2w6rmle4m3lkisqdmwt2ejhb2ryyvzpxogk4xcaerkenuu4",
@@ -326,7 +429,7 @@ describe("a dry-run index, whose IPNS fields are all null", () => {
       cid: "QmVxUjpeezfmdWxMYQEMBQccNmraLcWNMqZp1JfV6MjBnW",
     };
     const html = renderToStaticMarkup(
-      createElement(ArtifactCard, { artifact, publication: lookup(artifact) }),
+      createElement(ArtifactCard, { artifact, publication: lookup(artifact, ingestion) }),
     );
     expect(html).not.toContain("/ipns/");
     expect(html).toContain("CID addressed; no IPNS name minted");
@@ -339,7 +442,7 @@ describe("parseArtifactsIndex", () => {
     expect(index.county).toBe("duval");
     expect(index.mode).toBe("published");
     expect(index.generatedAt).toBe("2026-08-21T16:35:15.501Z");
-    expect(index.artifacts).toHaveLength(3);
+    expect(index.artifacts).toHaveLength(4);
   });
 
   it("drops entries with no name and survives junk", () => {

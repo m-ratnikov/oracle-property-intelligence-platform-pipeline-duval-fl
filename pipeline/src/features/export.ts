@@ -2,6 +2,7 @@ import { mkdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { DuckDBConnection } from "@duckdb/node-api";
 import { all, count, duckPath, ident, one, q, tableColumns } from "../db.js";
+import { computeFileCid } from "../publish/cid.js";
 
 /** The 37 canonical query-table columns, in elephant-query-db run-query-table-export.ts order. */
 export const QUERY_TABLE_CANONICAL_COLUMNS: readonly string[] = [
@@ -108,6 +109,55 @@ export async function validateQueryTable(conn: DuckDBConnection, parquetPath: st
     missingCanonical,
     problems,
     columns,
+  };
+}
+
+/**
+ * The published object name of the query table.
+ *
+ * This exact string has to appear in three places or the evidence stops joining up: the run
+ * record's `artifacts.queryTable.path`, the publish plan's object name in publish/index.ts, and
+ * therefore the `name` of the entry in the published artifacts index. The UI joins a run's
+ * artifacts to that index on it, so a run that records the object under any other name (or under
+ * no name at all) reads as an artifact that was never published.
+ */
+export const QUERY_TABLE_OBJECT = "query-table.parquet";
+
+/** What a run record says about the query table it produced. */
+export interface QueryTableArtifact {
+  path: string;
+  rows: number;
+  bytes: number;
+  sha256: string;
+  cid: string;
+  cidV1: string;
+  validationOk: boolean;
+  problems: string[];
+}
+
+/**
+ * Describe a freshly exported query table for a run record.
+ *
+ * Every pass that writes `query-table.parquet` must call this, not roll its own record: the
+ * consolidation pass republishes the parquet seconds after the ingestion run and used to record
+ * only `{ rows, propertyCidFilled }`, so the bytes it actually published were recorded nowhere and
+ * could never be matched against the published artifacts index. One function means the two passes
+ * cannot drift on the object name or on how the CID is computed.
+ */
+export async function describeQueryTableArtifact(
+  exported: ExportResult,
+  validation: ValidationReport,
+): Promise<QueryTableArtifact> {
+  const cid = await computeFileCid(exported.path);
+  return {
+    path: QUERY_TABLE_OBJECT,
+    rows: exported.rows,
+    bytes: exported.bytes,
+    sha256: cid.sha256,
+    cid: cid.cid,
+    cidV1: cid.cidV1,
+    validationOk: validation.ok,
+    problems: validation.problems,
   };
 }
 

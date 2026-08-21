@@ -5,7 +5,7 @@ import { ulid } from "ulid";
 import { COUNTY, getPaths, type Paths } from "./config.js";
 import { all, ensureSchema, one, openDb, q, type Db } from "./db.js";
 import { buildFeatures } from "./features/build.js";
-import { exportEntityTables, exportQueryTable, formatValidation, validateQueryTable, type ValidationReport } from "./features/export.js";
+import { describeQueryTableArtifact, exportEntityTables, exportQueryTable, formatValidation, validateQueryTable, type ValidationReport } from "./features/export.js";
 import { log as rootLog, type Logger } from "./log.js";
 import { computeFileCid } from "./publish/cid.js";
 import { buildCoverageSnapshot } from "./publish/coverage.js";
@@ -309,8 +309,7 @@ export async function runPipeline(opts: RunOptions): Promise<{ run: RunRecord; v
       const exp = await exportQueryTable(db.conn, qtPath);
       validation = await validateQueryTable(db.conn, qtPath);
       process.stdout.write(formatValidation(validation) + "\n");
-      const qtCid = await computeFileCid(qtPath);
-      artifacts.queryTable = { path: "query-table.parquet", rows: exp.rows, bytes: exp.bytes, sha256: qtCid.sha256, cid: qtCid.cid, cidV1: qtCid.cidV1, validationOk: validation.ok, problems: validation.problems };
+      artifacts.queryTable = await describeQueryTableArtifact(exp, validation);
       if (!validation.ok) {
         logger.error("query_table_validation_failed", { problems: validation.problems });
         runError = `query table validation failed: ${validation.problems.join("; ")}`;

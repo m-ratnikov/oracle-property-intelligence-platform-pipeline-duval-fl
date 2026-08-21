@@ -16,9 +16,11 @@ function scale(artifact: RunArtifact): string | null {
   return parts.length === 0 ? null : parts.join(", ");
 }
 
-/** Why there is no gateway URL, in the card's own words. */
+/** Why there is no gateway URL for THIS run's copy, in the card's own words. */
 function gatewayReason(publication: ArtifactPublication): string {
   switch (publication.status) {
+    case "superseded":
+      return "a later run republished this object; the index serves that copy";
     case "replaced":
       return "the artifacts index publishes a different CID under this name";
     case "unlisted":
@@ -26,6 +28,50 @@ function gatewayReason(publication: ArtifactPublication): string {
     default:
       return "no gateway url published for this artifact";
   }
+}
+
+/**
+ * The neutral note under a superseded card.
+ *
+ * The consolidation pass republishes `query-table.parquet` seconds after every ingestion run, so
+ * the ingestion run's copy is superseded on every single run, forever. That is the pipeline
+ * working, not failing, and the card reads that way: it names the successor and points at the
+ * copy the index serves. The warn tone below is reserved for a difference nothing explains.
+ */
+function SupersededNote({
+  publication,
+  path,
+}: {
+  publication: ArtifactPublication;
+  path: string | null;
+}) {
+  const successor = publication.supersededBy;
+  if (successor === null) return null;
+  const what =
+    successor.kind === "consolidation"
+      ? "the consolidation pass that followed it"
+      : "a later ingestion run";
+  return (
+    <p className="mt-2 text-[11.5px] text-muted">
+      Superseded by {what}, <span className="mono">{shortenId(successor.runId, 10, 5)}</span>, which
+      republished <span className="mono">{path}</span>.
+      {publication.currentUrl ? (
+        <>
+          {" "}
+          The index serves that copy at{" "}
+          <a
+            className="mono break-all"
+            href={publication.currentUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {publication.currentUrl}
+          </a>
+          .
+        </>
+      ) : null}
+    </p>
+  );
 }
 
 /**
@@ -111,12 +157,16 @@ export function ArtifactCard({
         </dd>
       </dl>
 
+      {publication.status === "superseded" ? (
+        <SupersededNote publication={publication} path={artifact.path} />
+      ) : null}
+
       {publication.status === "replaced" && publication.indexCid ? (
         <p className="mt-2 text-[11.5px] text-warn">
-          A later publish replaced this object: the artifacts index lists{" "}
-          <span className="mono">{shortenId(publication.indexCid, 10, 6)}</span> under{" "}
-          <span className="mono">{artifact.path}</span>, so this run&apos;s copy is not what the
-          gateway serves.
+          The artifacts index lists a different CID,{" "}
+          <span className="mono">{shortenId(publication.indexCid, 10, 6)}</span>, under{" "}
+          <span className="mono">{artifact.path}</span>, and no later run in this history
+          republished it. This run&apos;s copy was never published.
         </p>
       ) : null}
 

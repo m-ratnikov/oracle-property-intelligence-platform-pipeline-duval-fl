@@ -27,7 +27,7 @@
  * lists a different CID under its name, the card says so and shows no URL.
  */
 
-import { isRecord, num, str, type RunArtifact } from "./types";
+import { isRecord, num, str, type PipelineRun, type RunArtifact, type RunKind } from "./types";
 
 export interface PublishedArtifact {
   /** The published object name. The join key; see the module comment. */
@@ -101,36 +101,65 @@ export function parseArtifactsIndex(input: unknown): ArtifactsIndex {
 }
 
 /**
- * - `published`  the index lists this object name at exactly this run's CID.
- * - `replaced`   the index lists this object name at a different CID, so the bytes this run
- *                produced are not the ones the gateway currently serves under that name.
- * - `unlisted`   the index loaded and has no entry for this object name at all, so nothing was
- *                published for it.
- * - `unknown`    no index reached the browser, or the artifact carries no object name to join
- *                on. Says nothing either way, and the card degrades to what it said before.
+ * - `published`   the index lists this object name at exactly this run's CID.
+ * - `superseded`  the index lists a different CID under this name AND a later run in the loaded
+ *                 history recorded the same object. Ordinary pipeline behaviour, not a fault: the
+ *                 consolidation pass republishes the query table seconds after every ingestion
+ *                 run. The card names the successor and links to the copy the index serves.
+ * - `replaced`    the index lists a different CID under this name and NOTHING in the loaded
+ *                 history explains it. This is the real "never published" signal and keeps the
+ *                 warn tone.
+ * - `unlisted`    the index loaded and has no entry for this object name at all.
+ * - `unknown`     no index reached the browser, or the artifact carries no object name to join
+ *                 on. Says nothing either way, and the card degrades to what it said before.
  */
-export type PublicationStatus = "published" | "replaced" | "unlisted" | "unknown";
+export type PublicationStatus =
+  | "published"
+  | "superseded"
+  | "replaced"
+  | "unlisted"
+  | "unknown";
+
+/** The later run that republished an object, for a `superseded` card. */
+export interface Successor {
+  runId: string;
+  kind: RunKind;
+  startedAt: string | null;
+  /** True when that run recorded exactly the CID the index publishes. */
+  servesIndexCid: boolean;
+}
 
 export interface ArtifactPublication {
   status: PublicationStatus;
-  /** Only ever a URL the index published. Never constructed. */
+  /**
+   * The gateway URL for THIS run's bytes, and only for those. Null unless the index lists this
+   * object name at this run's exact CID. Never constructed.
+   */
   url: string | null;
+  /**
+   * The gateway URL of whatever the index currently serves under this object name, when that is
+   * not this run's copy. Rendered only as "what the index serves now", never as this run's URL.
+   */
+  currentUrl: string | null;
   ipnsName: string | null;
   ipnsUrl: string | null;
   ipnsLabel: string | null;
   /** The CID the index lists under this object name, when it is not this run's. */
   indexCid: string | null;
   indexGeneratedAt: string | null;
+  supersededBy: Successor | null;
 }
 
 export const UNKNOWN_PUBLICATION: ArtifactPublication = {
   status: "unknown",
   url: null,
+  currentUrl: null,
   ipnsName: null,
   ipnsUrl: null,
   ipnsLabel: null,
   indexCid: null,
   indexGeneratedAt: null,
+  supersededBy: null,
 };
 
 /** A run CID and an index entry describe the same bytes if either CID form agrees. */
@@ -138,14 +167,29 @@ function sameBytes(cid: string, entry: PublishedArtifact): boolean {
   return cid === entry.cid || cid === entry.cidV1;
 }
 
+/** Chronological order of runs. Run ids are ULIDs, so they order correctly when a stamp is absent. */
+function isLaterThan(candidate: PipelineRun, run: PipelineRun): boolean {
+  const a = candidate.started_at ?? "";
+  const b = run.started_at ?? "";
+  if (a !== b) return a > b;
+  return candidate.run_id > run.run_id;
+}
+
 /**
  * Build the lookup once per page, not once per card: the index is a single fetch shared by
  * every card on the page, and this turns it into a map so a page with a hundred artifacts still
  * scans it once.
+ *
+ * `runs` is the loaded history. It is what separates ordinary supersession from a genuine
+ * publish failure: if a later run recorded the same object name, the difference between this
+ * run's CID and the index's is explained, and the card says so plainly instead of raising an
+ * alarm. Pass an empty list and every mismatch stays `replaced`, which is the honest default
+ * when there is no history to reason with.
  */
 export function publicationLookup(
   index: ArtifactsIndex | null,
-): (artifact: RunArtifact) => ArtifactPublication {
+  runs: PipelineRun[] = [],
+): (artifact: RunArtifact, run: PipelineRun) => ArtifactPublication {
   if (index === null || index.artifacts.length === 0) return () => UNKNOWN_PUBLICATION;
 
   const byName = new Map<string, PublishedArtifact>();
@@ -153,7 +197,39 @@ export function publicationLookup(
     if (!byName.has(entry.name)) byName.set(entry.name, entry);
   }
 
-  return (artifact: RunArtifact): ArtifactPublication => {
+  /** object name -> every run that recorded producing it, with the CID it recorded. */
+  const producers = new Map<string, { run: PipelineRun; cid: string | null }[]>();
+  for (const run of runs) {
+    for (const artifact of run.artifacts) {
+      if (artifact.path === null) continue;
+      const list = producers.get(artifact.path) ?? [];
+      list.push({ run, cid: artifact.cid });
+      producers.set(artifact.path, list);
+    }
+  }
+
+  function successorOf(
+    path: string,
+    run: PipelineRun,
+    entry: PublishedArtifact,
+  ): Successor | null {
+    const later = (producers.get(path) ?? []).filter((p) => isLaterThan(p.run, run));
+    if (later.length === 0) return null;
+    // Prefer the run that produced exactly what the index publishes: that is the copy a reader
+    // following the link will actually get.
+    const exact = later.find((p) => p.cid !== null && sameBytes(p.cid, entry));
+    const chosen =
+      exact ??
+      later.reduce((newest, p) => (isLaterThan(p.run, newest.run) ? p : newest), later[0]!);
+    return {
+      runId: chosen.run.run_id,
+      kind: chosen.run.kind,
+      startedAt: chosen.run.started_at,
+      servesIndexCid: exact !== undefined,
+    };
+  }
+
+  return (artifact: RunArtifact, run: PipelineRun): ArtifactPublication => {
     // No object name means no join key. Absence of evidence, not evidence of absence.
     if (artifact.path === null || artifact.cid === null) return UNKNOWN_PUBLICATION;
 
@@ -163,28 +239,33 @@ export function publicationLookup(
     }
 
     if (!sameBytes(artifact.cid, entry)) {
-      // A real signal, not a glitch: this run's copy of the object was never published, or a
-      // later publish replaced it. The IPNS pointer for the name is still shown, because it is
-      // published and real, but the gateway URL for these bytes is not offered.
+      // The index publishes other bytes under this name. Whether that is routine or a failure
+      // depends entirely on whether the history explains it. The gateway URL for THIS run's
+      // bytes is not offered either way; only `currentUrl` is, labelled as the current copy.
+      const successor = successorOf(artifact.path, run, entry);
       return {
-        status: "replaced",
+        status: successor === null ? "replaced" : "superseded",
         url: null,
+        currentUrl: entry.url,
         ipnsName: entry.ipnsName,
         ipnsUrl: entry.ipnsUrl,
         ipnsLabel: entry.ipnsLabel,
         indexCid: entry.cid ?? entry.cidV1,
         indexGeneratedAt: index.generatedAt,
+        supersededBy: successor,
       };
     }
 
     return {
       status: "published",
       url: entry.url,
+      currentUrl: null,
       ipnsName: entry.ipnsName,
       ipnsUrl: entry.ipnsUrl,
       ipnsLabel: entry.ipnsLabel,
       indexCid: null,
       indexGeneratedAt: index.generatedAt,
+      supersededBy: null,
     };
   };
 }

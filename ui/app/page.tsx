@@ -36,12 +36,16 @@ export default function OverviewPage() {
    * gateway URL and IPNS name out of this single index rather than fetching anything itself.
    */
   const artifactsIndex = useJson(config.artifactsIndexUrl, parseArtifactsIndex);
-  const publicationOf = useMemo(
-    () => publicationLookup(artifactsIndex.data),
-    [artifactsIndex.data],
-  );
 
   const runs = useMemo(() => sortRunsDesc(history.data?.runs ?? []), [history.data]);
+  /*
+   * The history is part of the join, not just the index: a run's CID differing from the index's
+   * is only a failure if no later run republished the same object.
+   */
+  const publicationOf = useMemo(
+    () => publicationLookup(artifactsIndex.data, runs),
+    [artifactsIndex.data, runs],
+  );
 
   /*
    * "The latest run" on this page means the latest run that actually ingested sources.
@@ -231,7 +235,7 @@ export default function OverviewPage() {
                 <ArtifactCard
                   key={`${artifact.name}-${artifact.cid}`}
                   artifact={artifact}
-                  publication={publicationOf(artifact)}
+                  publication={publicationOf(artifact, latest)}
                 />
               ))}
             </div>
@@ -277,7 +281,7 @@ export default function OverviewPage() {
                   <ArtifactCard
                     key={`${consolidation.run_id}-${artifact.name}`}
                     artifact={artifact}
-                    publication={publicationOf(artifact)}
+                    publication={publicationOf(artifact, consolidation)}
                   />
                 ))}
               </div>
