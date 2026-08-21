@@ -3,10 +3,15 @@
 import { useMemo, useState } from "react";
 import { config } from "@/lib/config";
 import { useJson } from "@/lib/hooks";
-import { cumulativeBySource, parseRunHistory, sortRunsDesc } from "@/lib/types";
-import type { PipelineRun } from "@/lib/types";
 import {
-  formatDurationMs,
+  distinctLimitations,
+  ingestionSourceNames,
+  parseRunHistory,
+  summariseRuns,
+} from "@/lib/types";
+import type { PipelineRun, RunSummary } from "@/lib/types";
+import {
+  formatElapsed,
   formatInt,
   formatTimestamp,
   relativeTime,
@@ -14,52 +19,53 @@ import {
   signedDelta,
 } from "@/lib/format";
 import { PageHeader, Section, Callout, Spinner, ErrorBox, Stat, IdWithCopy } from "@/components/ui";
-import { SourceTrends } from "@/components/Charts";
+import { RunCadence, VerifiedAgainstWritten } from "@/components/RunCharts";
 import { SampleBadge } from "@/components/SampleBanner";
 import { ArtifactCard } from "@/components/ArtifactCard";
 
-function TriggerBadge({ trigger }: { trigger: string | null }) {
-  if (!trigger) return <span className="badge badge-neutral">unknown</span>;
-  const tone = trigger === "schedule" ? "badge-accent" : "badge-neutral";
-  return <span className={`badge ${tone}`}>{trigger}</span>;
+function StatusBadge({ status }: { status: string | null }) {
+  if (!status) return <span className="badge badge-neutral">unknown</span>;
+  const tone =
+    status === "completed"
+      ? "badge-good"
+      : status === "failed" || status === "aborted"
+        ? "badge-bad"
+        : status === "running"
+          ? "badge-accent"
+          : "badge-warn";
+  return <span className={`badge ${tone}`}>{status}</span>;
 }
 
-function RunDetail({ run, isLatest }: { run: PipelineRun; isLatest: boolean }) {
+function KindBadge({ kind }: { kind: RunSummary["kind"] }) {
+  return kind === "consolidation" ? (
+    <span className="badge badge-warn" title="Maintenance pass: re-hashes and republishes the property records the ingestion runs loaded. Not a data source.">
+      maintenance
+    </span>
+  ) : (
+    <span className="badge badge-accent">ingestion</span>
+  );
+}
+
+/** The per source detail that used to be an always open card, now folded into its row. */
+function RunDetail({ run }: { run: PipelineRun }) {
   const limitations = run.sources.flatMap((source) =>
     source.limitations.map((limitation) => ({ source: source.source, limitation })),
   );
 
   return (
-    <div className={`card ${isLatest ? "border-accent" : ""}`}>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2.5">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="mono text-[13px] font-semibold">{run.run_id}</span>
-          <TriggerBadge trigger={run.trigger} />
-          {isLatest ? <span className="badge badge-good">latest</span> : null}
-        </div>
-        <div className="flex flex-wrap items-center gap-3 text-[11.5px] text-muted">
-          <span title={formatTimestamp(run.started_at) ?? undefined}>
-            started {relativeTime(run.started_at)}
-          </span>
-          <span>took {formatDurationMs(run.started_at, run.finished_at)}</span>
-          {run.git_sha ? (
-            <span className="mono" title={run.git_sha}>
-              sha {shortenId(run.git_sha, 8, 0)}
-            </span>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="table-wrap" style={{ maxHeight: "none", border: "none", borderRadius: 0 }}>
+    <div className="border-t border-border bg-sunken px-3 py-3">
+      <div className="table-wrap" style={{ maxHeight: "none" }}>
         <table className="grid">
           <thead>
             <tr>
               <th>source</th>
-              <th className="num">rows fetched</th>
+              <th>status</th>
+              <th className="num">rows checked</th>
               <th className="num">inserted</th>
               <th className="num">updated</th>
               <th className="num">unchanged</th>
-              <th className="num">delta vs previous</th>
+              <th className="num">table rows after</th>
+              <th className="num">table delta</th>
               <th>artifact sha256</th>
             </tr>
           </thead>
@@ -69,15 +75,19 @@ function RunDetail({ run, isLatest }: { run: PipelineRun; isLatest: boolean }) {
                 <td>
                   <span className="mono font-semibold">{source.source}</span>
                 </td>
+                <td>
+                  <StatusBadge status={source.status} />
+                </td>
                 <td className="num">{formatInt(source.rows_fetched)}</td>
-                <td className={`num ${isLatest && (source.inserted ?? 0) > 0 ? "evidence" : ""}`}>
+                <td className={`num ${(source.inserted ?? 0) > 0 ? "evidence" : ""}`}>
                   {formatInt(source.inserted)}
                 </td>
-                <td className={`num ${isLatest && (source.updated ?? 0) > 0 ? "evidence" : ""}`}>
+                <td className={`num ${(source.updated ?? 0) > 0 ? "evidence" : ""}`}>
                   {formatInt(source.updated)}
                 </td>
                 <td className="num">{formatInt(source.unchanged)}</td>
-                <td className={`num ${isLatest ? "evidence" : ""}`}>
+                <td className="num">{formatInt(source.table_total_after)}</td>
+                <td className="num">
                   <span className={(source.delta_vs_previous ?? 0) > 0 ? "text-good" : "text-muted"}>
                     {signedDelta(source.delta_vs_previous)}
                   </span>
@@ -90,15 +100,19 @@ function RunDetail({ run, isLatest }: { run: PipelineRun; isLatest: boolean }) {
           </tbody>
         </table>
       </div>
+      <p className="mt-1.5 text-[11.5px] text-faint">
+        Table rows after is the whole target table once this run&apos;s merge finished, so a table
+        two tracks write into (sales_history, written by both sales and pa_detail) shows more rows
+        than this source staged. Table delta is that total against the previous recorded run of the
+        same track.
+      </p>
 
-      <div className="px-4 py-3">
+      <div className="mt-3">
         <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">
           Documented source limitations
         </div>
         {limitations.length === 0 ? (
-          <p className="mt-1 text-[12.5px] text-faint">
-            No limitations recorded for this run.
-          </p>
+          <p className="mt-1 text-[12.5px] text-faint">No limitations recorded for this run.</p>
         ) : (
           <ul className="mt-1 space-y-1 text-[12.5px]">
             {limitations.map((entry, index) => (
@@ -112,20 +126,20 @@ function RunDetail({ run, isLatest }: { run: PipelineRun; isLatest: boolean }) {
       </div>
 
       {run.artifacts.length > 0 ? (
-        <details className="border-t border-border px-4 py-3">
-          <summary className="cursor-pointer text-[12.5px] text-muted">
+        <div className="mt-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">
             {run.artifacts.length} artifacts published by this run
-          </summary>
-          <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          </div>
+          <div className="mt-2 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {run.artifacts.map((artifact) => (
               <ArtifactCard key={`${run.run_id}-${artifact.name}`} artifact={artifact} />
             ))}
           </div>
-        </details>
+        </div>
       ) : null}
 
       {Object.keys(run.extra).length > 0 ? (
-        <details className="border-t border-border px-4 py-3">
+        <details className="mt-3">
           <summary className="cursor-pointer text-[12.5px] text-muted">
             Additional fields published with this run
           </summary>
@@ -136,85 +150,233 @@ function RunDetail({ run, isLatest }: { run: PipelineRun; isLatest: boolean }) {
   );
 }
 
+function RunRow({
+  summary,
+  open,
+  onToggle,
+}: {
+  summary: RunSummary;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const run = summary.run;
+  const sourceCounts = [
+    `${summary.sourcesCompleted} ran`,
+    summary.sourcesSkipped > 0 ? `${summary.sourcesSkipped} skipped` : null,
+    summary.sourcesFailed > 0 ? `${summary.sourcesFailed} failed` : null,
+  ].filter(Boolean) as string[];
+
+  return (
+    <>
+      <tr
+        className="cursor-pointer"
+        onClick={onToggle}
+        aria-expanded={open}
+        title={open ? "Collapse per source detail" : "Expand per source detail"}
+      >
+        <td>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggle();
+            }}
+            aria-label={`${open ? "Collapse" : "Expand"} run ${run.run_id}`}
+          >
+            {open ? "hide" : "detail"}
+          </button>
+        </td>
+        <td>
+          <div className="mono text-[12px] font-semibold">{shortenId(run.run_id, 8, 5)}</div>
+          <div className="mono text-[11px] text-faint">{formatTimestamp(run.started_at)}</div>
+        </td>
+        <td className="text-[11.5px] text-muted">{relativeTime(run.started_at)}</td>
+        <td>
+          <div className="flex flex-wrap gap-1">
+            <KindBadge kind={summary.kind} />
+            <StatusBadge status={run.status} />
+          </div>
+          <div className="mt-0.5 text-[11px] text-faint">{run.trigger ?? "unknown trigger"}</div>
+        </td>
+        <td className="num">{formatElapsed(summary.durationMs)}</td>
+        <td className="text-[11.5px] text-muted">
+          {sourceCounts.join(", ")}
+          <span className="text-faint"> of {summary.trackCount}</span>
+        </td>
+        <td className="num">{formatInt(summary.rowsVerified)}</td>
+        <td className={`num ${summary.rowsInserted > 0 ? "evidence" : ""}`}>
+          {formatInt(summary.rowsInserted)}
+        </td>
+        <td className={`num ${summary.rowsUpdated > 0 ? "evidence" : ""}`}>
+          {formatInt(summary.rowsUpdated)}
+        </td>
+        <td className="num">
+          <span className={(summary.tableDelta ?? 0) > 0 ? "text-good" : "text-muted"}>
+            {signedDelta(summary.tableDelta)}
+          </span>
+        </td>
+        <td className="mono text-[11px]">
+          {run.git_sha ? (
+            <span title={run.git_sha}>{shortenId(run.git_sha, 7, 0)}</span>
+          ) : (
+            <span className="na">none</span>
+          )}
+        </td>
+        <td className="num">{formatInt(summary.artifactCount)}</td>
+      </tr>
+      {open ? (
+        <tr>
+          <td colSpan={12} style={{ padding: 0 }}>
+            <RunDetail run={run} />
+          </td>
+        </tr>
+      ) : null}
+    </>
+  );
+}
+
 export default function RunsPage() {
   const history = useJson(config.runHistoryUrl, parseRunHistory);
-  const [showAll, setShowAll] = useState(false);
+  const [openRun, setOpenRun] = useState<string | null>(null);
 
-  const runsDesc = useMemo(() => sortRunsDesc(history.data?.runs ?? []), [history.data]);
-  const sourceTrends = useMemo(() => {
-    const cumulative = cumulativeBySource(history.data?.runs ?? []);
-    return cumulative.map((entry) => ({
-      name: entry.source,
-      totals: entry.points.map((point) => point.total),
-    }));
-  }, [history.data]);
-
-  const visible = showAll ? runsDesc : runsDesc.slice(0, 3);
-
-  const firstRun = runsDesc[runsDesc.length - 1] ?? null;
-  const latest = runsDesc[0] ?? null;
-  const totalSources = new Set(runsDesc.flatMap((run) => run.sources.map((s) => s.source))).size;
-  const totalLimitations = runsDesc.reduce(
-    (sum, run) => sum + run.sources.reduce((inner, source) => inner + source.limitations.length, 0),
-    0,
+  const runs = useMemo(() => history.data?.runs ?? [], [history.data]);
+  const summaries = useMemo(() => summariseRuns(runs), [runs]);
+  const ingestion = useMemo(() => summaries.filter((s) => s.kind === "ingestion"), [summaries]);
+  const consolidation = useMemo(
+    () => summaries.filter((s) => s.kind === "consolidation"),
+    [summaries],
   );
+  const sourceNames = useMemo(() => ingestionSourceNames(runs), [runs]);
+  const limitations = useMemo(() => distinctLimitations(runs), [runs]);
+
+  const firstRun = summaries[summaries.length - 1] ?? null;
+  const latestIngestion = ingestion[0] ?? null;
+  const rewriteShare =
+    latestIngestion && latestIngestion.rowsVerified > 0
+      ? (latestIngestion.rowsWritten / latestIngestion.rowsVerified) * 100
+      : null;
 
   return (
     <div>
       <PageHeader
         title="Pipeline run history"
-        lead="Every recorded run, in reverse order, with per source record counts and the change against the previous run. This is the evidence that ingestion is continuous rather than a single bulk load."
+        lead="Every recorded run, newest first, with what it checked, what it had to write and what it published. This is the evidence that ingestion is continuous rather than a single bulk load."
         right={<SampleBadge />}
       />
 
       {history.loading ? <Spinner label="Loading run history" /> : null}
       {history.error ? <ErrorBox title="Run history unavailable" message={history.error} /> : null}
 
-      {runsDesc.length > 0 ? (
+      {summaries.length > 0 ? (
         <>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Stat label="Runs recorded" value={formatInt(runsDesc.length)} />
+            <Stat
+              label="Runs recorded"
+              value={formatInt(summaries.length)}
+              hint={`${formatInt(ingestion.length)} ingestion, ${formatInt(consolidation.length)} consolidation, first ${relativeTime(firstRun?.run.started_at)}`}
+            />
             <Stat
               label="Sources tracked"
-              value={formatInt(totalSources)}
-              hint="property, permit, ownership, contractor, business and location data"
+              value={formatInt(sourceNames.length)}
+              hint="Distinct ingestion sources. The consolidation pass is maintenance, not a source, so it is not one of these."
             />
             <Stat
-              label="First run"
-              value={relativeTime(firstRun?.started_at)}
-              hint={formatTimestamp(firstRun?.started_at)}
+              label="Rows checked, latest ingestion run"
+              value={formatInt(latestIngestion?.rowsVerified ?? null)}
+              hint={
+                latestIngestion
+                  ? `re-verified in ${formatElapsed(latestIngestion.durationMs)}`
+                  : undefined
+              }
             />
             <Stat
-              label="Limitations logged"
-              value={formatInt(totalLimitations)}
-              hint="constrained or slow sources named openly"
-              tone={totalLimitations > 0 ? "warn" : "neutral"}
+              label="Rows written, latest ingestion run"
+              value={formatInt(latestIngestion?.rowsWritten ?? null)}
+              tone={(latestIngestion?.rowsWritten ?? 0) > 0 ? "good" : "neutral"}
+              hint={
+                rewriteShare === null
+                  ? undefined
+                  : `${rewriteShare < 0.01 ? "<0.01" : rewriteShare.toFixed(2)}% of what it checked, which is what incremental means`
+              }
             />
           </div>
 
+          <div className="mt-7 grid gap-4 xl:grid-cols-2">
+            <Section
+              title="What each run checked, against what it had to write"
+              description="Every ingestion run reads its sources in full and compares them against what is stored. The gap between the two lines is the work the pipeline avoided by being incremental: after the first load it re-verifies millions of rows and writes a few hundred."
+            >
+              <VerifiedAgainstWritten runs={ingestion} />
+            </Section>
+
+            <Section
+              title="When runs happened, and how long they took"
+              description="Cadence and cost on one wall clock axis. The consolidation passes shrink from nine minutes to under half a minute as the content-hash state warms, which is the cache paying for itself."
+            >
+              <RunCadence runs={summaries} />
+            </Section>
+          </div>
+
           <Section
-            title="Rows per source, run by run"
-            description={`One panel per source, each on its own scale. The number is the rows that source has contributed in total; the line is how it got there across ${runsDesc.length} runs. Most panels are flat, which is what an incremental pipeline looks like once a source has caught up: it is checked every run and publishes nothing new. The per run figures behind these panels are in the table below.`}
+            title="Run by run"
+            description="Every recorded run, newest first. Open a row for its per source counts, documented limitations and published artifacts. This table is also the accessible twin of the two charts above: every number they plot is a column here."
+            right={
+              <span className="text-[11.5px] text-muted">
+                {formatInt(summaries.length)} runs, none hidden
+              </span>
+            }
           >
-            <SourceTrends sources={sourceTrends} runCount={runsDesc.length} />
+            <div className="table-wrap" style={{ maxHeight: "none" }}>
+              <table className="grid">
+                <thead>
+                  <tr>
+                    <th />
+                    <th>run</th>
+                    <th>when</th>
+                    <th>kind / status</th>
+                    <th className="num">took</th>
+                    <th>sources</th>
+                    <th className="num">rows checked</th>
+                    <th className="num">inserted</th>
+                    <th className="num">updated</th>
+                    <th className="num">table delta</th>
+                    <th>git sha</th>
+                    <th className="num">artifacts</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summaries.map((summary) => (
+                    <RunRow
+                      key={summary.run_id}
+                      summary={summary}
+                      open={openRun === summary.run_id}
+                      onToggle={() =>
+                        setOpenRun(openRun === summary.run_id ? null : summary.run_id)
+                      }
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </Section>
 
           <Section
-            title="Runs"
-            description="The latest run's deltas are highlighted."
-            right={
-              runsDesc.length > 3 ? (
-                <button type="button" className="btn btn-sm" onClick={() => setShowAll(!showAll)}>
-                  {showAll ? "show latest 3" : `show all ${runsDesc.length}`}
-                </button>
-              ) : null
-            }
+            title="Documented source limitations"
+            description="Counted once each, not once per run. A constraint is a property of a source: the same two sales caveats hold on every run, and reporting them once per run turned one constraint into fourteen problems."
           >
-            <div className="space-y-4">
-              {visible.map((run) => (
-                <RunDetail key={run.run_id} run={run} isLatest={run.run_id === latest?.run_id} />
-              ))}
-            </div>
+            {limitations.length === 0 ? (
+              <Callout tone="good">No limitations recorded on any run.</Callout>
+            ) : (
+              <ul className="space-y-1 text-[12.5px]">
+                {limitations.map((entry) => (
+                  <li key={`${entry.source}-${entry.limitation}`} className="flex gap-2">
+                    <span className="badge badge-warn shrink-0">{entry.source}</span>
+                    <span className="text-muted">{entry.limitation}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </Section>
         </>
       ) : !history.loading && !history.error ? (
@@ -228,7 +390,7 @@ export default function RunsPage() {
         <p className="mt-4 text-[11.5px] text-faint">
           Run history generated {formatTimestamp(history.data.generatedAt)} for county{" "}
           <span className="mono">{history.data.county ?? config.countyKey}</span>. Read from{" "}
-          <span className="mono break-all">{config.runHistoryUrl}</span>.
+          <span className="mono break-all">{config.runHistoryUrl}</span>. All timestamps are UTC.
         </p>
       ) : null}
     </div>

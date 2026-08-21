@@ -4,8 +4,22 @@ import Link from "next/link";
 import { useMemo } from "react";
 import { config, ZERO_COST_LINE } from "@/lib/config";
 import { useEngine, useJson } from "@/lib/hooks";
-import { parseCatalog, parseCoverage, parseRunHistory, sortRunsDesc } from "@/lib/types";
-import { formatInt, formatTimestamp, relativeTime, signedDelta } from "@/lib/format";
+import {
+  latestConsolidationRun,
+  latestIngestionRun,
+  parseCatalog,
+  parseCoverage,
+  parseRunHistory,
+  sortRunsDesc,
+  summariseRun,
+} from "@/lib/types";
+import {
+  formatElapsed,
+  formatInt,
+  formatTimestamp,
+  relativeTime,
+  signedDelta,
+} from "@/lib/format";
 import { PageHeader, Section, Stat, Callout, Spinner, ErrorBox } from "@/components/ui";
 import { EngineStatus } from "@/components/EngineStatus";
 import { ArtifactCard } from "@/components/ArtifactCard";
@@ -18,18 +32,30 @@ export default function OverviewPage() {
   const catalog = useJson(config.catalogUrl, parseCatalog);
 
   const runs = useMemo(() => sortRunsDesc(history.data?.runs ?? []), [history.data]);
-  const latest = runs[0] ?? null;
-  const previous = runs[1] ?? null;
 
-  const totalRowsLatest = latest
-    ? latest.sources.reduce((sum, source) => sum + (source.rows_fetched ?? 0), 0)
-    : null;
-  const totalInsertedLatest = latest
-    ? latest.sources.reduce((sum, source) => sum + (source.inserted ?? 0), 0)
-    : null;
-  const totalUpdatedLatest = latest
-    ? latest.sources.reduce((sum, source) => sum + (source.updated ?? 0), 0)
-    : null;
+  /*
+   * "The latest run" on this page means the latest run that actually ingested sources.
+   *
+   * A consolidation pass runs immediately after each ingestion run, so runs[0] was almost
+   * always that pass: one synthetic source, and this page duly reported "across 1 sources"
+   * with a totals table holding a single `consolidation` row. The consolidation evidence is
+   * real and is shown below in its own section; it just never stands in for an ingestion run.
+   */
+  const latest = useMemo(() => latestIngestionRun(runs), [runs]);
+  const previous = useMemo(
+    () => runs.filter((run) => run.kind === "ingestion")[1] ?? null,
+    [runs],
+  );
+  const consolidation = useMemo(() => latestConsolidationRun(runs), [runs]);
+  const consolidationSummary = useMemo(
+    () => (consolidation === null ? null : summariseRun(consolidation)),
+    [consolidation],
+  );
+
+  const latestSummary = useMemo(() => (latest === null ? null : summariseRun(latest)), [latest]);
+  const totalRowsLatest = latestSummary?.rowsVerified ?? null;
+  const totalInsertedLatest = latestSummary?.rowsInserted ?? null;
+  const totalUpdatedLatest = latestSummary?.rowsUpdated ?? null;
 
   const county = catalog.data?.counties.find((entry) => entry.countyKey === config.countyKey) ?? null;
 
@@ -46,7 +72,9 @@ export default function OverviewPage() {
         right={
           latest ? (
             <div className="text-right">
-              <div className="text-[11px] uppercase tracking-wide text-muted">Last run</div>
+              <div className="text-[11px] uppercase tracking-wide text-muted">
+                Last ingestion run
+              </div>
               <div className="text-[13px] font-semibold">{relativeTime(latest.started_at)}</div>
               <div className="mono text-[11px] text-faint">
                 {formatTimestamp(latest.started_at)}
@@ -72,13 +100,13 @@ export default function OverviewPage() {
           }
         />
         <Stat
-          label="Rows ingested, latest run"
+          label="Rows checked, latest ingestion run"
           loading={totalRowsLatest === null}
           value={formatInt(totalRowsLatest)}
           hint={latest ? `across ${latest.sources.length} sources` : undefined}
         />
         <Stat
-          label="New rows, latest run"
+          label="New rows, latest ingestion run"
           loading={totalInsertedLatest === null}
           value={formatInt(totalInsertedLatest)}
           hint={
@@ -94,7 +122,7 @@ export default function OverviewPage() {
           value={formatInt(runs.length)}
           hint={
             previous
-              ? `previous run ${relativeTime(previous.started_at)}`
+              ? `previous ingestion run ${relativeTime(previous.started_at)}`
               : "incremental history published with the data"
           }
         />
@@ -106,8 +134,8 @@ export default function OverviewPage() {
 
       <div className="mt-7">
         <Section
-          title="Totals by source, latest run"
-          description="Straight from the published run history. Delta is the change against the previous run, which is what makes this an incremental pipeline rather than a one shot load."
+          title="Totals by source, latest ingestion run"
+          description="Straight from the published run history, for the newest run that actually ingested sources. Table delta is how the target table's own total moved against the previous recorded run of that track, which is what makes this an incremental pipeline rather than a one shot load."
           right={<SampleBadge />}
         >
           {history.loading ? <Spinner label="Loading run history" /> : null}
@@ -122,7 +150,7 @@ export default function OverviewPage() {
                     <th className="num">inserted</th>
                     <th className="num">updated</th>
                     <th className="num">unchanged</th>
-                    <th className="num">delta vs previous</th>
+                    <th className="num">table delta</th>
                     <th>limitations</th>
                   </tr>
                 </thead>
@@ -184,7 +212,7 @@ export default function OverviewPage() {
 
         <Section
           title="Published Elephant IPFS artifacts"
-          description="Every artifact the latest run published, with its content identifier, its stable IPNS pointer and the gateway URL an MCP client or DuckDB opens directly."
+          description="Every artifact the latest ingestion run published, with its content identifier, its stable IPNS pointer and the gateway URL an MCP client or DuckDB opens directly."
           right={<SampleBadge />}
         >
           {latest && latest.artifacts.length > 0 ? (
@@ -197,11 +225,53 @@ export default function OverviewPage() {
             <Spinner label="Loading artifacts" />
           ) : (
             <Callout tone="warn">
-              The latest run published no artifact list. Nothing is invented here: if the pipeline
-              did not record CIDs, this page shows none.
+              The latest ingestion run published no artifact list. Nothing is invented here: if the
+              pipeline did not record CIDs, this page shows none.
             </Callout>
           )}
         </Section>
+
+        {consolidation && consolidationSummary ? (
+          <Section
+            title="Consolidation pass that followed it"
+            description="A separate maintenance pass runs after each ingestion run. It re-hashes every property record, republishes only the ones whose content changed, and publishes the open-data index and manifest an Elephant client resolves. It is not a data source and never stands in for an ingestion run, but its evidence is real, so it is shown here as itself."
+            right={<SampleBadge />}
+          >
+            <div className="card card-pad">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="mono text-[13px] font-semibold">{consolidation.run_id}</span>
+                  <span className="badge badge-warn">maintenance</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-3 text-[11.5px] text-muted">
+                  <span title={formatTimestamp(consolidation.started_at)}>
+                    ran {relativeTime(consolidation.started_at)}
+                  </span>
+                  <span>took {formatElapsed(consolidationSummary.durationMs)}</span>
+                </div>
+              </div>
+              <dl className="kv mt-2 text-[12.5px]">
+                <dt>property records re-hashed</dt>
+                <dd className="mono">{formatInt(consolidationSummary.rowsVerified)}</dd>
+                <dt>records republished</dt>
+                <dd className="mono">{formatInt(consolidationSummary.rowsWritten)}</dd>
+              </dl>
+            </div>
+            {consolidation.artifacts.length > 0 ? (
+              <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {consolidation.artifacts.map((artifact) => (
+                  <ArtifactCard
+                    key={`${consolidation.run_id}-${artifact.name}`}
+                    artifact={artifact}
+                  />
+                ))}
+              </div>
+            ) : null}
+            <p className="mt-2 text-[12px] text-muted">
+              Both passes appear in one timeline on the <Link href="/runs">Runs</Link> page.
+            </p>
+          </Section>
+        ) : null}
 
         <Section
           title="Catalog entry"

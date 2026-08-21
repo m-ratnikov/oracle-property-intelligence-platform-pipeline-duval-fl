@@ -128,10 +128,25 @@ async function insertSourceRecord(db: Db, runId: string, s: RunSourceRecord): Pr
       ${q(s.status)}, ${q(JSON.stringify(s.limitations))}::JSON, ${q(s.error)})`);
 }
 
+/**
+ * DuckDB TIMESTAMP columns hold no zone, and `::VARCHAR` renders them as
+ * "2026-08-21 16:34:49.119". Every consumer of run-history.json then has to guess what
+ * zone that is, and the guess a browser makes is the wrong one: V8 parses a
+ * space separated zoneless stamp as LOCAL time, so a run that started at 16:34 UTC
+ * rendered as 09:34 for a reader in +07 and as a run in the future for a reader in the
+ * Americas, on a page whose whole claim is continuous refresh.
+ *
+ * The stamps are written as `new Date().toISOString()` and so are already UTC. Say so in
+ * the output: emit ISO-8601 with an explicit Z, the same shape the coverage snapshot has
+ * always used (see publish/coverage.ts). `%g` is DuckDB's millisecond specifier, and
+ * strftime returns NULL for a NULL timestamp, which is what an unfinished run needs.
+ */
+const ISO_UTC = "'%Y-%m-%dT%H:%M:%S.%gZ'";
+
 export async function loadRunHistory(db: Db): Promise<RunRecord[]> {
   const runs = await all<Record<string, unknown>>(
     db.conn,
-    `SELECT run_id, started_at::VARCHAR AS started_at, finished_at::VARCHAR AS finished_at, status, trigger, git_sha, tracks, "window",
+    `SELECT run_id, strftime(started_at, ${ISO_UTC}) AS started_at, strftime(finished_at, ${ISO_UTC}) AS finished_at, status, trigger, git_sha, tracks, "window",
             sources::VARCHAR AS sources, limitations::VARCHAR AS limitations, totals::VARCHAR AS totals, artifacts::VARCHAR AS artifacts, error
      FROM run_log ORDER BY started_at DESC`,
   );

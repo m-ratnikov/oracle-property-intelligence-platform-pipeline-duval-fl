@@ -23,6 +23,26 @@
   --color-bad: #97231f;
   --color-bad-soft: #fae3e2;
 
+  /*
+   * Chart marks. Deliberately not the UI accent: these are validated palette values,
+   * checked with the data-viz palette validator against the card surface in both themes
+   * (lightness band, chroma floor, CVD separation, normal-vision floor, contrast).
+   *
+   * `verified` and `written` are two steps of ONE hue, because rows written are a subset
+   * of rows verified: an ordered pair takes an ordinal ramp, not two identities.
+   * Validator, light on #ffffff: monotone L, adjacent dL >= 0.06, light end 2.99:1, hue
+   * spread 3 degrees. All pass.
+   *
+   * `ingestion` and `consolidation` are two identities, so they take categorical slots 1
+   * and 2 (blue, orange). Validator, light on #ffffff: CVD dE 24.7 protan, normal-vision
+   * dE 33.6, both marks over 3:1. All pass.
+   */
+  --chart-verified: #5598e7;
+  --chart-written: #104281;
+  --chart-ingestion: #2a78d6;
+  --chart-consolidation: #eb6834;
+  --chart-grid: #e6e6e0;
+
   --font-mono: ui-monospace, "SFMono-Regular", "SF Mono", "Cascadia Mono", "Liberation Mono",
     Menlo, Consolas, monospace;
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial,
@@ -48,6 +68,14 @@
     --color-warn-soft: #33280f;
     --color-bad: #f08c86;
     --color-bad-soft: #3a1c1a;
+
+    /* Re-stepped for the dark surface (#1c1c1f), not flipped. Ordinal: light end 3.15:1,
+       monotone, hue spread 2 degrees. Categorical: CVD dE 26.8 protan, normal-vision 31.8. */
+    --chart-verified: #256abf;
+    --chart-written: #cde2fb;
+    --chart-ingestion: #3987e5;
+    --chart-consolidation: #d95926;
+    --chart-grid: #2b2b31;
   }
 }
 

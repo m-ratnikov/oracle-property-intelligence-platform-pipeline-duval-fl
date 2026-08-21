@@ -7,13 +7,24 @@
  * throwing. The UI renders what exists and says "not available" for the rest.
  */
 
+import { durationMs, parseTimestamp } from "./format";
+
 export interface RunSource {
   source: string;
+  status: string | null;
   rows_fetched: number | null;
   inserted: number | null;
   updated: number | null;
   unchanged: number | null;
+  /**
+   * How the target table's own total moved against the previous recorded run of this
+   * track. Not the same quantity as inserted + updated: a table written by more than one
+   * track (sales_history, written by both `sales` and `pa_detail`) moves without this
+   * track inserting anything.
+   */
   delta_vs_previous: number | null;
+  /** Rows in the target table after this run's merge, which is the real table total. */
+  table_total_after: number | null;
   artifact_sha256: string | null;
   source_url: string | null;
   limitations: string[];
@@ -25,14 +36,30 @@ export interface RunArtifact {
   ipns_label: string | null;
   ipns_name: string | null;
   gateway_url: string | null;
+  /** Rows and bytes where the publisher recorded them, for the artifact card's subtitle. */
+  rows: number | null;
+  bytes: number | null;
 }
+
+/**
+ * A consolidation pass is maintenance, not ingestion: it re-hashes the property records the
+ * ingestion runs already loaded and republishes the changed ones to IPFS. It publishes real
+ * evidence and belongs in the timeline, but it is not a data source and must never stand in
+ * for the latest ingestion run.
+ */
+export type RunKind = "ingestion" | "consolidation";
+
+export const CONSOLIDATION_TRACK = "consolidation";
 
 export interface PipelineRun {
   run_id: string;
   started_at: string | null;
   finished_at: string | null;
   trigger: string | null;
+  status: string | null;
   git_sha: string | null;
+  tracks: string[];
+  kind: RunKind;
   sources: RunSource[];
   artifacts: RunArtifact[];
   /** Anything the pipeline added that this UI does not model yet. */
@@ -160,10 +187,86 @@ const KNOWN_RUN_KEYS = new Set([
   "started_at",
   "finished_at",
   "trigger",
+  "status",
   "git_sha",
+  "tracks",
   "sources",
   "artifacts",
 ]);
+
+/**
+ * The pipeline publishes `artifacts` as an object keyed by kind, not as a list:
+ * `{ queryTable: {...}, tables: { parcels: {...}, ... }, coverage: {...}, egressCountry: "US" }`,
+ * and the consolidation pass publishes `{ openData: { indexCid, manifestCid, ... }, queryTable }`.
+ * Reading only the array form meant `artifacts` came back empty for every run, so the overview
+ * page told a reader "the latest run published no artifact list" while the run record in front of
+ * it carried a query-table CID, a CID per entity table and a coverage CID.
+ *
+ * Flattened one level, because `tables` is a map of artifacts rather than an artifact.
+ */
+function artifactFrom(name: string, value: unknown): RunArtifact | null {
+  if (!isRecord(value)) return null;
+  const cid = str(value.cid) ?? str(value.cidV1) ?? str(value.indexCid);
+  const gateway = str(value.gateway_url) ?? str(value.gatewayUrl);
+  const ipnsName = str(value.ipns_name) ?? str(value.ipnsName);
+  if (cid === null && gateway === null && ipnsName === null) return null;
+  return {
+    name,
+    cid,
+    ipns_label: str(value.ipns_label) ?? str(value.ipnsLabel),
+    ipns_name: ipnsName,
+    gateway_url: gateway,
+    rows: num(value.rows) ?? num(value.propertyCount),
+    bytes: num(value.bytes) ?? num(value.totalBytes),
+  };
+}
+
+function parseArtifacts(input: unknown): RunArtifact[] {
+  if (Array.isArray(input)) {
+    return input.filter(isRecord).map((artifact) => ({
+      name: str(artifact.name) ?? "artifact",
+      cid: str(artifact.cid),
+      ipns_label: str(artifact.ipns_label),
+      ipns_name: str(artifact.ipns_name),
+      gateway_url: str(artifact.gateway_url),
+      rows: num(artifact.rows),
+      bytes: num(artifact.bytes),
+    }));
+  }
+  if (!isRecord(input)) return [];
+  const out: RunArtifact[] = [];
+  for (const [key, value] of Object.entries(input)) {
+    const direct = artifactFrom(key, value);
+    if (direct !== null) {
+      out.push(direct);
+      continue;
+    }
+    // `tables` is a map of table name -> artifact. Nothing else nests.
+    if (isRecord(value)) {
+      for (const [nested, item] of Object.entries(value)) {
+        const child = artifactFrom(`${key}.${nested}`, item);
+        if (child !== null) out.push(child);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The consolidation pass records a single source named `consolidation` and a trigger of the
+ * same name. Either is enough; both are checked so a run published by an older or newer
+ * pipeline still classifies.
+ */
+function runKind(trigger: string | null, tracks: string[], sources: RunSource[]): RunKind {
+  if (trigger === CONSOLIDATION_TRACK) return "consolidation";
+  if (tracks.length > 0 && tracks.every((track) => track === CONSOLIDATION_TRACK)) {
+    return "consolidation";
+  }
+  if (tracks.length === 0 && sources.length > 0 && sources.every((s) => s.source === CONSOLIDATION_TRACK)) {
+    return "consolidation";
+  }
+  return "ingestion";
+}
 
 /** Sum two optional counts, keeping null when neither side reported anything. */
 function addOrNull(a: number | null, b: number | null): number | null {
@@ -174,39 +277,47 @@ function addOrNull(a: number | null, b: number | null): number | null {
 export function parseRunHistory(input: unknown): RunHistory {
   if (!isRecord(input)) return { county: null, generatedAt: null, runs: [] };
   const runsRaw = Array.isArray(input.runs) ? input.runs : [];
-  const runs: PipelineRun[] = runsRaw.filter(isRecord).map((run) => ({
-    run_id: str(run.run_id) ?? "unknown",
-    started_at: str(run.started_at),
-    finished_at: str(run.finished_at),
-    trigger: str(run.trigger),
-    git_sha: str(run.git_sha),
+  const runs: PipelineRun[] = runsRaw.filter(isRecord).map((run) => {
     // The pipeline names these `track` and `rows_staged`; earlier field names are still accepted so
     // an older run-history.json keeps rendering. Reading only the old names made every row on the
     // runs page say "unknown" with 0 fetched, on the page whose whole job is to evidence ingestion.
-    sources: (Array.isArray(run.sources) ? run.sources : []).filter(isRecord).map((source) => ({
-      source: str(source.track) ?? str(source.source) ?? str(source.source_system) ?? "unknown",
-      rows_fetched: num(source.rows_staged) ?? num(source.rows_fetched),
-      inserted: num(source.inserted),
-      updated: num(source.updated),
-      unchanged: num(source.unchanged),
-      // not emitted per source; the change this run made is what was inserted plus what changed
-      delta_vs_previous:
-        num(source.delta_vs_previous) ?? addOrNull(num(source.inserted), num(source.updated)),
-      artifact_sha256: str(source.source_sha256) ?? str(source.artifact_sha256),
-      source_url: str(source.source_url),
-      limitations: strList(source.limitations),
-    })),
-    artifacts: (Array.isArray(run.artifacts) ? run.artifacts : [])
+    const sources: RunSource[] = (Array.isArray(run.sources) ? run.sources : [])
       .filter(isRecord)
-      .map((artifact) => ({
-        name: str(artifact.name) ?? "artifact",
-        cid: str(artifact.cid),
-        ipns_label: str(artifact.ipns_label),
-        ipns_name: str(artifact.ipns_name),
-        gateway_url: str(artifact.gateway_url),
-      })),
-    extra: rest(run, KNOWN_RUN_KEYS),
-  }));
+      .map((source) => ({
+        source: str(source.track) ?? str(source.source) ?? str(source.source_system) ?? "unknown",
+        status: str(source.status),
+        rows_fetched: num(source.rows_staged) ?? num(source.rows_fetched),
+        inserted: num(source.inserted),
+        updated: num(source.updated),
+        unchanged: num(source.unchanged),
+        // The pipeline publishes this as `delta_vs_prev_total`. Reading only the name this UI
+        // invented meant the column always fell through to inserted + updated, so a header that
+        // said "delta vs previous" showed the same number as the two columns beside it.
+        delta_vs_previous:
+          num(source.delta_vs_prev_total) ??
+          num(source.delta_vs_previous) ??
+          addOrNull(num(source.inserted), num(source.updated)),
+        table_total_after: num(source.table_total_after),
+        artifact_sha256: str(source.source_sha256) ?? str(source.artifact_sha256),
+        source_url: str(source.source_url),
+        limitations: strList(source.limitations),
+      }));
+    const tracks = strList(run.tracks);
+    const trigger = str(run.trigger);
+    return {
+      run_id: str(run.run_id) ?? "unknown",
+      started_at: str(run.started_at),
+      finished_at: str(run.finished_at),
+      trigger,
+      status: str(run.status),
+      git_sha: str(run.git_sha),
+      tracks,
+      kind: runKind(trigger, tracks, sources),
+      sources,
+      artifacts: parseArtifacts(run.artifacts),
+      extra: rest(run, KNOWN_RUN_KEYS),
+    };
+  });
   return {
     county: str(input.county),
     generatedAt: str(input.generatedAt) ?? str(input.generated_at),
@@ -327,29 +438,120 @@ export function parseOpenDataIndex(input: unknown): OpenDataIndex {
   };
 }
 
-/** Aggregate a run history into per source cumulative totals across runs. */
-export function cumulativeBySource(
-  runs: PipelineRun[],
-): { source: string; points: { run_id: string; total: number }[] }[] {
-  const ordered = [...runs].sort((a, b) => (a.started_at ?? "").localeCompare(b.started_at ?? ""));
-  const sources = new Set<string>();
-  for (const run of ordered) for (const source of run.sources) sources.add(source.source);
-
-  return [...sources].sort().map((source) => {
-    let total = 0;
-    const points = ordered.map((run) => {
-      const entry = run.sources.find((item) => item.source === source);
-      if (entry) {
-        // Prefer an explicit cumulative signal, otherwise accumulate inserts.
-        total += entry.inserted ?? entry.delta_vs_previous ?? 0;
-      }
-      return { run_id: run.run_id, total };
-    });
-    return { source, points };
-  });
-}
-
 /** Latest run first. */
 export function sortRunsDesc(runs: PipelineRun[]): PipelineRun[] {
   return [...runs].sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""));
+}
+
+/**
+ * The newest run that actually ingested sources.
+ *
+ * The consolidation pass runs right after each ingestion run, so it is almost always the
+ * newest entry in the history. Taking `runs[0]` as "the latest run" therefore described the
+ * whole dataset with one synthetic row: "across 1 sources", a totals table holding only
+ * `consolidation`, and no per source deltas at all. Consolidation evidence is real and is
+ * surfaced separately; it just never stands in for an ingestion run.
+ */
+export function latestIngestionRun(runs: PipelineRun[]): PipelineRun | null {
+  return sortRunsDesc(runs).find((run) => run.kind === "ingestion") ?? null;
+}
+
+/** The newest consolidation pass, whose artifacts are the published open-data index. */
+export function latestConsolidationRun(runs: PipelineRun[]): PipelineRun | null {
+  return sortRunsDesc(runs).find((run) => run.kind === "consolidation") ?? null;
+}
+
+/** Source names that are real data sources. Excludes the consolidation maintenance track. */
+export function ingestionSourceNames(runs: PipelineRun[]): string[] {
+  const names = new Set<string>();
+  for (const run of runs) {
+    if (run.kind === "consolidation") continue;
+    for (const source of run.sources) {
+      if (source.source !== CONSOLIDATION_TRACK) names.add(source.source);
+    }
+  }
+  return [...names].sort();
+}
+
+/**
+ * Distinct `source: limitation` pairs.
+ *
+ * Summing `limitations.length` over every run counted the same two `sales` caveats once per
+ * run, so one standing constraint observed across fourteen runs read as fourteen problems.
+ * A limitation is a property of a source, not an event.
+ */
+export function distinctLimitations(runs: PipelineRun[]): { source: string; limitation: string }[] {
+  const seen = new Map<string, { source: string; limitation: string }>();
+  for (const run of runs) {
+    for (const source of run.sources) {
+      for (const limitation of source.limitations) {
+        seen.set(`${source.source}\u0000${limitation}`, { source: source.source, limitation });
+      }
+    }
+  }
+  return [...seen.values()].sort(
+    (a, b) => a.source.localeCompare(b.source) || a.limitation.localeCompare(b.limitation),
+  );
+}
+
+/** One row of the run-by-run table, and one mark on each chart. */
+export interface RunSummary {
+  run: PipelineRun;
+  run_id: string;
+  kind: RunKind;
+  startedMs: number | null;
+  durationMs: number | null;
+  trackCount: number;
+  sourcesCompleted: number;
+  sourcesSkipped: number;
+  sourcesFailed: number;
+  /**
+   * Rows this run read out of its sources and checked against what is already stored. This is
+   * the corpus each run re-verifies, and it is the number that stays flat while the pipeline
+   * proves it is incremental.
+   */
+  rowsVerified: number;
+  rowsInserted: number;
+  rowsUpdated: number;
+  /** Rows the run actually had to write: inserted plus updated. */
+  rowsWritten: number;
+  /** Movement in the target tables' own totals, summed across the run's sources. */
+  tableDelta: number | null;
+  artifactCount: number;
+  limitationCount: number;
+}
+
+function sumOrNull(values: (number | null)[]): number | null {
+  const present = values.filter((value): value is number => value !== null);
+  return present.length === 0 ? null : present.reduce((sum, value) => sum + value, 0);
+}
+
+export function summariseRun(run: PipelineRun): RunSummary {
+  const started = parseTimestamp(run.started_at);
+  const rowsInserted = run.sources.reduce((sum, s) => sum + (s.inserted ?? 0), 0);
+  const rowsUpdated = run.sources.reduce((sum, s) => sum + (s.updated ?? 0), 0);
+  const statusOf = (source: RunSource) => source.status ?? "completed";
+  return {
+    run,
+    run_id: run.run_id,
+    kind: run.kind,
+    startedMs: started === null ? null : started.getTime(),
+    durationMs: durationMs(run.started_at, run.finished_at),
+    trackCount: run.tracks.length > 0 ? run.tracks.length : run.sources.length,
+    sourcesCompleted: run.sources.filter((s) => statusOf(s) === "completed").length,
+    sourcesSkipped: run.sources.filter((s) => statusOf(s) === "skipped").length,
+    sourcesFailed: run.sources.filter((s) => statusOf(s) === "failed").length,
+    rowsVerified: run.sources.reduce((sum, s) => sum + (s.rows_fetched ?? 0), 0),
+    rowsInserted,
+    rowsUpdated,
+    rowsWritten: rowsInserted + rowsUpdated,
+    tableDelta: sumOrNull(run.sources.map((s) => s.delta_vs_previous)),
+    artifactCount: run.artifacts.length,
+    limitationCount: run.sources.reduce((sum, s) => sum + s.limitations.length, 0),
+  };
+}
+
+/** Newest first, which is the order the run table renders in. */
+export function summariseRuns(runs: PipelineRun[]): RunSummary[] {
+  return sortRunsDesc(runs).map(summariseRun);
 }

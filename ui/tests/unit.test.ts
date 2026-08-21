@@ -5,19 +5,28 @@ import { CoverageBar } from "@/components/Charts";
 import { guardSql, stripSqlComments, MAX_LIMIT, DEFAULT_LIMIT } from "@/lib/sql";
 import { resolveArtifactUrl } from "@/lib/config";
 import {
-  cumulativeBySource,
+  distinctLimitations,
+  ingestionSourceNames,
+  latestConsolidationRun,
+  latestIngestionRun,
   parseCatalog,
   parseCoverage,
   parseOpenDataIndex,
   parseRunHistory,
   sortRunsDesc,
+  summariseRun,
+  summariseRuns,
 } from "@/lib/types";
 import {
   displayCell,
   displayCellForColumn,
+  formatDurationMs,
   formatMetres,
+  formatTimestamp,
   formatUsd,
   isPlainIntegerColumn,
+  parseTimestamp,
+  relativeTime,
   shortenId,
   signedDelta,
   toCsv,
@@ -206,7 +215,7 @@ describe("lenient artifact parsers", () => {
     expect(parsed.properties["1234"]).toBe("bafyabc");
   });
 
-  it("orders runs newest first and accumulates per source", () => {
+  it("orders runs newest first", () => {
     const history = parseRunHistory({
       runs: [
         { run_id: "b", started_at: "2026-08-02T00:00:00Z", sources: [{ source: "s", inserted: 5 }] },
@@ -214,10 +223,6 @@ describe("lenient artifact parsers", () => {
       ],
     });
     expect(sortRunsDesc(history.runs).map((run) => run.run_id)).toEqual(["b", "a"]);
-
-    const [series] = cumulativeBySource(history.runs);
-    expect(series.source).toBe("s");
-    expect(series.points.map((point) => point.total)).toEqual([10, 15]);
   });
 });
 
@@ -242,6 +247,14 @@ describe("formatting", () => {
   it("shortens long identifiers but keeps short ones whole", () => {
     expect(shortenId("bafybeigd" + "x".repeat(50), 10, 6)).toBe("bafybeigdx...xxxxxx");
     expect(shortenId("short")).toBe("short");
+  });
+
+  it("keeps only the head when no tail is asked for", () => {
+    // `slice(-0)` is `slice(0)`, so the naive form printed the whole sha after the ellipsis
+    // and the runs page showed "5be287e...5be287e52c628428eaaa72e10a3d71d22f6d3ec1".
+    const sha = "5be287e52c628428eaaa72e10a3d71d22f6d3ec1";
+    expect(shortenId(sha, 7, 0)).toBe("5be287e...");
+    expect(shortenId(sha, 7, 0)).not.toContain(sha);
   });
 
   it("flattens arrow values", () => {

@@ -29,24 +29,49 @@ export function formatPercent(part: number | null, whole: number | null): string
   return `${((part / whole) * 100).toFixed(1)}%`;
 }
 
+/**
+ * Parse a published timestamp, treating a zoneless stamp as UTC.
+ *
+ * Every stamp this app renders is UTC at the point it was recorded, but not every one
+ * says so. DuckDB TIMESTAMP columns carry no zone, so run records published before the
+ * pipeline fix read "2026-08-21 16:34:49.119" - and the ECMAScript rule for a date-time
+ * string with no offset is LOCAL time. `new Date(...)` therefore moved every run record
+ * by the reader's UTC offset: a 16:34Z run showed as 09:34Z with "7h ago" in Bangkok and
+ * sat in the future in New York, on a page whose whole claim is continuous refresh.
+ *
+ * Anything that already names a zone - a trailing Z or a +HH:MM / -HH:MM offset - is
+ * handed to the platform parser untouched, so the newly published `Z` stamps and the
+ * coverage snapshot are unaffected. A bare `YYYY-MM-DD` is already UTC by specification.
+ */
+const ZONELESS_DATE_TIME =
+  /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?)$/;
+
+export function parseTimestamp(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  const zoneless = ZONELESS_DATE_TIME.exec(trimmed);
+  const date = new Date(zoneless ? `${zoneless[1]}T${zoneless[2]}Z` : trimmed);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 export function formatTimestamp(value: string | null | undefined): string {
   if (!value) return NOT_AVAILABLE;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  const date = parseTimestamp(value);
+  if (date === null) return value;
   return date.toISOString().replace("T", " ").replace(/\.\d+Z$/, "Z");
 }
 
 export function formatDateOnly(value: string | null | undefined): string {
   if (!value) return NOT_AVAILABLE;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  const date = parseTimestamp(value);
+  if (date === null) return value;
   return date.toISOString().slice(0, 10);
 }
 
 /** "3 hours ago" style, deliberately coarse. */
 export function relativeTime(value: string | null | undefined, now = Date.now()): string {
   if (!value) return NOT_AVAILABLE;
-  const then = new Date(value).getTime();
+  const then = parseTimestamp(value)?.getTime() ?? Number.NaN;
   if (Number.isNaN(then)) return NOT_AVAILABLE;
   const seconds = Math.round((now - then) / 1000);
   if (seconds < 0) return "in the future";
@@ -59,12 +84,30 @@ export function relativeTime(value: string | null | undefined, now = Date.now())
   return `${days}d ago`;
 }
 
-export function formatDurationMs(startIso: string | null, endIso: string | null): string {
-  if (!startIso || !endIso) return NOT_AVAILABLE;
-  const start = new Date(startIso).getTime();
-  const end = new Date(endIso).getTime();
-  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return NOT_AVAILABLE;
-  const seconds = Math.round((end - start) / 1000);
+/** Elapsed milliseconds between two published stamps, or null if either is unusable. */
+export function durationMs(
+  startIso: string | null | undefined,
+  endIso: string | null | undefined,
+): number | null {
+  const start = parseTimestamp(startIso)?.getTime();
+  const end = parseTimestamp(endIso)?.getTime();
+  if (start === undefined || end === undefined || end < start) return null;
+  return end - start;
+}
+
+export function formatDurationMs(
+  startIso: string | null | undefined,
+  endIso: string | null | undefined,
+): string {
+  const elapsed = durationMs(startIso, endIso);
+  if (elapsed === null) return NOT_AVAILABLE;
+  return formatElapsed(elapsed);
+}
+
+/** "27m 4s" / "24s". Coarse on purpose: a run is not timed to the millisecond. */
+export function formatElapsed(elapsed: number | null): string {
+  if (elapsed === null || !Number.isFinite(elapsed) || elapsed < 0) return NOT_AVAILABLE;
+  const seconds = Math.round(elapsed / 1000);
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   return `${minutes}m ${seconds % 60}s`;
@@ -76,11 +119,17 @@ export function formatMetres(value: number | null | undefined): string {
   return `${Math.round(value)} m`;
 }
 
-/** Shorten a CID or long hash for display, keeping head and tail. */
+/**
+ * Shorten a CID or long hash for display, keeping head and tail.
+ *
+ * `tail: 0` means "head only", which is how a git sha is shown. It has to be special cased:
+ * `slice(-0)` is `slice(0)`, so the naive form returned the entire string after the ellipsis
+ * and the runs page printed "5be287e...5be287e52c628428eaaa72e10a3d71d22f6d3ec1".
+ */
 export function shortenId(value: string | null | undefined, head = 10, tail = 6): string {
   if (!value) return NOT_AVAILABLE;
   if (value.length <= head + tail + 3) return value;
-  return `${value.slice(0, head)}...${value.slice(-tail)}`;
+  return `${value.slice(0, head)}...${tail === 0 ? "" : value.slice(-tail)}`;
 }
 
 export function signedDelta(value: number | null | undefined): string {

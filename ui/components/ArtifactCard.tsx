@@ -1,7 +1,19 @@
 "use client";
 
+import { formatInt } from "@/lib/format";
 import type { RunArtifact } from "@/lib/types";
 import { CopyButton, IdWithCopy, NotAvailable } from "./ui";
+
+/** "404,023 records, 1.8 GB" where the publisher recorded either. */
+function scale(artifact: RunArtifact): string | null {
+  const parts: string[] = [];
+  if (artifact.rows !== null) parts.push(`${formatInt(artifact.rows)} records`);
+  if (artifact.bytes !== null) {
+    const mb = artifact.bytes / 1_000_000;
+    parts.push(mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${mb.toFixed(1)} MB`);
+  }
+  return parts.length === 0 ? null : parts.join(", ");
+}
 
 /**
  * One published artifact: its CID, its IPNS label and name, and the gateway URL
@@ -21,6 +33,9 @@ export function ArtifactCard({ artifact }: { artifact: RunArtifact }) {
           <span className="badge badge-accent">{artifact.ipns_label}</span>
         ) : null}
       </div>
+      {scale(artifact) ? (
+        <div className="mt-0.5 text-[11.5px] text-faint">{scale(artifact)}</div>
+      ) : null}
 
       <dl className="kv mt-2 text-[12.5px]">
         <dt>CID</dt>
