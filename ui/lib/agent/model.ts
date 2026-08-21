@@ -8,8 +8,10 @@
  *   AGENT_PROVIDER=bedrock    needs AWS credentials in the environment
  *                             (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY /
  *                             AWS_REGION, or AWS_BEARER_TOKEN_BEDROCK)
- *   AGENT_MODEL               model id, default claude-sonnet-4-5 for Anthropic,
- *                             us.anthropic.claude-sonnet-4-5-20250929-v1:0 for Bedrock
+ *   AGENT_MODEL               model id, default claude-opus-5 for Anthropic,
+ *                             anthropic.claude-opus-5 for Bedrock. Set
+ *                             AGENT_MODEL=claude-sonnet-5 to trade some answer
+ *                             quality for latency during a live demo.
  */
 
 import type { Env } from "./types";
@@ -26,8 +28,9 @@ export interface ResolvedModel {
   instructions: (system: string) => SystemModelMessage;
 }
 
-export const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5";
-export const DEFAULT_BEDROCK_MODEL = "us.anthropic.claude-sonnet-4-5-20250929-v1:0";
+export const DEFAULT_ANTHROPIC_MODEL = "claude-opus-5";
+// Bedrock ids carry an `anthropic.` prefix and no date suffix.
+export const DEFAULT_BEDROCK_MODEL = "anthropic.claude-opus-5";
 
 export class AgentNotConfiguredError extends Error {
   constructor(message = NOT_CONFIGURED_MESSAGE) {

@@ -30,7 +30,7 @@ export const maxDuration = 60;
 export type { AgentResponse, AgentToolCall, AgentEvidenceRow } from "@/lib/agent/types";
 
 const NOT_CONFIGURED_HINT =
-  "Set ANTHROPIC_API_KEY (and optionally AGENT_MODEL, default claude-sonnet-4-5) in the server environment, or AGENT_PROVIDER=bedrock with AWS credentials, then redeploy. Every question the agent answers is also answerable on the Questions page, which runs the same SQL rules in the browser.";
+  "Set ANTHROPIC_API_KEY (and optionally AGENT_MODEL, default claude-opus-5) in the server environment, or AGENT_PROVIDER=bedrock with AWS credentials, then redeploy. Every question the agent answers is also answerable on the Questions page, which runs the same SQL rules in the browser.";
 
 function notConfigured(message = NOT_CONFIGURED_MESSAGE): NextResponse<AgentResponse> {
   return NextResponse.json(emptyResponse("not_implemented", message, NOT_CONFIGURED_HINT), {

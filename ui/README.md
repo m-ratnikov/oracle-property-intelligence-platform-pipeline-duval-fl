@@ -239,7 +239,7 @@ combinations, and a stated heuristic score for "strong candidates for further re
 | Variable | Required | Notes |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | yes, for the agent | Server only. Without it the route returns 501 and the page shows "agent not configured". |
-| `AGENT_MODEL` | no | Default `claude-sonnet-4-5` (Anthropic) or `us.anthropic.claude-sonnet-4-5-20250929-v1:0` (Bedrock). |
+| `AGENT_MODEL` | no | Default `claude-opus-5` (Anthropic) or `anthropic.claude-opus-5` (Bedrock). Set `claude-sonnet-5` to trade some answer quality for latency. |
 | `AGENT_PROVIDER` | no | `anthropic` (default) or `bedrock`. Bedrock needs `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_REGION` or `AWS_BEARER_TOKEN_BEDROCK`. |
 | `QUERY_TABLE_URL` | no | Server side parquet URL (IPNS root or direct object). Falls back to `NEXT_PUBLIC_QUERY_TABLE_URL`, then to `public/sample/query-table.parquet`. |
 | `RUN_HISTORY_URL`, `OPEN_DATA_INDEX_URL` | no | Server side overrides; fall back to the `NEXT_PUBLIC_*` values, then to the sample files. |

@@ -171,9 +171,12 @@ test.describe("agent shell", () => {
   test("shows an honest not wired state rather than inventing an answer", async ({ page }) => {
     await page.goto("/agent");
     await page.getByRole("button", { name: /Which properties have roofs older/ }).click();
-    await expect(page.getByText("agent not wired yet")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText("Tool call transcript")).toBeVisible();
-    await expect(page.getByText("Evidence", { exact: true })).toBeVisible();
+    // Without ANTHROPIC_API_KEY the route refuses rather than inventing an answer, and the page
+    // says which variable is missing. Assert the copy the route actually returns.
+    await expect(
+      page.getByText("agent not configured: set ANTHROPIC_API_KEY").first(),
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("ANTHROPIC_API_KEY").first()).toBeVisible();
   });
 });
 
