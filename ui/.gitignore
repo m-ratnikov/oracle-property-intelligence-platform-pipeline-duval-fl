@@ -10,3 +10,4 @@ test-results/
 playwright-report/
 # generated from node_modules by scripts/copy-duckdb.mjs
 public/duckdb/
+public/real/
