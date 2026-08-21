@@ -16,10 +16,20 @@ import {
   type FilebaseEnv,
 } from "./filebase.js";
 
-/** IPNS labels per Elephant conventions (one label per dataset; never reuse). */
+/**
+ * IPNS labels per Elephant conventions (one label per dataset; never reuse).
+ *
+ * Every artifact a consumer follows ACROSS runs needs a name, not a CID. A CID is immutable, so a
+ * consumer pinned to one keeps reading the run it was published in: the runs page froze at eight
+ * runs and could only move by rebuilding the site, on the page whose entire job is to show that
+ * ingestion is continuous. The catalog is named for the same reason - it is what an MCP deployment
+ * is pointed at, and that pointer should not have to be reissued every publish.
+ */
 export const IPNS_LABELS = {
   queryTable: `oracle-query-table-${COUNTY.key}`,
   coverage: `oracle-dataset-coverage-${COUNTY.key}`,
+  runHistory: `oracle-run-history-${COUNTY.key}`,
+  catalog: "oracle-published-counties",
   artifacts: `${COUNTY.key}-oracle-artifacts`,
 } as const;
 
@@ -91,7 +101,7 @@ export async function planPublish(paths: Paths): Promise<PublishObject[]> {
   const cov = join(dir, "dataset-coverage.json");
   if (existsSync(cov)) objects.push(await describe("dataset-coverage.json", cov, OBJECT_KEYS.coverage, JSON_CT, IPNS_LABELS.coverage));
   const rh = join(dir, "run-history.json");
-  if (existsSync(rh)) objects.push(await describe("run-history.json", rh, OBJECT_KEYS.runHistory, JSON_CT, null));
+  if (existsSync(rh)) objects.push(await describe("run-history.json", rh, OBJECT_KEYS.runHistory, JSON_CT, IPNS_LABELS.runHistory));
   const tablesDir = join(dir, "tables");
   if (existsSync(tablesDir)) {
     for (const f of readdirSync(tablesDir).filter((f) => f.endsWith(".parquet")).sort()) {
@@ -200,7 +210,7 @@ export async function executePublish(opts: {
   const catalog = buildCatalog({ generatedAt: publishedAt, queryTableUrl: qtUrl, datasetCoverageUrl: covUrl });
   const catalogPath = join(opts.paths.publishDir, "published-counties.json");
   writeFileSync(catalogPath, JSON.stringify(catalog, null, 2));
-  results.push(await upload(await describe("published-counties.json", catalogPath, OBJECT_KEYS.catalog, JSON_CT, null)));
+  results.push(await pointIpns(await upload(await describe("published-counties.json", catalogPath, OBJECT_KEYS.catalog, JSON_CT, IPNS_LABELS.catalog))));
 
   // 4. artifacts index (points the artifacts IPNS at one JSON that lists every CID)
   const ipns: PublishManifest["ipns"] = {};
@@ -257,7 +267,8 @@ export async function executePublish(opts: {
     ORACLE_OPEN_DATA_DEFAULT_COUNTY: COUNTY.key,
     PROPERTY_QUERY_TABLE_DEFAULT_COUNTY: COUNTY.key,
     DATASET_COVERAGE_MAP: JSON.stringify({ [COUNTY.key]: covUrl }),
-    PUBLISHED_COUNTY_CATALOG_URL: byName("published-counties.json")?.gatewayUrl ?? "",
+    PUBLISHED_COUNTY_CATALOG_URL:
+      byName("published-counties.json")?.ipns?.gatewayUrl ?? byName("published-counties.json")?.gatewayUrl ?? "",
   };
 
   const manifest: PublishManifest = {

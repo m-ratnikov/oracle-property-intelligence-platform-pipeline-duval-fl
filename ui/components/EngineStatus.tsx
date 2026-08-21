@@ -34,17 +34,30 @@ export function EngineStatus({ compact = false }: { compact?: boolean }) {
   }
 
   if (engine.stage !== "ready") {
+    /*
+     * Three rows, matching the ready state's badge, detail and url lines. The
+     * engine takes seconds to attach over a public gateway, and without the
+     * reserved height this card grows by about 46px on arrival and pushes every
+     * section below it down the page.
+     */
     return (
-      <div className="card card-pad">
-        <div className="flex items-center gap-2 text-[13px] text-muted">
+      <div className="card card-pad" data-testid="engine-loading">
+        <div className="flex h-5 items-center gap-2 text-[13px] text-muted">
           <span className="pulsing inline-block h-2 w-2 rounded-full bg-accent" />
           {engine.message}
         </div>
-        {engine.progress !== null ? (
-          <div className="progress mt-2">
-            <div style={{ width: `${Math.round(engine.progress * 100)}%` }} />
-          </div>
-        ) : null}
+        <div className="mt-1.5 flex h-[18px] items-center">
+          {engine.progress !== null ? (
+            <div className="progress w-full">
+              <div style={{ width: `${Math.round(engine.progress * 100)}%` }} />
+            </div>
+          ) : (
+            <span className="skeleton block h-2.5 w-64 max-w-full" />
+          )}
+        </div>
+        <div className="mt-1 flex h-[18px] items-center">
+          <span className="skeleton block h-2.5 w-[420px] max-w-full" />
+        </div>
       </div>
     );
   }
