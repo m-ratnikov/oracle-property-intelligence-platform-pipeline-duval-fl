@@ -1,9 +1,30 @@
 {
-  "discoveredAt": "2026-08-21T08:47:58.344Z",
+  "discoveredAt": "2026-08-21T09:32:32.097Z",
+  "shellUrl": "https://jaxepics.coj.net/Permit/View/B-25-279425.000",
   "scripts": [
     "https://js.arcgis.com/calcite-components/3.0.3/calcite.esm.js",
     "polyfills-5FDKUQTZ.js",
     "main-DIQF3EFM.js"
+  ],
+  "bundles": [
+    {
+      "url": "https://js.arcgis.com/calcite-components/3.0.3/calcite.esm.js",
+      "status": 200,
+      "bytes": 53909,
+      "literals": 0
+    },
+    {
+      "url": "https://jaxepics.coj.net/polyfills-5FDKUQTZ.js",
+      "status": 200,
+      "bytes": 34609,
+      "literals": 0
+    },
+    {
+      "url": "https://jaxepics.coj.net/main-DIQF3EFM.js",
+      "status": 200,
+      "bytes": 588,
+      "literals": 0
+    }
   ],
   "apiPaths": []
 }
