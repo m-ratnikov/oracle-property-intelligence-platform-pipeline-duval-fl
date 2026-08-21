@@ -1,0 +1,213 @@
+{
+  "run_id": "01M0HZBCWVXHYQK8EH72QJCH3N",
+  "county": "duval",
+  "started_at": "2026-08-21 10:54:59.997",
+  "finished_at": "2026-08-21 10:55:37.448",
+  "status": "completed",
+  "trigger": "workflow_dispatch",
+  "git_sha": "60e22c1bbec32c7ae1f19773c65d6ca054585033",
+  "tracks": [
+    "contractors"
+  ],
+  "window": null,
+  "sources": [
+    {
+      "track": "contractors",
+      "source_system": "dbpr_cilb",
+      "target_table": "contractors",
+      "source_url": "https://www2.myfloridalicense.com/sto/file_download/extracts/cilb_certified.csv",
+      "artifact_path": "contractors/cilb_certified.csv",
+      "artifact_sha256": "4f7966501a02e980fcb0c60623b0670046e75a45983ed9ca4e3ba73ff40bc6e6",
+      "artifact_etag": null,
+      "artifact_last_modified": "Thu, 20 Aug 2026 10:46:31 GMT",
+      "artifact_bytes": 753973144,
+      "download_status": "unchanged",
+      "rows_staged": 4049,
+      "inserted": 4049,
+      "updated": 0,
+      "unchanged": 0,
+      "missing_in_source": 0,
+      "table_total_after": 4049,
+      "delta_vs_prev_total": 4049,
+      "started_at": "2026-08-21T10:55:00.550Z",
+      "finished_at": "2026-08-21T10:55:25.219Z",
+      "status": "completed",
+      "limitations": [
+        "HTTP 403 from non-US IPs; from a US runner with a browser UA the files download",
+        "BBB not used: terms forbid aggregation",
+        "cilb_certified: 358 malformed CSV rows rejected (ragged/quoted lines), see DuckDB rejects",
+        "cilb_registered: 129 malformed CSV rows rejected (ragged/quoted lines), see DuckDB rejects",
+        "DBPR CILB extracts are headerless course-completion rows, mapped by column position; they carry no county, licence status, board number or DBA, so those stay NULL",
+        "Duval matched on municipality name plus the 322xx zip range, which overlaps a few neighbouring-county zips (e.g. 32259 St Johns); DBPR publishes no county field"
+      ],
+      "notes": {
+        "cilb_certified_first_row": [
+          "CGC",
+          "Cert General",
+          "CGC058548",
+          "AALDERINK, JAMES",
+          "623 SE 19 CT",
+          "column5",
+          "CAPE CORAL, FL  33990",
+          "08/31/2028",
+          "0008545",
+          "UNDERSTANDING WORKERS COMPENSATION",
+          "1",
+          "07/29/2020"
+        ],
+        "cilb_certified_rows_statewide": 4131157,
+        "cilb_certified_rows_rejected": 358,
+        "cilb_certified_sha256": "4f7966501a02e980fcb0c60623b0670046e75a45983ed9ca4e3ba73ff40bc6e6",
+        "cilb_registered_first_row": [
+          "RA",
+          "Reg Air",
+          "RA13067315",
+          "ABELL, LAWRENCE",
+          "4049 A GRAND BOULEVARD",
+          "column5",
+          "NEW PORT RICHEY, FL  34652",
+          "08/31/2027",
+          "0008513",
+          "BUSINESS MANAGEMENT: BRIEF OVERVIEW",
+          "1",
+          "07/26/2017"
+        ],
+        "cilb_registered_rows_statewide": 161843,
+        "cilb_registered_rows_rejected": 129,
+        "cilb_registered_sha256": "b6218fb7a4d9e1af7d5a77960f1c10ac889e747ee4e517c1d8c64198ddcaf1c1",
+        "roofingContractorsDuval": 516,
+        "duvalContractorsAllTrades": 4049
+      },
+      "error": null
+    }
+  ],
+  "limitations": [
+    "contractors: HTTP 403 from non-US IPs; from a US runner with a browser UA the files download",
+    "contractors: BBB not used: terms forbid aggregation",
+    "contractors: cilb_certified: 358 malformed CSV rows rejected (ragged/quoted lines), see DuckDB rejects",
+    "contractors: cilb_registered: 129 malformed CSV rows rejected (ragged/quoted lines), see DuckDB rejects",
+    "contractors: DBPR CILB extracts are headerless course-completion rows, mapped by column position; they carry no county, licence status, board number or DBA, so those stay NULL",
+    "contractors: Duval matched on municipality name plus the 322xx zip range, which overlaps a few neighbouring-county zips (e.g. 32259 St Johns); DBPR publishes no county field"
+  ],
+  "totals": {
+    "parcels": 404023,
+    "parcel_geometry": 405716,
+    "sales_history": 68903,
+    "permits": 0,
+    "contractors": 4049,
+    "businesses": 1024,
+    "business_events": 17919,
+    "places": 3084,
+    "transit_stops": 2501,
+    "transit_routes": 45,
+    "water_bodies": 757,
+    "address_points": 671814,
+    "coj_parcels": 407985,
+    "owners": 323925,
+    "entity_links": 1176361,
+    "derived.properties_features": 404023
+  },
+  "artifacts": {
+    "queryTable": {
+      "path": "query-table.parquet",
+      "rows": 404023,
+      "bytes": 49514091,
+      "sha256": "4175454408e379be67d804b60c53790e6fa46c45c4964ddcdcb7cc8861c82d04",
+      "cid": "Qmd8Vzfa7UvAL2FQj3UFCpRwYCbBQW3RdwD2ZERVCTmE6t",
+      "cidV1": "bafybeig3yj5q23amtktpw4xn4hevtqa33v4w23yscx6lel5ajesitdmire",
+      "validationOk": true,
+      "problems": []
+    },
+    "tables": {
+      "parcels": {
+        "path": "tables/parcels.parquet",
+        "rows": 404023,
+        "bytes": 38911589,
+        "sha256": "e8649656a2b133bb133a76c37d4c4d34b10ec4d6c4017d76ea200aa8ba76455e",
+        "cid": "QmVor33EJdpmF4DBbus6FUsb72rRMponxhkfDTdDKisRTa",
+        "cidV1": "bafybeido7fgbfeqc22p2ra6mbcvnypxzxbu3hsa5or3gpghrfnklkzfbau"
+      },
+      "parcel_geometry": {
+        "path": "tables/parcel_geometry.parquet",
+        "rows": 405716,
+        "bytes": 25307296,
+        "sha256": "a7ae5ca401c4cac3ca1ee0db7c793dc8a8894014af12ef3312d0f4e0a3544e3d",
+        "cid": "QmYp5YAgCPifob4ML2DRC4apJi2aqQEisALxbT8VQhiiYr",
+        "cidV1": "bafybeie3top7x774fhzzyjkyeetgbklekpw2ffmcmo5kqq63qgehvbzyym"
+      },
+      "sales_history": {
+        "path": "tables/sales_history.parquet",
+        "rows": 68903,
+        "bytes": 3427367,
+        "sha256": "7851c7c64cc4f5d8eed52ec78e966879a5fd2cc09904b18657184b515d6e06c1",
+        "cid": "QmZQJi2xNMcq7sEZY2n2zsTwdKqCjt4y6zLsXCm1ixY8is",
+        "cidV1": "bafybeifembbzegkqkk3l63ji7azocb43wenm7niwinc54hapkoeaq5zkma"
+      },
+      "contractors": {
+        "path": "tables/contractors.parquet",
+        "rows": 4049,
+        "bytes": 201640,
+        "sha256": "40c81efff71c0e88405156508a81037fe012cb9f77e8b37f64cdd3055ffca3cf",
+        "cid": "QmaingobPDgxr3ynyB4vEQxnLFErUW92fciSEUUdm9eP6i",
+        "cidV1": "bafybeifx7afir6uysvtjkquqdm3kchoatzvrggkhppmpnykmql7nccipvm"
+      },
+      "businesses": {
+        "path": "tables/businesses.parquet",
+        "rows": 1024,
+        "bytes": 108419,
+        "sha256": "8ef493204e26b97fd1a6cac83776a57aa02856da004e9e92e0cfabf1a2009386",
+        "cid": "QmPqaNGksywzZjmU1Z9MNKRTisbgUgEqSvsyBSJVezf93e",
+        "cidV1": "bafybeiawispph6zmhcjj2267a4jhozogpxtvf47vqimsuqizbemfomxs3e"
+      },
+      "places": {
+        "path": "tables/places.parquet",
+        "rows": 3084,
+        "bytes": 382955,
+        "sha256": "b15769b82d699b7fd5039cc247a82b63f9b230a04246d8ebfac37b44ef201a0e",
+        "cid": "QmYDdHWy8SvJRRBZJwGhxFRfxgN5FnmyNdSa7qBDhkbtmh",
+        "cidV1": "bafybeieszayyw3ytzrd5w753l2w446xh7yrjku4wnjomplbrhphbhb2ajq"
+      },
+      "transit_stops": {
+        "path": "tables/transit_stops.parquet",
+        "rows": 2501,
+        "bytes": 110120,
+        "sha256": "08bf6fe239ec5622611e442d3d41788e2dea16798748ce98a780190e434c5f4f",
+        "cid": "Qmc4Taz8jp7ScTJquLq66hodAfUHccDhaDStkTjSSDkgxi",
+        "cidV1": "bafybeigl3w7vtzyehisecv2vfz7fd4ewavfrwg7qfhb545qje7hpufhmom"
+      },
+      "water_bodies": {
+        "path": "tables/water_bodies.parquet",
+        "rows": 757,
+        "bytes": 3161848,
+        "sha256": "1d12f49528e543ae21ef94fcf77039cd95fd34588702c219dbf3122ededb1f26",
+        "cid": "QmeE2e5LDnAyC9eckQXBatq9mA36dqpTvR17BfsRPxwF3Z",
+        "cidV1": "bafybeihmbc4nqudo5dptgb34mb2naqbupcuzygw7pcduer5ok4o3cqcmfq"
+      },
+      "address_points": {
+        "path": "tables/address_points.parquet",
+        "rows": 671814,
+        "bytes": 28231885,
+        "sha256": "a384388e2093e73edf7f03fa3b50c9cde684c726479627096c10da2b1c89ce44",
+        "cid": "QmZ5Jtg6DAXKNkubrcivnojFDvTGM793C9TegaJ769srSy",
+        "cidV1": "bafybeie7qjxz4hf5er5cevnupo7mhcizmqqpjhmhqjmcwk3ycrtoyqangy"
+      },
+      "entity_links": {
+        "path": "tables/entity_links.parquet",
+        "rows": 1176361,
+        "bytes": 38262193,
+        "sha256": "7b4e7e6d935bd1f21e7d777553d6cb5006f88b552fcc413863e54c840aa36df0",
+        "cid": "QmQZPUp698HYADW2Y9Ni8SQC8s1ZDvbJy9bucP91kLwTDD",
+        "cidV1": "bafybeiba7k2gigzk4ho5zxx5i4azk6r27sbzwpofglc67pz434my2gjo5q"
+      }
+    },
+    "egressCountry": "US",
+    "coverage": {
+      "path": "dataset-coverage.json",
+      "bytes": 14015,
+      "sha256": "a7e0b188f33d8bcb830a3792a13feae41e2228f667ffe9af07e178d641033e97",
+      "cid": "QmT7NYJztLFppAXR1cuUVKWPBjdH1Q9jb5BdUsf6ywmKvg",
+      "cidV1": "bafybeicg4onblm7qhhgbrz4qiy3f7jeoohdt5b5povnusmahrmxeyabsge"
+    }
+  },
+  "error": null
+}

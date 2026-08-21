@@ -1,0 +1,61 @@
+{
+  "run_id": "01M0HZCKVT3PS6GMFV9CWV2M8V",
+  "county": "duval",
+  "started_at": "2026-08-21 10:55:39.9",
+  "finished_at": "2026-08-21 10:56:02.824",
+  "status": "completed",
+  "trigger": "consolidation",
+  "git_sha": null,
+  "tracks": [
+    "consolidation"
+  ],
+  "window": "changed",
+  "sources": [
+    {
+      "track": "consolidation",
+      "source_system": "duval_consolidation",
+      "target_table": "consolidation_state",
+      "source_url": "derived",
+      "rows_staged": 404023,
+      "inserted": 10,
+      "updated": 0,
+      "unchanged": 404013,
+      "missing_in_source": 0,
+      "table_total_after": 404023,
+      "status": "completed",
+      "started_at": "2026-08-21T10:55:39.900Z",
+      "finished_at": "2026-08-21T10:56:02.824Z",
+      "limitations": [],
+      "notes": {
+        "shards": 41,
+        "totalBytes": 1776580275,
+        "indexCid": "QmNY5oPMvQPNQBETSPeLgh5EUxagUdiveCQSmXbLov27yP",
+        "manifestCid": "QmVY18CkJPYvcXQAQYW21UfXeCC9y7XujuEuat2uMB7zQW",
+        "ms": 15511,
+        "limit": null,
+        "since": "changed"
+      }
+    }
+  ],
+  "limitations": [],
+  "totals": {
+    "consolidation_state": 404023,
+    "totalBytes": 1776580275,
+    "shards": 41
+  },
+  "artifacts": {
+    "openData": {
+      "outDir": "/home/runner/work/oracle-property-intelligence-platform-pipeline-duval-fl/oracle-property-intelligence-platform-pipeline-duval-fl/.data/artifacts/publish/duval/open-data",
+      "indexCid": "QmNY5oPMvQPNQBETSPeLgh5EUxagUdiveCQSmXbLov27yP",
+      "manifestCid": "QmVY18CkJPYvcXQAQYW21UfXeCC9y7XujuEuat2uMB7zQW",
+      "propertyCount": 404023,
+      "totalBytes": 1776580275,
+      "shards": 41
+    },
+    "queryTable": {
+      "rows": 404023,
+      "propertyCidFilled": 404023
+    }
+  },
+  "error": null
+}

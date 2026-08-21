@@ -1,6 +1,6 @@
 {
   "county": "duval",
-  "exportedAt": "2026-08-21T10:42:14.153Z",
+  "exportedAt": "2026-08-21T10:55:37.448Z",
   "datasets": [
     {
       "county": "duval",
@@ -259,12 +259,12 @@
     {
       "county": "duval",
       "source": "contractors",
-      "ingested_count": 0,
-      "expected_count": 0,
-      "first_loaded_at": null,
-      "last_loaded_at": null,
-      "cid": null,
-      "ipns_label": null,
+      "ingested_count": 4049,
+      "expected_count": 4049,
+      "first_loaded_at": "2026-08-21T09:32:31Z",
+      "last_loaded_at": "2026-08-21T09:32:31Z",
+      "cid": "QmaingobPDgxr3ynyB4vEQxnLFErUW92fciSEUUdm9eP6i",
+      "ipns_label": "duval-oracle-artifacts",
       "track": "contractors",
       "source_system": "dbpr_cilb",
       "source_url": "https://www2.myfloridalicense.com/sto/file_download/extracts/cilb_certified.csv",
@@ -275,11 +275,11 @@
         "HTTP 403 from non-US IPs; from a US runner with a browser UA the files download",
         "BBB not used: terms forbid aggregation"
       ],
-      "last_run_id": "01M0HX8SRZRV0NA9E9TCGYN607",
+      "last_run_id": "01M0HZBCWVXHYQK8EH72QJCH3N",
       "last_run_status": "completed",
       "requires_us_egress": true,
       "last_skip_reason": null,
-      "roofing_contractors_count_duval": null
+      "roofing_contractors_count_duval": 516
     },
     {
       "county": "duval",
