@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { ulid } from "ulid";
-import { getPaths } from "./config.js";
+import { COUNTY, getPaths } from "./config.js";
 import { consolidationArtifacts, consolidationStateStats, exportConsolidation } from "./consolidation/export.js";
 import { formatOpenDataResult, publishOpenData } from "./publish/openData.js";
 import { all, ensureSchema, openDb, q } from "./db.js";
@@ -10,6 +10,7 @@ import { log } from "./log.js";
 import { executePublish, formatManifest, formatPlan, planPublish } from "./publish/index.js";
 import { readFilebaseEnv } from "./publish/filebase.js";
 import { loadRunHistory, runPipeline, tableTotals, writeRunHistoryFiles } from "./run.js";
+import { rehydrateRunLog } from "./runLog.js";
 import { parseTracks } from "./sources.js";
 
 interface Args {
@@ -119,6 +120,10 @@ async function main(): Promise<void> {
     case "consolidation": {
       const db = await openDb(paths.dbPath);
       await ensureSchema(db.conn);
+      // This pass republishes run-history.json from run_log (writeRunHistoryFiles below), so a
+      // cold database would publish a history of one. Fill the gaps from the committed records
+      // first; anything already in run_log wins.
+      await rehydrateRunLog(db, { runsDir: paths.runsDir, county: COUNTY.key, logger: log });
       const runId = ulid();
       const startedAt = new Date().toISOString();
       const since = args.flags.get("since") ?? "changed";

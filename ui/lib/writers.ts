@@ -101,6 +101,8 @@ function list(writers: string[]): string {
 export function tableDeltaNote(source: RunSource, others: OtherWriters | null): string | null {
   if (others === null) return null;
   const delta = source.delta_vs_previous;
+  // Unknown (null: no previous run of this track recorded) and zero both leave nothing to explain.
+  // The note accounts for a MOVE, and neither of those is a move this page measured.
   if (delta === null || delta === 0) return null;
   const own = ownMovement(source);
   if (own === delta) return null;

@@ -21,6 +21,9 @@ export interface RunSource {
    * track. Not the same quantity as inserted + updated: a table written by more than one
    * track (sales_history, written by both `sales` and `pa_detail`) moves without this
    * track inserting anything.
+   *
+   * Null means UNKNOWN, never zero: the run record had no previous run of this track to compare
+   * against. Nothing downstream may turn that into a number.
    */
   delta_vs_previous: number | null;
   /**
@@ -565,6 +568,20 @@ function sumOrNull(values: (number | null)[]): number | null {
   return present.length === 0 ? null : present.reduce((sum, value) => sum + value, 0);
 }
 
+/**
+ * The run's own table movement: the sum of its sources' deltas.
+ *
+ * A source whose delta is unknown BUT which did record a table total makes the sum unknown. Adding
+ * it as zero would publish a run total nobody measured, on the one row of the page that is supposed
+ * to total the movement. A source with no table total at all never got as far as a merge (a skipped
+ * or failed track), so it moved nothing, contributes nothing, and does not make the run unknown,
+ * which is the case most runs in the published history are in.
+ */
+function runTableDelta(sources: RunSource[]): number | null {
+  const unknown = sources.some((s) => s.delta_vs_previous === null && s.table_total_after !== null);
+  return unknown ? null : sumOrNull(sources.map((s) => s.delta_vs_previous));
+}
+
 export function summariseRun(run: PipelineRun): RunSummary {
   const started = parseTimestamp(run.started_at);
   const rowsInserted = run.sources.reduce((sum, s) => sum + (s.inserted ?? 0), 0);
@@ -584,7 +601,7 @@ export function summariseRun(run: PipelineRun): RunSummary {
     rowsInserted,
     rowsUpdated,
     rowsWritten: rowsInserted + rowsUpdated,
-    tableDelta: sumOrNull(run.sources.map((s) => s.delta_vs_previous)),
+    tableDelta: runTableDelta(run.sources),
     artifactCount: run.artifacts.length,
     limitationCount: run.sources.reduce((sum, s) => sum + s.limitations.length, 0),
   };

@@ -9,6 +9,7 @@ import { describeQueryTableArtifact, exportEntityTables, exportQueryTable, forma
 import { log as rootLog, type Logger } from "./log.js";
 import { computeFileCid } from "./publish/cid.js";
 import { buildCoverageSnapshot } from "./publish/coverage.js";
+import { insertRunSource, rehydrateRunLog } from "./runLog.js";
 import { SOURCES, type TrackName } from "./sources.js";
 import { probeUrl } from "./tracks/http.js";
 import { TRACK_RUNNERS } from "./tracks/index.js";
@@ -43,6 +44,7 @@ export interface RunSourceRecord {
   unchanged: number | null;
   missing_in_source: number | null;
   table_total_after: number | null;
+  /** Null means "no previous run of this track is recorded", which is unknown, never zero. */
   delta_vs_prev_total: number | null;
   started_at: string;
   finished_at: string;
@@ -78,6 +80,24 @@ function gitSha(env: NodeJS.ProcessEnv): string | null {
   }
 }
 
+/**
+ * How this track moved its target table since the previous recorded run of the track, or null
+ * when that is not a knowable quantity.
+ *
+ * Returning `after` for a track with no previous run recorded reported the WHOLE TABLE as the
+ * movement. The published `water` row is what that looks like: "inserted 0, updated 0,
+ * unchanged 757" and "table delta +757" in the same row, because that database's `run_log` had
+ * no earlier water run to subtract. The merge knew nothing had changed; the delta claimed a
+ * first load.
+ *
+ * "No previous run to compare against" is not +757 and it is not 0, which would claim the table
+ * did not move. It is unknown, and every consumer renders it as unknown. This is not only a cache
+ * artifact either: it is exactly what the first run of a genuinely new county hits.
+ */
+export function tableDelta(after: number | null, prevTotal: number | null): number | null {
+  return after !== null && prevTotal !== null ? after - prevTotal : null;
+}
+
 function toSourceRecord(r: TrackResult, prevTotal: number | null): RunSourceRecord {
   const after = r.merge?.totalAfter ?? null;
   return {
@@ -97,7 +117,7 @@ function toSourceRecord(r: TrackResult, prevTotal: number | null): RunSourceReco
     unchanged: r.merge?.unchanged ?? null,
     missing_in_source: r.merge?.missingInSource ?? null,
     table_total_after: after,
-    delta_vs_prev_total: after !== null && prevTotal !== null ? after - prevTotal : after,
+    delta_vs_prev_total: tableDelta(after, prevTotal),
     started_at: r.startedAt,
     finished_at: r.finishedAt,
     status: r.status,
@@ -107,7 +127,7 @@ function toSourceRecord(r: TrackResult, prevTotal: number | null): RunSourceReco
   };
 }
 
-async function previousTotal(db: Db, track: string): Promise<number | null> {
+export async function previousTotal(db: Db, track: string): Promise<number | null> {
   const rows = await all<{ t: string | number | null }>(
     db.conn,
     `SELECT table_total_after AS t FROM run_log_sources WHERE track = ${q(track)} AND status = 'completed' AND table_total_after IS NOT NULL
@@ -115,17 +135,6 @@ async function previousTotal(db: Db, track: string): Promise<number | null> {
   );
   const v = rows[0]?.t;
   return v === null || v === undefined ? null : Number(v);
-}
-
-async function insertSourceRecord(db: Db, runId: string, s: RunSourceRecord): Promise<void> {
-  const n = (v: number | null) => (v === null ? "NULL" : String(v));
-  await db.conn.run(`
-    INSERT INTO run_log_sources VALUES (
-      ${q(runId)}, ${q(s.track)}, ${q(s.source_system)}, ${q(s.target_table)}, ${q(s.source_url)},
-      ${q(s.artifact_path)}, ${q(s.artifact_sha256)}, ${q(s.artifact_etag)}, ${q(s.artifact_last_modified)}, ${n(s.artifact_bytes)},
-      ${q(s.download_status)}, ${s.rows_staged}, ${n(s.inserted)}, ${n(s.updated)}, ${n(s.unchanged)}, ${n(s.missing_in_source)},
-      ${n(s.table_total_after)}, ${n(s.delta_vs_prev_total)}, ${q(s.started_at)}::TIMESTAMP, ${q(s.finished_at)}::TIMESTAMP,
-      ${q(s.status)}, ${q(JSON.stringify(s.limitations))}::JSON, ${q(s.error)})`);
 }
 
 /**
@@ -227,6 +236,13 @@ export async function runPipeline(opts: RunOptions): Promise<{ run: RunRecord; v
   await ensureSchema(db.conn);
   logger.info("run_start", { tracks: opts.tracks, window: opts.window, trigger: opts.trigger, git_sha: sha, db: paths.dbPath });
 
+  // Before ANY lookup that reads history. The DuckDB file comes from a branch-scoped Actions
+  // cache that rolls, so `run_log` can be empty on a runner whose tables are full; the committed
+  // runs/*.json are the durable copy and every runner has them checked out. Without this the
+  // first track's previousTotal answers null and its delta reports a first load. Gaps only:
+  // anything already in run_log wins.
+  await rehydrateRunLog(db, { runsDir: paths.runsDir, county: COUNTY.key, logger });
+
   // A previous process that died mid-run leaves status 'running'; close it out honestly.
   await db.conn.run(
     `UPDATE run_log SET status = 'aborted', finished_at = ${q(startedAt)}::TIMESTAMP,
@@ -293,7 +309,7 @@ export async function runPipeline(opts: RunOptions): Promise<{ run: RunRecord; v
     const prev = await previousTotal(db, track);
     const rec = toSourceRecord(result, prev);
     for (const l of rec.limitations) limitations.add(`${track}: ${l}`);
-    await insertSourceRecord(db, runId, rec);
+    await insertRunSource(db, runId, rec);
     sources.push(rec);
   }
 
