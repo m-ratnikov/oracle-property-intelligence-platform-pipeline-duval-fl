@@ -122,9 +122,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: duval-publish-${{ github.run_id }}
+          # the exclusion needs /** : a bare directory path excludes nothing, so the glob walked all
+          # 404k per-property files and upload-artifact died with "Maximum call stack size exceeded".
+          # The per-property files are published to IPFS by CID, not shipped as a build artifact.
           path: |
             .data/artifacts/publish/duval/
-            !.data/artifacts/publish/duval/open-data/properties
+            !.data/artifacts/publish/duval/open-data/properties/**
+            !.data/artifacts/publish/duval/open-data/shards/**
             .data/artifacts/permits/discovered-api.json
           if-no-files-found: warn
           retention-days: 14

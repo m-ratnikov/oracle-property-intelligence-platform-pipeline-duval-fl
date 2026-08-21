@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { closeSync, openSync, readSync, renameSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { all, duckPath, q, scalar } from "../db.js";
 import { downloadArtifact } from "../download.js";
@@ -27,10 +27,15 @@ export function dbprReadCsv(csvPath: string, columns: string[]): string {
     strict_mode = false, ignore_errors = true, null_padding = true, max_line_size = 4000000)`;
 }
 
-/** Read the header line of a CSV (comma separated, quotes stripped) without DuckDB. */
+/**
+ * Read the header line of a CSV (comma separated, quotes stripped) without DuckDB.
+ *
+ * Reads a bounded prefix rather than the file. cilb_certified.csv is ~754 MB and a whole-file read
+ * into a JS string throws "Cannot create a string longer than 0x1fffffe8 characters" (V8 caps strings
+ * near 512 MB), which is how this track died in CI. Nothing past the first newline is ever needed.
+ */
 export function readCsvHeader(csvPath: string): string[] {
-  const buf = readFileSync(csvPath, { encoding: "utf8", flag: "r" });
-  const firstLine = buf.slice(0, buf.indexOf("\n") === -1 ? buf.length : buf.indexOf("\n")).replace(/\r$/, "");
+  const firstLine = readFirstLine(csvPath).replace(/\r$/, "");
   const out: string[] = [];
   let cur = "";
   let inQ = false;
@@ -52,15 +57,84 @@ export async function dbprRejectedCount(conn: import("@duckdb/node-api").DuckDBC
   return Math.max(0, lines - 1 - parsedRows);
 }
 
-/** If the file is not valid UTF-8, transcode latin-1 -> UTF-8 in place (returns true when transcoded). */
-export function ensureUtf8(csvPath: string): boolean {
-  const buf = readFileSync(csvPath);
+/** Bytes read per chunk when scanning or transcoding a multi-hundred-megabyte extract. */
+const CHUNK_BYTES = 4 * 1024 * 1024;
+
+/** The first line of a file, read a chunk at a time so file size does not matter. */
+function readFirstLine(csvPath: string): string {
+  const fd = openSync(csvPath, "r");
   try {
-    new TextDecoder("utf-8", { fatal: true }).decode(buf);
-    return false;
+    const buf = Buffer.alloc(CHUNK_BYTES);
+    let acc = Buffer.alloc(0);
+    let position = 0;
+    for (;;) {
+      const bytes = readSync(fd, buf, 0, buf.length, position);
+      if (bytes === 0) return acc.toString("utf8");
+      position += bytes;
+      const newline = buf.indexOf(0x0a, 0);
+      if (newline !== -1 && newline < bytes) {
+        return Buffer.concat([acc, buf.subarray(0, newline)]).toString("utf8");
+      }
+      acc = Buffer.concat([acc, buf.subarray(0, bytes)]);
+      // A header this long is a malformed file, not a header; stop rather than buffer the whole extract.
+      if (acc.length > CHUNK_BYTES * 4) return acc.toString("utf8");
+    }
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * If the file is not valid UTF-8, transcode latin-1 -> UTF-8 in place (returns true when transcoded).
+ *
+ * Streams in chunks: decoding a 754 MB extract in one call exceeds V8's maximum string length and
+ * throws, which the old `catch` misread as "invalid UTF-8" and then hit again while transcoding.
+ * TextDecoder is given `stream: true` so a multi-byte character split across a chunk boundary is
+ * carried into the next chunk instead of being reported as invalid.
+ */
+export function ensureUtf8(csvPath: string): boolean {
+  if (isValidUtf8(csvPath)) return false;
+  const tmp = `${csvPath}.utf8`;
+  const src = openSync(csvPath, "r");
+  const out = openSync(tmp, "w");
+  try {
+    const buf = Buffer.alloc(CHUNK_BYTES);
+    let position = 0;
+    for (;;) {
+      const bytes = readSync(src, buf, 0, buf.length, position);
+      if (bytes === 0) break;
+      position += bytes;
+      // latin-1 is single byte, so a chunk boundary can never split a character
+      writeSync(out, Buffer.from(buf.subarray(0, bytes).toString("latin1"), "utf8"));
+    }
+  } finally {
+    closeSync(src);
+    closeSync(out);
+  }
+  renameSync(tmp, csvPath);
+  return true;
+}
+
+function isValidUtf8(csvPath: string): boolean {
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const fd = openSync(csvPath, "r");
+  try {
+    const buf = Buffer.alloc(CHUNK_BYTES);
+    let position = 0;
+    for (;;) {
+      const bytes = readSync(fd, buf, 0, buf.length, position);
+      if (bytes === 0) {
+        // flush: an incomplete character left at end of file is invalid
+        decoder.decode(new Uint8Array(0));
+        return true;
+      }
+      position += bytes;
+      decoder.decode(buf.subarray(0, bytes), { stream: true });
+    }
   } catch {
-    writeFileSync(csvPath, Buffer.from(buf.toString("latin1"), "utf8"));
-    return true;
+    return false;
+  } finally {
+    closeSync(fd);
   }
 }
 

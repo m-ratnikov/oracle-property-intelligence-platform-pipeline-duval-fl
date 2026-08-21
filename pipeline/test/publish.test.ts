@@ -96,10 +96,10 @@ describe("publish: IPNS pointing is best-effort", () => {
     expect(puts.length).toBeGreaterThanOrEqual(4);
     // the one name the account allows went to the query table, the artifact the MCP follows across runs
     expect(names.map((n) => n.label)).toEqual([IPNS_LABELS.queryTable]);
-    expect(manifest.ipns[IPNS_LABELS.queryTable].networkKey).toBe(`k51-${IPNS_LABELS.queryTable}`);
+    expect(manifest.ipns[IPNS_LABELS.queryTable]?.networkKey).toBe(`k51-${IPNS_LABELS.queryTable}`);
     // every later label was refused and is reported rather than swallowed
     expect(manifest.ipnsFailures.map((f) => f.label)).toEqual([IPNS_LABELS.coverage, IPNS_LABELS.artifacts]);
-    expect(manifest.ipnsFailures[0].reason).toContain("402");
+    expect(manifest.ipnsFailures[0]?.reason).toContain("402");
     // refused labels still resolve, by CID
     for (const f of manifest.ipnsFailures) {
       const obj = manifest.objects.find((o) => o.ipnsLabel === f.label);
