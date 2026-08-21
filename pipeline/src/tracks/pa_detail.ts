@@ -10,7 +10,7 @@ import { hashStaging, mergeStaging } from "../merge.js";
 import { PA_DETAIL_SALE_SOURCE } from "../sources.js";
 import { SALE_KEY_SQL } from "./sales.js";
 import { BROWSER_UA, mapLimit, sleep } from "./http.js";
-import { normalizeRoofCover, parsePaDetail, type PaDetail } from "./pa_detail_parse.js";
+import { parsePaDetail, type PaDetail } from "./pa_detail_parse.js";
 import type { TrackContext, TrackRunner } from "./types.js";
 import { startResult } from "./types.js";
 

@@ -1,6 +1,6 @@
 import { closeSync, openSync, readSync, renameSync, writeSync } from "node:fs";
 import { join } from "node:path";
-import { all, duckPath, q, scalar } from "../db.js";
+import { duckPath, q, scalar } from "../db.js";
 import { downloadArtifact } from "../download.js";
 import { hashStaging, mergeStaging } from "../merge.js";
 import { BROWSER_UA } from "./http.js";

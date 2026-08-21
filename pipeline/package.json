@@ -18,7 +18,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "export:consolidation": "tsx src/cli.ts consolidation",
-    "publish:open-data": "tsx src/cli.ts publish-open-data"
+    "publish:open-data": "tsx src/cli.ts publish-open-data",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\""
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1115.0",
@@ -32,12 +36,17 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@smithy/types": "^4.17.2",
     "@types/adm-zip": "^0.5.7",
     "@types/node": "^22.17.0",
     "@types/ssh2-sftp-client": "^9.0.6",
+    "eslint": "^10.8.1",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.6",
     "tsx": "^4.23.12",
     "typescript": "^5.9.2",
+    "typescript-eslint": "^8.67.0",
     "vitest": "^4.1.11"
   },
   "packageManager": "pnpm@11.22.0"
