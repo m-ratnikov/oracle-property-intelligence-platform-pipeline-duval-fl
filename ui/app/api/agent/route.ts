@@ -60,13 +60,23 @@ function notConfigured(message = NOT_CONFIGURED_MESSAGE): NextResponse<AgentResp
  * renders. No path here produces a bare 500 with a stack trace, and every
  * message has been through redaction before it arrives.
  */
-function toErrorResponse(error: unknown, secrets: (string | undefined)[]): NextResponse<AgentResponse> {
+function toErrorResponse(
+  error: unknown,
+  secrets: (string | undefined)[],
+  // Whose credential the turn used. A visitor can fix their own key; they cannot fix this
+  // deployment's, so pointing them at the settings page for a server side failure sends them to
+  // a control that will not help. Defaults to "user" because that is the safe thing to say when
+  // the failure happened before a credential was resolved.
+  credentialSource: "user" | "server" = "user",
+): NextResponse<AgentResponse> {
   if (error instanceof AgentNotConfiguredError) return notConfigured(error.message);
 
   if (isAgentError(error)) {
     const hint =
       error.name === "AgentCredentialError"
-        ? "The provider rejected that credential. Check the key on the settings page, confirm it belongs to the provider you selected, and test it there before asking again."
+        ? credentialSource === "server"
+          ? "The provider rejected this deployment's own key, so there is nothing to fix on your side. Add your own key on the settings page to keep going, or let the operator know the server credential needs attention."
+          : "The provider rejected that credential. Check the key on the settings page, confirm it belongs to the provider you selected, and test it there before asking again."
         : error.name === "AgentRateLimitError"
           ? "This is a public endpoint, so it is capped per address. Wait for the window to roll over, or supply your own key to keep your questions independent of everyone else's."
           : error.name === "AgentBadRequestError"
@@ -158,7 +168,7 @@ export async function POST(request: Request): Promise<NextResponse<AgentResponse
     const response = await runAgent({ messages, credential, abortSignal: request.signal });
     return NextResponse.json(response);
   } catch (error: unknown) {
-    return toErrorResponse(error, secrets);
+    return toErrorResponse(error, secrets, credential ? "user" : "server");
   }
 }
 
