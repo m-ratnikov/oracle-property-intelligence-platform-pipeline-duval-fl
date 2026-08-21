@@ -24,6 +24,7 @@
     "@ai-sdk/gateway": "^4.0.56",
     "@ai-sdk/google": "^4.0.47",
     "@ai-sdk/groq": "^4.0.29",
+    "@ai-sdk/openai": "^4.0.44",
     "@ai-sdk/openai-compatible": "^3.0.32",
     "@duckdb/duckdb-wasm": "^1.32.0",
     "@duckdb/node-api": "1.5.5-r.4",

@@ -189,9 +189,11 @@ describe("credential headers", () => {
   });
 
   it("refuses an unknown provider and an unlisted model", () => {
-    expect(() => readUserCredential(headers({ [KEY_HEADER]: FAKE_KEY, [PROVIDER_HEADER]: "openai" }))).toThrow(
-      /Unknown provider/,
-    );
+    // deliberately not a real vendor name: "openai" used to stand in here and became a listed
+    // provider, which quietly turned this assertion into a test of nothing
+    expect(() =>
+      readUserCredential(headers({ [KEY_HEADER]: FAKE_KEY, [PROVIDER_HEADER]: "definitely-not-a-provider" })),
+    ).toThrow(/Unknown provider/);
     expect(() =>
       readUserCredential(
         headers({ [KEY_HEADER]: FAKE_KEY, [PROVIDER_HEADER]: "google", [MODEL_HEADER]: "gemini-9-ultra" }),

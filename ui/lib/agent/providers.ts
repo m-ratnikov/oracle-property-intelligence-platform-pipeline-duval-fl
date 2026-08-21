@@ -16,6 +16,7 @@
  */
 
 export type AgentProvider =
+  | "openai"
   | "openrouter"
   | "google"
   | "groq"
@@ -69,6 +70,43 @@ export interface ProviderDefinition {
 export const FREE_TIER_VERIFIED_ON = "2026-08-21";
 
 export const PROVIDERS: readonly ProviderDefinition[] = [
+  {
+    id: "openai",
+    label: "OpenAI",
+    envKeys: ["OPENAI_API_KEY"],
+    models: [
+      {
+        id: "gpt-5-mini",
+        label: "GPT-5 mini",
+        free: false,
+        notes:
+          "The default. Fast enough for a live demo and strong enough for multi step tool use, at a fraction of gpt-5. Listed first because defaultModelFor falls back to the first entry when a provider has no free model, and this is the one to land on.",
+      },
+      {
+        id: "gpt-5",
+        label: "GPT-5",
+        free: false,
+        notes: "Best answers on this list and the slowest of the three. Worth selecting for a hard question, not for a demo loop.",
+      },
+      {
+        id: "gpt-4.1-mini",
+        label: "GPT-4.1 mini",
+        free: false,
+        notes: "Previous generation, kept as a fallback if a GPT-5 id is ever rejected on an account.",
+      },
+    ],
+    docsUrl: "https://platform.openai.com/docs/models",
+    keyUrl: "https://platform.openai.com/api-keys",
+    acceptsUserKey: true,
+    keyHint: "An OpenAI key. Starts with sk- (project keys start with sk-proj-).",
+    freeTier: {
+      available: false,
+      summary:
+        "No free tier: usage is billed per token against prepaid credit, so a key here answers reliably rather than queueing behind a shared free pool. That is why it is the server default - the free providers below were measured returning 429 or timing out mid demo. Model ids were read from this account's own /v1/models on 2026-08-21 rather than assumed.",
+      source: "https://platform.openai.com/docs/pricing",
+      readOn: FREE_TIER_VERIFIED_ON,
+    },
+  },
   {
     id: "openrouter",
     label: "OpenRouter",

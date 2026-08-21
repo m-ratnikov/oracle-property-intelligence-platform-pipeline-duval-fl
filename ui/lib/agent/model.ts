@@ -203,6 +203,10 @@ async function createProviderModel(
   env: Env,
 ): Promise<LanguageModel> {
   switch (provider) {
+    case "openai": {
+      const { createOpenAI } = await import("@ai-sdk/openai");
+      return createOpenAI({ apiKey })(modelId);
+    }
     case "anthropic": {
       const { createAnthropic } = await import("@ai-sdk/anthropic");
       return createAnthropic({ apiKey })(modelId);

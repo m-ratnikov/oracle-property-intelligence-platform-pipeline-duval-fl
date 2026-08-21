@@ -6,13 +6,21 @@
  * the parquet, one short lived connection per statement. The view is the same
  * name the Elephant MCP server builds, so SQL that works here works there.
  *
- * The parquet is read in place: a local file in dev and tests, an IPFS gateway
- * URL through httpfs range reads in production. Nothing is copied, nothing is
- * written, no extension is installed unless the URL is http(s).
+ * A remote parquet is fetched ONCE per warm process into the temp directory and read from there.
+ * Reading it in place over httpfs looked cheaper - only the row groups a query needs - but measured
+ * on the deployed function a single preset question spent 158 s of a 172 s turn inside DuckDB,
+ * because every query re-fetched row groups through an IPFS gateway that resolves an IPNS name
+ * first. One sequential 49 MB download beats many small ranges over that path, and warm invocations
+ * then query a local file. If the download fails the httpfs path is still used, so a temp directory
+ * that is full or read only degrades instead of breaking.
+ *
+ * A local file in dev and tests is read in place as before. No extension is installed unless the
+ * source is http(s).
  */
 
 import type { Env } from "./types";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { DuckDBInstance, type DuckDBConnection, type DuckDBValue } from "@duckdb/node-api";
@@ -97,12 +105,48 @@ export function toPlain(value: DuckDBValue | unknown): Plain {
   return String(value);
 }
 
+/** How long to wait for the one-off parquet download before falling back to httpfs range reads. */
+const DOWNLOAD_TIMEOUT_MS = 60_000;
+
+/**
+ * Fetch the parquet into the temp directory once, and return the local path. Returns null when the
+ * download cannot be completed, so the caller falls back to reading the URL in place.
+ *
+ * Writes to a per-URL temp name and renames, so two invocations racing on a cold start cannot leave
+ * a half written file for the other to read.
+ */
+async function localCopy(source: string): Promise<string | null> {
+  try {
+    const dir = resolve(tmpdir(), "duval-query-table");
+    mkdirSync(dir, { recursive: true });
+    const digest = createHash("sha256").update(source).digest("hex").slice(0, 16);
+    const target = resolve(dir, `${digest}.parquet`);
+    if (existsSync(target) && statSync(target).size > 0) return target;
+
+    const response = await fetch(source, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+    if (!response.ok) return null;
+    const body = Buffer.from(await response.arrayBuffer());
+    // a truncated or error body is worse than no cache: refuse anything that is not a parquet
+    if (body.length < 8 || body.subarray(0, 4).toString("latin1") !== "PAR1") return null;
+    const partial = `${target}.${process.pid}.partial`;
+    writeFileSync(partial, body);
+    renameSync(partial, target);
+    return target;
+  } catch {
+    return null;
+  }
+}
+
 async function createInstance(source: string): Promise<DuckDBInstance> {
   const isHttp = /^https?:\/\//i.test(source);
+  const cached = isHttp ? await localCopy(source) : null;
+  const readFrom = cached ?? source;
+  const needsHttpfs = isHttp && cached === null;
+
   const instance = await DuckDBInstance.create(":memory:");
   const setup = await instance.connect();
   try {
-    if (isHttp) {
+    if (needsHttpfs) {
       // Serverless file systems are read only except the temp directory, and
       // httpfs has to be fetched once per cold start.
       const extensionDir = resolve(tmpdir(), "duckdb-extensions");
@@ -111,7 +155,7 @@ async function createInstance(source: string): Promise<DuckDBInstance> {
       await setup.run("LOAD httpfs");
     }
     await setup.run(
-      `CREATE OR REPLACE VIEW ${VIEW_NAME} AS SELECT * FROM read_parquet(${sqlString(source)})`,
+      `CREATE OR REPLACE VIEW ${VIEW_NAME} AS SELECT * FROM read_parquet(${sqlString(readFrom)})`,
     );
   } finally {
     setup.closeSync();
