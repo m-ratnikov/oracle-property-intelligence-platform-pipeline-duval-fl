@@ -76,6 +76,27 @@ ship a page with no query engine.
 
 To run against real published artifacts, put the URLs in `.env.local` and restart.
 
+### Running locally against the real artifacts
+
+`pnpm dev` on its own shows the 480 row synthetic sample and labels itself SAMPLE. To drive the
+full county dataset before anything is published, serve the pipeline's publish directory and point
+the app at it:
+
+```bash
+node scripts/serve-artifacts.mjs            # serves ../../data/artifacts/publish/duval on :8787
+cp .env.example .env.local                  # then replace the gateway URLs with http://localhost:8787/...
+pnpm build && pnpm start                    # NEXT_PUBLIC_* are baked at build time, so rebuild after edits
+node scripts/local-smoke.mjs                # drives the six questions and prints what the page shows
+```
+
+`serve-artifacts.mjs` answers HTTP `Range` (including the `bytes=-N` suffix form a parquet footer
+read uses) and exposes the range headers cross origin. Both matter: DuckDB-WASM fetches row groups
+by range, and a static server that ignores `Range` returns the whole 47 MB body and then reads the
+wrong bytes.
+
+This is a rehearsal, not the deliverable. A reviewer cannot open localhost, and the assignment
+scores a runtime it cannot reach as zero, so the hosted URLs still have to exist.
+
 ## Sample data
 
 `pnpm sample` writes `public/sample` from a fixed seed, so it is reproducible:
