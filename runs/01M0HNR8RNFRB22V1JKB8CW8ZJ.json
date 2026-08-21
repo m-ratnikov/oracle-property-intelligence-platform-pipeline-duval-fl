@@ -1,0 +1,195 @@
+{
+  "run_id": "01M0HNR8RNFRB22V1JKB8CW8ZJ",
+  "county": "duval",
+  "started_at": "2026-08-21 08:07:15.99",
+  "finished_at": "2026-08-21 08:07:42.419",
+  "status": "completed_with_errors",
+  "trigger": "manual",
+  "git_sha": "a56e979b36a20aa91b9b520f54baa5341ceb0e5f",
+  "tracks": [
+    "water",
+    "links"
+  ],
+  "window": null,
+  "sources": [
+    {
+      "track": "water",
+      "source_system": "coj_nhd_hydrography",
+      "target_table": "water_bodies",
+      "source_url": "https://services1.arcgis.com/NXfNVaFp7QMxnE3j/arcgis/rest/services/stjohnsriver/FeatureServer/0",
+      "artifact_path": null,
+      "artifact_sha256": null,
+      "artifact_etag": null,
+      "artifact_last_modified": null,
+      "artifact_bytes": null,
+      "download_status": null,
+      "rows_staged": 0,
+      "inserted": null,
+      "updated": null,
+      "unchanged": null,
+      "missing_in_source": null,
+      "table_total_after": null,
+      "delta_vs_prev_total": null,
+      "started_at": "2026-08-21T08:07:23.031Z",
+      "finished_at": "2026-08-21T08:07:23.031Z",
+      "status": "failed",
+      "limitations": [
+        "Water view is a proximity proxy (centroid within 150 m or parcel bbox touching a 30 m buffer), not a sightline analysis",
+        "NHD lake/pond polygons below 1 ha and unnamed flowlines are excluded",
+        "Parcel polygons are not stored; the parcel bounding box stands in for the polygon"
+      ],
+      "notes": {},
+      "error": "Binder Error: Referenced column \"geom\" not found in FROM clause!\nCandidate bindings: \"resolution\", \"permanent_identifier\"\n\nLINE 25:       WHERE ST_Intersects(geom, ST_MakeEnvelope(-82.05, 30.1, -81.3, 30.6)) AND FType...\n                                   ^"
+    },
+    {
+      "track": "links",
+      "source_system": "duval_reconciliation",
+      "target_table": "entity_links",
+      "source_url": "derived",
+      "artifact_path": null,
+      "artifact_sha256": null,
+      "artifact_etag": null,
+      "artifact_last_modified": null,
+      "artifact_bytes": null,
+      "download_status": null,
+      "rows_staged": 323925,
+      "inserted": 0,
+      "updated": 1291,
+      "unchanged": 322634,
+      "missing_in_source": 127,
+      "table_total_after": 324052,
+      "delta_vs_prev_total": 0,
+      "started_at": "2026-08-21T08:07:23.035Z",
+      "finished_at": "2026-08-21T08:07:31.523Z",
+      "status": "completed",
+      "limitations": [
+        "Address matching is exact on the normalized line 1 + ZIP5; unit-level mismatches are not linked"
+      ],
+      "notes": {
+        "links": [
+          {
+            "link_type": "business_parcel",
+            "match_method": "owner_name_match",
+            "n": 3
+          },
+          {
+            "link_type": "business_parcel",
+            "match_method": "situs_address_match",
+            "n": 655
+          },
+          {
+            "link_type": "parcel_owner",
+            "match_method": "owner_name_mailing_hash",
+            "n": 404023
+          }
+        ],
+        "parcelsLinkedToBusiness": 577,
+        "businessesLinkedToParcel": 570,
+        "owners": 324052
+      },
+      "error": null
+    }
+  ],
+  "limitations": [
+    "water: Water view is a proximity proxy (centroid within 150 m or parcel bbox touching a 30 m buffer), not a sightline analysis",
+    "water: NHD lake/pond polygons below 1 ha and unnamed flowlines are excluded",
+    "water: Parcel polygons are not stored; the parcel bounding box stands in for the polygon",
+    "links: Address matching is exact on the normalized line 1 + ZIP5; unit-level mismatches are not linked"
+  ],
+  "totals": {
+    "parcels": 404023,
+    "parcel_geometry": 405716,
+    "sales_history": 64532,
+    "permits": 0,
+    "contractors": 0,
+    "businesses": 1024,
+    "business_events": 17919,
+    "places": 3084,
+    "transit_stops": 2501,
+    "transit_routes": 45,
+    "water_bodies": 0,
+    "address_points": 0,
+    "coj_parcels": 0,
+    "owners": 324052,
+    "entity_links": 404681,
+    "derived.properties_features": 404023
+  },
+  "artifacts": {
+    "queryTable": {
+      "path": "query-table.parquet",
+      "rows": 404023,
+      "bytes": 31775079,
+      "sha256": "b9d2a928791b7846cbaca35db39c4ac46d077a064cae54444e5b97cdc4f3258e",
+      "cid": "QmVSpEtLWphw4Qpw3n4LZZKsUCwT36SmUQbgtseJCxH9xB",
+      "cidV1": "bafybeidjsyi5rbu5zbvbpgxou76l3lyganohaku6d3p4uv3m2nmwr347ga",
+      "validationOk": true,
+      "problems": []
+    },
+    "tables": {
+      "parcels": {
+        "path": "tables/parcels.parquet",
+        "rows": 404023,
+        "bytes": 38911589,
+        "sha256": "c5c5a5b1746d48ded732eee500024c3fe521653c9d83d70f2fb08a08f0e000c4",
+        "cid": "QmfZMzL3RqSqhLMYLtB4g8dRtcZfZTaXHxPfbVdkern2y6",
+        "cidV1": "bafybeih73bjjgtupi3leywt6quamozyf3cl5rzpti7ewvsmtfqbhu6tb2e"
+      },
+      "parcel_geometry": {
+        "path": "tables/parcel_geometry.parquet",
+        "rows": 405716,
+        "bytes": 25307296,
+        "sha256": "9bc99c87ed404eab5e67e67fad392eb36738ecf6230087e92a3b2b4c1ab76763",
+        "cid": "QmVcD9Knx3t5NWCZky7VgkWyJxWLbXDruUPxg5u32EDSo6",
+        "cidV1": "bafybeidl7yy5xzjdhqdsd6y53zfo33eapcsssipj5kdx3rp5spe3irbqyu"
+      },
+      "sales_history": {
+        "path": "tables/sales_history.parquet",
+        "rows": 64532,
+        "bytes": 3076215,
+        "sha256": "19b51a73f7a7988f7c5a27575e5787beee75d9c5dd21667a07e71f5ae543d821",
+        "cid": "QmNXY7mgvnhqM3A459LaAbQS5JUzKfSwhpv3e7nBuBWhA3",
+        "cidV1": "bafybeiaczhxxbr6kiul4jdlz4zd3yi2ixyhbamv6fsrzeilb5nwxfydmkq"
+      },
+      "businesses": {
+        "path": "tables/businesses.parquet",
+        "rows": 1024,
+        "bytes": 108419,
+        "sha256": "a811ecb5b19697e47301fa367e9f3681e27e8b9f91cacb579070f94526d852b4",
+        "cid": "QmXZ8xNgLvaWwrMhvrVfMiA5jxq2vE7m7khqAE5r6WVdhU",
+        "cidV1": "bafybeiei5qlqhhomexq5q4zpezmumms4q33l27jy7vtxzontekbxtswizm"
+      },
+      "places": {
+        "path": "tables/places.parquet",
+        "rows": 3084,
+        "bytes": 382955,
+        "sha256": "fd370a529ce6fef6250d0285f4e0484e1d4dfc13718f38fece9e417239021658",
+        "cid": "QmbmdL3BJXYrRYkfWia7LpHvhTKzJpNmwnaFipA8Hx9QP1",
+        "cidV1": "bafybeighrxr2yqpuoaci6q7k3ylxq5po7wb35wex7d5lazdctrnhyzxafa"
+      },
+      "transit_stops": {
+        "path": "tables/transit_stops.parquet",
+        "rows": 2501,
+        "bytes": 110120,
+        "sha256": "1d1d18e45ac873e927d78d6ffe5c2977e7d7ed37b7e945cc6c1d0b7bc1b9d9ca",
+        "cid": "QmRWTAjYGb6HY1J44cz5hZjgF2Q6c7BRixAvtSce5561U6",
+        "cidV1": "bafybeibpcxi4zje5kw5sgzzvpmp5iz7t3yeaqkvryxrov3h77cf23qv5nm"
+      },
+      "entity_links": {
+        "path": "tables/entity_links.parquet",
+        "rows": 404681,
+        "bytes": 15904617,
+        "sha256": "dfd480d0139544a75d1d810b3a8bd7bf529f71163821ab016c2c6ed7917de156",
+        "cid": "QmTjGn3UZAcbDoXR87HXZbyoLRobJFWZb5rMKxETgjVWXH",
+        "cidV1": "bafybeicqcx7jqlybmdhnym64stqpram6xwcbkv7l2dvh24r2rmg7dq46ka"
+      }
+    },
+    "coverage": {
+      "path": "dataset-coverage.json",
+      "bytes": 11875,
+      "sha256": "6fa359459876bcf7dd67c46a9cef6a0421fde313c8c5921db3fbb37a3b15420b",
+      "cid": "QmPmoDmkfywSieMvm7AvSSQ43tD7ARF3VVop6Ya3A18R3p",
+      "cidV1": "bafybeiavjtkmhvhspshjpqyipqihwwqrgsddv55b3tktvfriaojy4prjxm"
+    }
+  },
+  "error": null
+}

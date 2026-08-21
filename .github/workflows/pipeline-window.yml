@@ -1,28 +1,27 @@
-name: pipeline
+name: pipeline-window
 
-# Continuous, incremental Duval ingestion: every 6 hours and on demand. Each run downloads only
-# sources whose ETag/Last-Modified changed, merges by row hash (inserted/updated/unchanged deltas),
-# rebuilds the query table, records the run in runs/<run_id>.json (committed back) and, when the
-# Filebase secrets exist, re-publishes the artifacts to IPFS and re-points the IPNS names.
-# The scheduled run executes ALL tracks: the FDOR/JTA/NHD/Overture/Sunbiz tracks run anywhere; the
-# COJ / DBPR / JaxEPICS tracks need a US egress (GitHub runners are US) and self-skip elsewhere.
+# Ad-hoc bounded run (dispatch only): pick the tracks and the window, e.g. permits with a 1000-permit
+# window, Sunbiz with a 30-day window, or the COJ address points incremental pull. Same cache, same
+# run-history commit-back, publish off by default.
 on:
-  schedule:
-    - cron: "17 */6 * * *"
   workflow_dispatch:
     inputs:
       tracks:
-        description: "Comma-separated tracks, or default (all) | local (no US-only tracks)"
-        required: false
-        default: "default"
+        description: "Comma-separated tracks (e.g. permits | businesses | coj_addresses,coj_parcels | contractors)"
+        required: true
+        default: "permits"
       window:
-        description: "Window for windowed tracks: Sunbiz days (e.g. 14d) or permit count (e.g. 300)"
+        description: "Window (Sunbiz days like 30d, permit count like 1000)"
         required: false
         default: ""
-      publish:
-        description: "Upload to Filebase + re-point IPNS (requires secrets)"
+      force:
+        description: "Re-download artifacts even when unchanged"
         required: false
-        default: "true"
+        default: "false"
+      publish:
+        description: "Upload to Filebase + re-point IPNS after the run"
+        required: false
+        default: "false"
 
 concurrency:
   group: duval-pipeline
@@ -34,13 +33,11 @@ permissions:
 env:
   DATA_DIR: ${{ github.workspace }}/.data
   NODE_OPTIONS: --max-old-space-size=6144
-  SUNBIZ_WINDOW_DAYS: "14"
-  PERMITS_WINDOW: "300"
 
 jobs:
-  run:
+  window:
     runs-on: ubuntu-latest
-    timeout-minutes: 170
+    timeout-minutes: 300
     defaults:
       run:
         working-directory: pipeline
@@ -49,19 +46,15 @@ jobs:
         with:
           ref: ${{ github.ref }}
           fetch-depth: 0
-
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: pipeline/package.json
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: pipeline/pnpm-lock.yaml
-
-      - name: Restore source artifacts + DuckDB from the previous run
-        uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v4
         with:
           path: |
             .data/artifacts/appraisal
@@ -76,41 +69,27 @@ jobs:
           key: duval-data-${{ github.run_id }}
           restore-keys: |
             duval-data-
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      - name: Unit tests
-        run: pnpm test
-
-      - name: Egress check (COJ / DBPR / JaxEPICS answer only from US IPs; FDOR, JTA, NHD, Overture, Sunbiz do not care)
+      - run: pnpm install --frozen-lockfile
+      - name: Egress check
         run: curl -s --max-time 10 https://ipinfo.io/json | head -c 300; echo
-
-      - name: Run pipeline (all tracks)
+      - name: Run bounded window
         env:
-          TRACKS: ${{ github.event.inputs.tracks || 'default' }}
-          WINDOW: ${{ github.event.inputs.window || '' }}
+          TRACKS: ${{ github.event.inputs.tracks }}
+          WINDOW: ${{ github.event.inputs.window }}
+          FORCE: ${{ github.event.inputs.force }}
         run: |
-          ARGS="--tracks $TRACKS --trigger ${{ github.event_name }}"
+          ARGS="--tracks $TRACKS --trigger workflow_dispatch_window"
           if [ -n "$WINDOW" ]; then ARGS="$ARGS --window $WINDOW"; fi
+          if [ "$FORCE" = "true" ]; then ARGS="$ARGS --force"; fi
           pnpm run pipeline -- $ARGS
-
-      - name: Publish to Filebase / IPFS (dry-run when secrets are absent)
+      - name: Publish (optional)
+        if: ${{ github.event.inputs.publish == 'true' }}
         env:
           FILEBASE_ACCESS_KEY: ${{ secrets.FILEBASE_ACCESS_KEY }}
           FILEBASE_SECRET_KEY: ${{ secrets.FILEBASE_SECRET_KEY }}
           FILEBASE_BUCKET_DUVAL: ${{ secrets.FILEBASE_BUCKET_DUVAL }}
-          PUBLISH: ${{ github.event.inputs.publish || 'true' }}
-        run: |
-          if [ -n "$FILEBASE_ACCESS_KEY" ] && [ "$PUBLISH" = "true" ]; then
-            pnpm run publish:ipfs -- --publish
-          else
-            echo "Filebase secrets not configured (or publish=false): dry-run only"
-            pnpm run publish:ipfs
-          fi
-
-      - name: Save source artifacts + DuckDB for the next run
-        if: always()
+        run: pnpm run publish:ipfs -- --publish
+      - if: always()
         uses: actions/cache/save@v4
         with:
           path: |
@@ -124,18 +103,15 @@ jobs:
             .data/artifacts/permits
             .data/duval.duckdb
           key: duval-data-${{ github.run_id }}
-
-      - name: Upload publish artifacts
-        if: always()
+      - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: duval-publish-${{ github.run_id }}
+          name: duval-window-${{ github.run_id }}
           path: |
             .data/artifacts/publish/duval/
             .data/artifacts/permits/discovered-api.json
           if-no-files-found: warn
           retention-days: 14
-
       - name: Commit run history
         if: always()
         working-directory: ${{ github.workspace }}
@@ -143,11 +119,9 @@ jobs:
           git config user.name "duval-oracle-pipeline[bot]"
           git config user.email "pipeline@users.noreply.github.com"
           mkdir -p runs
-          cp .data/artifacts/publish/duval/publish-manifest.json runs/latest-publish-manifest.json 2>/dev/null || true
-          cp .data/artifacts/publish/duval/dataset-coverage.json runs/latest-dataset-coverage.json 2>/dev/null || true
           cp .data/artifacts/permits/discovered-api.json runs/latest-jaxepics-api.json 2>/dev/null || true
           git add runs/
           if git diff --cached --quiet; then echo "no run history changes"; exit 0; fi
-          git commit -m "pipeline: run history $(date -u +%Y-%m-%dT%H:%MZ) [skip ci]"
+          git commit -m "pipeline: window run $(date -u +%Y-%m-%dT%H:%MZ) [skip ci]"
           git pull --rebase origin ${GITHUB_REF_NAME}
           git push origin HEAD:${GITHUB_REF_NAME}

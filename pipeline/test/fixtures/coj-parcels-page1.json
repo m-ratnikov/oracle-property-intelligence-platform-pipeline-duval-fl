@@ -1,0 +1,47 @@
+{
+  "_fixture": "ArcGIS MapServer query page shaped after maps.coj.net CityBiz/Parcels layer 0 (fields from the layer's documented outFields; attribute values synthetic). Used to test paging + parsing; the live layer is only reachable from US egress.",
+  "objectIdFieldName": "OBJECTID",
+  "fields": [
+    { "name": "RE", "type": "esriFieldTypeString" },
+    { "name": "RE_NOSPACE", "type": "esriFieldTypeString" },
+    { "name": "LNAMEOWNER", "type": "esriFieldTypeString" },
+    { "name": "MAILADDR1", "type": "esriFieldTypeString" },
+    { "name": "MAILCITY", "type": "esriFieldTypeString" },
+    { "name": "MAILSTATE", "type": "esriFieldTypeString" },
+    { "name": "MAILZIP", "type": "esriFieldTypeString" },
+    { "name": "LONGNAME", "type": "esriFieldTypeString" },
+    { "name": "PUSE", "type": "esriFieldTypeString" },
+    { "name": "DESCPU", "type": "esriFieldTypeString" },
+    { "name": "ZON_LABEL", "type": "esriFieldTypeString" },
+    { "name": "FLD_ZONE", "type": "esriFieldTypeString" },
+    { "name": "ACRES", "type": "esriFieldTypeDouble" },
+    { "name": "LAT", "type": "esriFieldTypeDouble" },
+    { "name": "LONG", "type": "esriFieldTypeDouble" },
+    { "name": "SALESLDD", "type": "esriFieldTypeSmallInteger" },
+    { "name": "SALESLMM", "type": "esriFieldTypeSmallInteger" },
+    { "name": "SALESLYY", "type": "esriFieldTypeSmallInteger" },
+    { "name": "CAMA_VAL", "type": "esriFieldTypeDouble" },
+    { "name": "TOT_BLD_VA", "type": "esriFieldTypeDouble" },
+    { "name": "NBBLDGS", "type": "esriFieldTypeSmallInteger" }
+  ],
+  "exceededTransferLimit": true,
+  "features": [
+    {
+      "attributes": {
+        "RE": "000001-0005", "RE_NOSPACE": "0000010005", "LNAMEOWNER": "RAYONIER FOREST RESOURCES L P",
+        "MAILADDR1": "1 RAYONIER WAY", "MAILCITY": "WILDLIGHT", "MAILSTATE": "FL", "MAILZIP": "32097",
+        "LONGNAME": "0 N US 301 HWY", "PUSE": "5500", "DESCPU": "TIMBERLAND", "ZON_LABEL": "AGR", "FLD_ZONE": "A",
+        "ACRES": 73.42, "LAT": 30.4441, "LONG": -82.0231, "SALESLDD": 15, "SALESLMM": 6, "SALESLYY": 2004,
+        "CAMA_VAL": 521850, "TOT_BLD_VA": 0, "NBBLDGS": 0
+      }
+    },
+    {
+      "attributes": {
+        "RE": "168871-2134", "RE_NOSPACE": "1688712134", "LNAMEOWNER": "DOE JOHN", "MAILADDR1": "1303 W DEFENDER CT",
+        "MAILCITY": "JACKSONVILLE", "MAILSTATE": "FL", "MAILZIP": "32218", "LONGNAME": "1303 W DEFENDER CT 1303",
+        "PUSE": "0100", "DESCPU": "SINGLE FAMILY", "ZON_LABEL": "RLD-60", "FLD_ZONE": "X", "ACRES": 0.12,
+        "LAT": 30.3, "LONG": -81.6, "SALESLDD": 3, "SALESLMM": 6, "SALESLYY": 25, "CAMA_VAL": 250000, "TOT_BLD_VA": 180000, "NBBLDGS": 1
+      }
+    }
+  ]
+}

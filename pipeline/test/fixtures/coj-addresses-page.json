@@ -1,0 +1,26 @@
+{
+  "_fixture": "ArcGIS MapServer page shaped after maps.coj.net ERAT/EratDashboard_3000 layer 41 (address points). EDIT_DATE is epoch milliseconds as ArcGIS returns it. Synthetic values.",
+  "exceededTransferLimit": false,
+  "features": [
+    {
+      "attributes": {
+        "ADDRESS_ID": "1001", "RE": "168871-2134", "WHOLE_ADDRESS": "1303 W DEFENDER CT 1303", "ZIPCODE": "32218",
+        "LATITUDE": 30.3001, "LONGITUDE": -81.6002, "ZONING": "RLD-60", "LANDUSE": "LDR", "FLOODZONE": "X",
+        "SUBDIVISION": "DEFENDER PLACE", "EDIT_DATE": 1755734400000
+      }
+    },
+    {
+      "attributes": {
+        "ADDRESS_ID": "1002", "RE": "000001-0005", "WHOLE_ADDRESS": "0 N US 301 HWY", "ZIPCODE": "32234",
+        "LATITUDE": 30.4441, "LONGITUDE": -82.0231, "ZONING": "AGR", "LANDUSE": "AGR", "FLOODZONE": "A",
+        "SUBDIVISION": null, "EDIT_DATE": 1755820800000
+      }
+    },
+    {
+      "attributes": {
+        "ADDRESS_ID": null, "RE": null, "WHOLE_ADDRESS": "dropped: no ADDRESS_ID", "ZIPCODE": null,
+        "LATITUDE": null, "LONGITUDE": null, "ZONING": null, "LANDUSE": null, "FLOODZONE": null, "SUBDIVISION": null, "EDIT_DATE": null
+      }
+    }
+  ]
+}

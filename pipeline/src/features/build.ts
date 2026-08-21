@@ -1,6 +1,6 @@
 import type { DuckDBConnection } from "@duckdb/node-api";
 import { COUNTY } from "../config.js";
-import { count, q } from "../db.js";
+import { count, q, tableExists } from "../db.js";
 import { DOR_USE_CODES, dorUseGroupSql, ownerRegionSql, yearsSinceSql } from "./rules.js";
 
 export interface FeatureBuildStats {
@@ -11,7 +11,11 @@ export interface FeatureBuildStats {
   transitLoaded: boolean;
   placesLoaded: boolean;
   waterLoaded: boolean;
+  cojParcelsLoaded: boolean;
+  addressesLoaded: boolean;
 }
+
+export const WALK_M = 800;
 
 /**
  * Build derived.properties_features: one row per parcel, the 37 canonical query-table columns first
@@ -24,9 +28,12 @@ export async function buildFeatures(
 ): Promise<FeatureBuildStats> {
   const permitsLoaded = (await count(conn, "permits")) > 0;
   const businessesLoaded = (await count(conn, "businesses")) > 0;
-  const transitLoaded = (await count(conn, "transit_stops")) > 0;
-  const placesLoaded = (await count(conn, "places")) > 0;
-  const waterLoaded = (await count(conn, "water_bodies")) > 0;
+  const transitLoaded = (await count(conn, "transit_stops")) > 0 && (await tableExists(conn, "derived", "nn_transit"));
+  const placesLoaded = (await count(conn, "places")) > 0 && (await tableExists(conn, "derived", "nn_starbucks"));
+  const waterLoaded = (await count(conn, "water_bodies")) > 0 && (await tableExists(conn, "derived", "water_distance"));
+  const cojParcelsLoaded = (await count(conn, "coj_parcels")) > 0;
+  const addressesLoaded = (await count(conn, "address_points")) > 0;
+  const linksLoaded = (await count(conn, "entity_links")) > 0;
 
   await conn.run("CREATE OR REPLACE TABLE derived.dor_use_codes (code VARCHAR, description VARCHAR)");
   const values = Object.entries(DOR_USE_CODES)
@@ -34,37 +41,52 @@ export async function buildFeatures(
     .join(",");
   await conn.run(`INSERT INTO derived.dor_use_codes VALUES ${values}`);
 
-  const hasSunbizExpr = businessesLoaded
-    ? `EXISTS (SELECT 1 FROM businesses b
-         WHERE upper(trim(b.principal_addr1)) = upper(trim(p.phy_addr1))
-           AND left(regexp_replace(coalesce(b.principal_zip, ''), '[^0-9]', '', 'g'), 5) = left(regexp_replace(coalesce(p.phy_zipcd, ''), '[^0-9]', '', 'g'), 5))`
-    : "NULL::BOOLEAN";
+  // has_sunbiz_tenant: a business linked to the parcel by situs address (entity_links), NULL until Sunbiz loads
+  const sunbizJoin = businessesLoaded && linksLoaded
+    ? `LEFT JOIN (SELECT to_id AS parcel_id, count(*) AS n, count(*) FILTER (WHERE match_method = 'situs_address_match') AS n_situs
+                  FROM entity_links WHERE link_type = 'business_parcel' GROUP BY to_id) bz ON bz.parcel_id = p.parcel_id`
+    : "";
+  const hasSunbizExpr = businessesLoaded && linksLoaded ? "coalesce(bz.n_situs, 0) > 0" : "NULL::BOOLEAN";
+  const sunbizCountExpr = businessesLoaded && linksLoaded ? "coalesce(bz.n, 0)::BIGINT" : "NULL::BIGINT";
 
   const permitJoin = permitsLoaded
     ? `LEFT JOIN (
          SELECT parcel_id, count(*) AS permit_count,
-                max(CASE WHEN is_roof THEN year(issue_date) END) AS last_roof_permit_year,
-                max(CASE WHEN is_roof THEN issue_date END) AS last_roof_permit_date
+                count(*) FILTER (WHERE is_roof_permit) AS roof_permit_count,
+                max(CASE WHEN is_roof_permit THEN year(coalesce(issue_date, applied_date)) END) AS last_roof_permit_year,
+                max(CASE WHEN is_roof_permit THEN coalesce(issue_date, applied_date) END) AS last_roof_permit_date,
+                max(coalesce(issue_date, applied_date)) AS last_permit_date
          FROM permits WHERE parcel_id IS NOT NULL GROUP BY parcel_id) pm ON pm.parcel_id = p.parcel_id`
     : "";
   const hasPermitsExpr = permitsLoaded ? "coalesce(pm.permit_count, 0) > 0" : "NULL::BOOLEAN";
   const permitCountExpr = permitsLoaded ? "coalesce(pm.permit_count, 0)::BIGINT" : "NULL::BIGINT";
+  const roofPermitCountExpr = permitsLoaded ? "coalesce(pm.roof_permit_count, 0)::BIGINT" : "NULL::BIGINT";
   const lastRoofYearExpr = permitsLoaded ? "pm.last_roof_permit_year" : "NULL::INTEGER";
   const lastRoofDateExpr = permitsLoaded ? "pm.last_roof_permit_date::VARCHAR" : "NULL::VARCHAR";
+  const lastPermitDateExpr = permitsLoaded ? "pm.last_permit_date::VARCHAR" : "NULL::VARCHAR";
 
-  // Nearest-neighbour distances are filled by the enrichment tracks (transit/places/water) into
-  // derived.parcel_distances; they stay NULL until those tracks load.
-  await conn.run(`
-    CREATE TABLE IF NOT EXISTS derived.parcel_distances (
-      parcel_id VARCHAR NOT NULL,
-      nearest_transit_stop_m DOUBLE, nearest_transit_stop_id VARCHAR, nearest_transit_stop_name VARCHAR,
-      nearest_starbucks_m DOUBLE, nearest_starbucks_id VARCHAR, nearest_starbucks_name VARCHAR,
-      water_dist_m DOUBLE, water_name VARCHAR, water_basis VARCHAR,
-      run_id VARCHAR, computed_at TIMESTAMP)`);
-  const distJoin = "LEFT JOIN derived.parcel_distances d ON d.parcel_id = p.parcel_id";
+  const transitJoin = transitLoaded ? "LEFT JOIN derived.nn_transit tr ON tr.parcel_id = p.parcel_id" : "";
+  const starbucksJoin = placesLoaded ? "LEFT JOIN derived.nn_starbucks sb ON sb.parcel_id = p.parcel_id" : "";
+  const waterJoin = waterLoaded ? "LEFT JOIN derived.water_distance wd ON wd.parcel_id = p.parcel_id" : "";
+  const cojJoin = cojParcelsLoaded ? "LEFT JOIN (SELECT * FROM coj_parcels QUALIFY row_number() OVER (PARTITION BY parcel_id ORDER BY last_sale_date DESC NULLS LAST) = 1) cj ON cj.parcel_id = p.parcel_id" : "";
+  const addrJoin = addressesLoaded
+    ? `LEFT JOIN (SELECT parcel_id, any_value(floodzone) AS floodzone, any_value(zoning) AS zoning, any_value(subdivision) AS subdivision, count(*) AS address_point_count
+                  FROM address_points WHERE parcel_id IS NOT NULL GROUP BY parcel_id) ap ON ap.parcel_id = p.parcel_id`
+    : "";
+
+  const nn = (loaded: boolean, expr: string) => (loaded ? expr : "NULL");
+  // tenure: latest of the roll/SDF sale and the COJ last-sale date
+  const rollSale = "ls.sale_date";
+  const cojSale = cojParcelsLoaded ? "cj.last_sale_date" : "NULL::DATE";
+  const anySale = `greatest(coalesce(${rollSale}, DATE '0001-01-01'), coalesce(${cojSale}, DATE '0001-01-01'))`;
+  const anySaleExpr = `CASE WHEN ${rollSale} IS NULL AND ${cojSale} IS NULL THEN NULL ELSE ${anySale} END`;
+  const tenureBasis = `CASE
+      WHEN ${rollSale} IS NOT NULL AND (${cojSale} IS NULL OR ${rollSale} >= ${cojSale}) THEN 'FDOR_SALE'
+      WHEN ${cojSale} IS NOT NULL THEN 'COJ_SALESL'
+      ELSE NULL END`;
 
   const ownerRegion = ownerRegionSql("p");
-  const yearsSince = yearsSinceSql("ls.sale_date", opts.asOf);
+  const yearsSince = yearsSinceSql(`(${anySaleExpr})`, opts.asOf);
 
   await conn.run(`
     CREATE OR REPLACE TABLE derived.properties_features AS
@@ -111,7 +133,7 @@ export async function buildFeatures(
             AND left(regexp_replace(coalesce(p.own_zipcd, ''), '[^0-9]', '', 'g'), 5) = left(regexp_replace(coalesce(p.phy_zipcd, ''), '[^0-9]', '', 'g'), 5) END AS owner_occupied,
       ls.sale_date::VARCHAR                         AS last_sale_date,
       ls.sale_price                                 AS last_sale_price,
-      NULL::VARCHAR                                 AS subdivision,
+      ${addressesLoaded ? "ap.subdivision" : "NULL::VARCHAR"} AS subdivision,
       ${hasPermitsExpr}                             AS has_permits,
       ${permitCountExpr}                            AS permit_count,
       ${hasSunbizExpr}                              AS has_sunbiz_tenant,
@@ -140,9 +162,16 @@ export async function buildFeatures(
       ls.or_book                                    AS last_sale_or_book,
       ls.or_page                                    AS last_sale_or_page,
       ls.sale_count::BIGINT                         AS sale_count,
+      (${anySaleExpr})::VARCHAR                     AS last_sale_date_any,
+      ${tenureBasis}                                AS tenure_basis,
       ${yearsSince}                                 AS years_since_last_sale,
+      CASE WHEN (${anySaleExpr}) IS NULL THEN NULL
+           ELSE (${anySaleExpr}) <= DATE '${opts.asOf}' - INTERVAL 10 YEAR END AS no_sale_10y_flag,
+      ${sunbizCountExpr}                            AS sunbiz_business_count,
+      ${roofPermitCountExpr}                        AS roof_permit_count,
       ${lastRoofYearExpr}                           AS last_roof_permit_year,
       ${lastRoofDateExpr}                           AS last_roof_permit_date,
+      ${lastPermitDateExpr}                         AS last_permit_date,
       CASE WHEN ${lastRoofYearExpr} IS NOT NULL THEN ${lastRoofYearExpr}
            WHEN p.eff_yr_blt > 0 THEN p.eff_yr_blt
            WHEN p.act_yr_blt > 0 THEN p.act_yr_blt END::INTEGER AS roof_year_est,
@@ -152,29 +181,52 @@ export async function buildFeatures(
       CASE WHEN ${lastRoofYearExpr} IS NOT NULL THEN year(DATE '${opts.asOf}') - ${lastRoofYearExpr}
            WHEN p.eff_yr_blt > 0 THEN year(DATE '${opts.asOf}') - p.eff_yr_blt
            WHEN p.act_yr_blt > 0 THEN year(DATE '${opts.asOf}') - p.act_yr_blt END::INTEGER AS roof_age_years,
-      CASE WHEN ${waterLoaded ? "true" : "false"} AND d.water_dist_m IS NOT NULL THEN d.water_dist_m <= 150 END AS water_view_flag,
-      CASE WHEN ${waterLoaded ? "true" : "false"} THEN d.water_dist_m END AS water_dist_m,
-      CASE WHEN ${waterLoaded ? "true" : "false"} THEN d.water_basis END AS water_basis,
-      CASE WHEN ${transitLoaded ? "true" : "false"} THEN d.nearest_transit_stop_m END AS nearest_transit_stop_m,
-      CASE WHEN ${transitLoaded ? "true" : "false"} THEN d.nearest_transit_stop_id END AS nearest_transit_stop_id,
-      CASE WHEN ${transitLoaded ? "true" : "false"} THEN d.nearest_transit_stop_name END AS nearest_transit_stop_name,
-      CASE WHEN ${placesLoaded ? "true" : "false"} THEN d.nearest_starbucks_m END AS nearest_starbucks_m,
-      CASE WHEN ${placesLoaded ? "true" : "false"} THEN d.nearest_starbucks_id END AS nearest_starbucks_id,
-      CASE WHEN ${placesLoaded ? "true" : "false"} THEN d.nearest_starbucks_name END AS nearest_starbucks_name,
+      ${nn(waterLoaded, "CASE WHEN p.latitude IS NULL THEN NULL ELSE coalesce(wd.water_view_flag, false) END")}::BOOLEAN AS water_view_flag,
+      ${nn(waterLoaded, "CASE WHEN p.latitude IS NULL THEN NULL ELSE coalesce(wd.water_view_flag AND wd.layer IN ('coj_stjohnsriver', 'coj_jax_river', 'nhd_NHDArea'), false) END")}::BOOLEAN AS water_view_major_flag,
+      ${nn(waterLoaded, "wd.water_dist_m")}::DOUBLE   AS water_dist_m,
+      ${nn(waterLoaded, "wd.water_name")}::VARCHAR    AS water_body_name,
+      ${nn(waterLoaded, "wd.water_type")}::VARCHAR    AS water_body_type,
+      ${nn(waterLoaded, `CASE WHEN p.latitude IS NULL THEN NULL
+             WHEN wd.parcel_id IS NULL THEN 'no mapped water within ~1 km of centroid (COJ rivers + NHD)'
+             WHEN wd.box_touch THEN 'parcel bbox within 30 m of ' || coalesce(wd.water_name, wd.water_type) || ' (' || wd.layer || ')'
+             ELSE 'centroid ' || wd.water_dist_m::VARCHAR || ' m from shoreline of ' || coalesce(wd.water_name, wd.water_type) || ' (' || wd.layer || ')' END`)}::VARCHAR AS water_basis,
+      ${nn(transitLoaded, "tr.nearest_transit_stop_m")}::DOUBLE      AS nearest_transit_stop_m,
+      ${nn(transitLoaded, "tr.nearest_transit_stop_id")}::VARCHAR    AS nearest_transit_stop_id,
+      ${nn(transitLoaded, "tr.nearest_transit_stop_name")}::VARCHAR  AS nearest_transit_stop_name,
+      ${nn(transitLoaded, "tr.nearest_transit_stop_route_types")}::VARCHAR AS nearest_transit_route_types,
+      ${nn(transitLoaded, "tr.nearest_transit_stop_route_short_names")}::VARCHAR AS nearest_transit_routes,
+      ${nn(transitLoaded, `CASE WHEN tr.nearest_transit_stop_m IS NULL THEN NULL ELSE tr.nearest_transit_stop_m <= ${WALK_M} END`)}::BOOLEAN AS near_transit_800m,
+      ${nn(placesLoaded, "sb.nearest_starbucks_m")}::DOUBLE        AS nearest_starbucks_m,
+      ${nn(placesLoaded, "sb.nearest_starbucks_id")}::VARCHAR      AS nearest_starbucks_id,
+      ${nn(placesLoaded, "sb.nearest_starbucks_name")}::VARCHAR    AS nearest_starbucks_name,
+      ${nn(placesLoaded, `CASE WHEN sb.nearest_starbucks_m IS NULL THEN NULL ELSE sb.nearest_starbucks_m <= ${WALK_M} END`)}::BOOLEAN AS near_starbucks_800m,
+      ${cojParcelsLoaded ? "cj.fld_zone" : addressesLoaded ? "ap.floodzone" : "NULL::VARCHAR"} AS fld_zone,
+      ${cojParcelsLoaded ? "cj.zoning" : addressesLoaded ? "ap.zoning" : "NULL::VARCHAR"} AS zoning,
+      ${cojParcelsLoaded ? "cj.last_sale_date::VARCHAR" : "NULL::VARCHAR"} AS coj_last_sale_date,
+      ${addressesLoaded ? "ap.address_point_count::BIGINT" : "NULL::BIGINT"} AS address_point_count,
       p.geometry_source                             AS coordinates_source,
       p.source_artifact                             AS source_artifact,
       p.source_sha256                               AS source_sha256,
       p.fetched_at::VARCHAR                         AS source_fetched_at,
       p.run_id                                      AS source_run_id,
       ${q(opts.runId)}                              AS features_run_id,
-      DATE '${opts.asOf}'::VARCHAR                  AS features_as_of
+      DATE '${opts.asOf}'::VARCHAR                  AS features_as_of,
+      -- UI provenance contract (ui/lib/sql.ts): primary source URL, fetch time, run id
+      p.source_url                                  AS source_url,
+      p.fetched_at                                  AS fetched_at,
+      ${q(opts.runId)}                              AS run_id
     FROM parcels p
     LEFT JOIN derived.dor_use_codes uc ON uc.code = p.dor_uc
     LEFT JOIN last_sale ls ON ls.parcel_id = p.parcel_id
     ${permitJoin}
-    ${distJoin}
+    ${sunbizJoin}
+    ${transitJoin}
+    ${starbucksJoin}
+    ${waterJoin}
+    ${cojJoin}
+    ${addrJoin}
   `);
 
   const rows = await count(conn, "derived.properties_features");
-  return { rows, asOf: opts.asOf, permitsLoaded, businessesLoaded, transitLoaded, placesLoaded, waterLoaded };
+  return { rows, asOf: opts.asOf, permitsLoaded, businessesLoaded, transitLoaded, placesLoaded, waterLoaded, cojParcelsLoaded, addressesLoaded };
 }

@@ -15,7 +15,7 @@ describe("dataset-coverage.json", () => {
     const appraisal = snap.datasets.find((d) => d.source === "appraisal");
     expect(appraisal).toMatchObject({ county: "duval", ingested_count: 0, expected_count: null, first_loaded_at: null, last_loaded_at: null, cid: null, ipns_label: null });
     // the non-implemented sources are still reported (coverage honesty)
-    expect(snap.datasets.find((d) => d.source === "permits")).toMatchObject({ ingested_count: 0, implemented: false });
+    expect(snap.datasets.find((d) => d.source === "permits")).toMatchObject({ ingested_count: 0, implemented: true, requires_us_egress: true, last_skip_reason: null });
     await db.close();
   });
 
@@ -44,6 +44,9 @@ describe("dataset-coverage.json", () => {
       ipns_label: "duval-oracle-artifacts",
       last_run_id: "r2",
     });
+    await db.conn.run(`INSERT INTO entity_links VALUES ('l1', 'parcel_owner', 'parcel', 'A', 'owner', 'o1', 'owner_name_mailing_hash', 1.0, NULL, 'r2', TIMESTAMP '2026-08-21 11:00:00')`);
+    const snap2 = await buildCoverageSnapshot(db.conn, { exportedAt: "2026-08-21T00:00:00.000Z" });
+    expect(snap2.datasets.find((d) => d.source === "entity_links")).toMatchObject({ ingested_count: 1, first_loaded_at: "2026-08-21T11:00:00Z", owners: 0 });
     const geometry = snap.datasets.find((d) => d.source === "geometry");
     expect(geometry).toMatchObject({ ingested_count: 0, expected_count: null, parcels_total: 2, parcels_with_coordinates: 0 });
     expect(OracleDatasetCoverageSnapshotSchema.safeParse(snap).success).toBe(true);

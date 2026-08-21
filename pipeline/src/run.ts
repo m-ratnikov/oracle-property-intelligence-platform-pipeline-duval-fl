@@ -10,6 +10,7 @@ import { log as rootLog, type Logger } from "./log.js";
 import { computeFileCid } from "./publish/cid.js";
 import { buildCoverageSnapshot } from "./publish/coverage.js";
 import { SOURCES, type TrackName } from "./sources.js";
+import { probeUrl } from "./tracks/http.js";
 import { TRACK_RUNNERS } from "./tracks/index.js";
 import type { TrackContext, TrackResult } from "./tracks/types.js";
 import { startResult } from "./tracks/types.js";
@@ -162,8 +163,8 @@ export async function loadRunHistory(db: Db): Promise<RunRecord[]> {
 
 export async function tableTotals(db: Db): Promise<Record<string, number>> {
   const tables = [
-    "parcels", "parcel_geometry", "sales_history", "permits", "contractors", "businesses", "places",
-    "transit_stops", "water_bodies", "address_points", "entity_links",
+    "parcels", "parcel_geometry", "sales_history", "permits", "contractors", "businesses", "business_events", "places",
+    "transit_stops", "transit_routes", "water_bodies", "address_points", "coj_parcels", "owners", "entity_links",
   ];
   const out: Record<string, number> = {};
   for (const t of tables) {
@@ -223,18 +224,43 @@ export async function runPipeline(opts: RunOptions): Promise<{ run: RunRecord; v
   const sources: RunSourceRecord[] = [];
   const limitations = new Set<string>();
   let failed = 0;
+  let egressCountry: string | null = null;
+  if (opts.tracks.some((t) => SOURCES[t].requiresUsEgress)) {
+    try {
+      const res = await fetch("https://ipinfo.io/json", { signal: AbortSignal.timeout(10_000) });
+      const j = (await res.json()) as { country?: string };
+      egressCountry = j.country ?? null;
+    } catch {
+      egressCountry = null;
+    }
+    logger.info("egress", { country: egressCountry });
+  }
 
   for (const track of opts.tracks) {
     const source = SOURCES[track];
     const runner = TRACK_RUNNERS[track];
     const ctx: TrackContext = { conn: db.conn, runId, paths, logger, window: opts.window, force: opts.force, env: opts.env };
     let result: TrackResult;
+    let egressBlock: string | null = null;
+    if (runner !== undefined && source.implemented && source.requiresUsEgress && source.probeUrl) {
+      const probe = await probeUrl(source.probeUrl);
+      if (!probe.reachable) {
+        egressBlock = `skipped: non-US egress (HTTP ${probe.status}${probe.error && probe.status === 0 ? `, ${probe.error}` : ""})`;
+      }
+    }
     if (runner === undefined || !source.implemented) {
       result = startResult(source);
       result.status = "skipped";
       result.limitations.push("track not implemented in this milestone; recorded for coverage honesty");
       result.finishedAt = new Date().toISOString();
       logger.warn("track_skipped", { track, reason: "not implemented", limitations: result.limitations });
+    } else if (egressBlock !== null) {
+      result = startResult(source);
+      result.status = "skipped";
+      result.limitations.push(egressBlock);
+      result.notes.egress = { probeUrl: source.probeUrl, egressCountry: egressCountry ?? null };
+      result.finishedAt = new Date().toISOString();
+      logger.warn("track_skipped", { track, reason: egressBlock, probeUrl: source.probeUrl });
     } else {
       logger.info("track_start", { track, source: source.title, url: source.url });
       try {
@@ -289,6 +315,7 @@ export async function runPipeline(opts: RunOptions): Promise<{ run: RunRecord; v
   }
 
   const totals = await tableTotals(db);
+  if (egressCountry !== null) artifacts.egressCountry = egressCountry;
   const status = runError !== null ? "failed" : failed > 0 ? "completed_with_errors" : "completed";
   const finishedAt = new Date().toISOString();
   await db.conn.run(`

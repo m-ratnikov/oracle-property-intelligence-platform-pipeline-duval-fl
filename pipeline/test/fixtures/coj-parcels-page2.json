@@ -1,0 +1,14 @@
+{
+  "_fixture": "Second (last) page: exceededTransferLimit false. Synthetic values.",
+  "exceededTransferLimit": false,
+  "features": [
+    {
+      "attributes": {
+        "RE": "000002-0010", "RE_NOSPACE": "0000020010", "LNAMEOWNER": "BRYCEVILLE LAND LLC", "MAILADDR1": "9540 SAN JOSE BLVD",
+        "MAILCITY": "JACKSONVILLE", "MAILSTATE": "FL", "MAILZIP": "32257", "LONGNAME": "0 N US 301 HWY", "PUSE": "5500",
+        "DESCPU": "TIMBERLAND", "ZON_LABEL": "AGR", "FLD_ZONE": "AE", "ACRES": 1381.67, "LAT": 30.45, "LONG": -82.03,
+        "SALESLDD": null, "SALESLMM": null, "SALESLYY": null, "CAMA_VAL": 3989713, "TOT_BLD_VA": 0, "NBBLDGS": 0
+      }
+    }
+  ]
+}

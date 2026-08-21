@@ -6,13 +6,15 @@ export type TrackName =
   | "appraisal"
   | "sales"
   | "geometry"
-  | "permits"
-  | "contractors"
-  | "businesses"
-  | "places"
   | "transit"
   | "water"
-  | "addresses";
+  | "places"
+  | "businesses"
+  | "links"
+  | "coj_parcels"
+  | "coj_addresses"
+  | "contractors"
+  | "permits";
 
 export interface SourceDef {
   track: TrackName;
@@ -25,11 +27,20 @@ export interface SourceDef {
   cadence: string;
   targetTable: string;
   implemented: boolean;
+  /** Source only answers from a US IP (COJ / DBPR hosts). Locally the track is skipped with the probe result. */
+  requiresUsEgress: boolean;
+  /** Small GET used to decide egress availability before a US-only track runs. */
+  probeUrl?: string;
+  /** Known total in the source when published by the source itself (used as coverage expected_count fallback). */
+  knownExpectedCount?: number;
   /** Known constraints, copied into run_log.limitations as data. */
   limitations: string[];
 }
 
 const FDOR = "https://floridarevenue.com/property/dataportal/Documents/PTO%20Data%20Portal";
+export const COJ_PARCELS_URL = "https://maps.coj.net/coj/rest/services/CityBiz/Parcels/MapServer/0/query";
+export const COJ_ADDRESSES_URL = "https://maps.coj.net/coj/rest/services/ERAT/EratDashboard_3000/MapServer/41/query";
+export const DUVAL_BBOX = { minLon: -82.05, maxLon: -81.3, minLat: 30.1, maxLat: 30.6 } as const;
 
 export const SOURCES: Record<TrackName, SourceDef> = {
   appraisal: {
@@ -45,10 +56,11 @@ export const SOURCES: Record<TrackName, SourceDef> = {
     cadence: "annual roll (prelim Jul, final Oct); only the current roll is posted",
     targetTable: "parcels",
     implemented: true,
+    requiresUsEgress: false,
     limitations: [
       "FDOR posts only the current roll type; prior years by email request",
       "No roof attributes in the bulk roll (ACT_YR_BLT/EFF_YR_BLT used as roof-age proxy)",
-      "Sale history limited to the two most recent sales per parcel (SALE_*1/2)",
+      "Sale fields cover only the roll's current and prior year (2025-2026)",
     ],
   },
   sales: {
@@ -64,9 +76,10 @@ export const SOURCES: Record<TrackName, SourceDef> = {
     cadence: "annual (prior year + YTD); NAL SALE_*1/2 folded in",
     targetTable: "sales_history",
     implemented: true,
+    requiresUsEgress: false,
     limitations: [
       "Sale dates carry year+month only (day unknown; stored as first of month)",
-      "Monthly PA sales files (jacksonville.gov data offerings) rotate GUID URLs and are US-egress only; not yet wired",
+      "Only 2025-2026 transfers; older tenure comes from the COJ parcels layer (SALESL*)",
     ],
   },
   geometry: {
@@ -79,110 +92,166 @@ export const SOURCES: Record<TrackName, SourceDef> = {
     cadence: "annual (collected Apr, published Aug)",
     targetTable: "parcel_geometry",
     implemented: true,
+    requiresUsEgress: false,
     limitations: [
       "192 MB archive; centroids computed from polygons (not rooftop points)",
       "Parcels present in NAL but missing from the shapefile get no coordinates",
+    ],
+  },
+  transit: {
+    track: "transit",
+    coverageSource: "transit",
+    sourceSystem: "jta_gtfs",
+    title: "JTA GTFS static feed (stops, routes, stop_times)",
+    url: envOrDefault("SOURCE_URL_GTFS", "https://ride.jtafla.com/gtfs-archive/gtfs.zip"),
+    format: "gtfs zip",
+    cadence: "irregular releases (redirect to a dated media file); ETag/Last-Modified polled",
+    targetTable: "transit_stops",
+    implemented: true,
+    requiresUsEgress: false,
+    knownExpectedCount: 2501,
+    limitations: ["No GTFS-RT; no licence text published", "Walking distance is straight-line (haversine), not network distance"],
+  },
+  water: {
+    track: "water",
+    coverageSource: "hydrography",
+    sourceSystem: "coj_nhd_hydrography",
+    title: "COJ St Johns River + Jax_River polygons (AGO) and USGS NHD HU4 0307 (waterbody, area, flowline)",
+    url: "https://services1.arcgis.com/NXfNVaFp7QMxnE3j/arcgis/rest/services/stjohnsriver/FeatureServer/0",
+    format: "arcgis geojson + filegdb (zip)",
+    cadence: "static (NHD retired 2023); AGO layers refreshed by COJ",
+    targetTable: "water_bodies",
+    implemented: true,
+    requiresUsEgress: false,
+    limitations: [
+      "Water view is a proximity proxy (centroid within 150 m of a mapped shoreline vertex, or parcel bbox within 30 m), not a sightline analysis; distances beyond ~1 km are not computed",
+      "NHD lake/pond polygons below 1 ha and unnamed flowlines are excluded",
+      "Parcel polygons are not stored; the parcel bounding box stands in for the polygon",
+    ],
+  },
+  places: {
+    track: "places",
+    coverageSource: "places",
+    sourceSystem: "overture_places",
+    title: "Overture Maps Places release 2026-08-19.0 (Duval bbox; coffee, grocery, pharmacy, school, hospital, restaurant)",
+    url: envOrDefault("SOURCE_URL_OVERTURE", "s3://overturemaps-us-west-2/release/2026-08-19.0/theme=places/type=place/*"),
+    format: "geoparquet (DuckDB httpfs, anonymous)",
+    cadence: "monthly releases; GERS ids stable across releases",
+    targetTable: "places",
+    implemented: true,
+    requiresUsEgress: false,
+    limitations: ["Brand matching by name (Starbucks); confidence varies; CDLA-Permissive 2.0", "Reading the release scans ~2.5 min of remote parquet"],
+  },
+  businesses: {
+    track: "businesses",
+    coverageSource: "sunbiz",
+    sourceSystem: "sunbiz",
+    title: "Florida Division of Corporations (Sunbiz) daily corporate files (SFTP, public credentials)",
+    url: "sftp://sftp.floridados.gov/doc/cor/",
+    format: "fixed-length 1440-char records (daily deltas) + Events",
+    cadence: "daily; window of N days per run, processed files journaled",
+    targetTable: "businesses",
+    implemented: true,
+    requiresUsEgress: false,
+    limitations: [
+      "No county filter: rows kept when principal/mailing ZIP starts with 322 or city starts with JACKSONVILLE",
+      "Layout page (dos.sunbiz.org/data-definitions/cor.html) was unreachable (HTTP 522); offsets validated against live records instead",
+      "Officers kept as names only; events file parsed for doc number + raw line",
+    ],
+  },
+  links: {
+    track: "links",
+    coverageSource: "entity_links",
+    sourceSystem: "duval_reconciliation",
+    title: "Entity reconciliation: owners (name + mailing hash), business <-> parcel links",
+    url: "derived",
+    format: "derived",
+    cadence: "every run after the source tracks",
+    targetTable: "entity_links",
+    implemented: true,
+    requiresUsEgress: false,
+    limitations: ["Address matching is exact on the normalized line 1 + ZIP5; unit-level mismatches are not linked"],
+  },
+  coj_parcels: {
+    track: "coj_parcels",
+    coverageSource: "coj_parcels",
+    sourceSystem: "coj_parcels",
+    title: "City of Jacksonville parcel layer (CityBiz/Parcels MapServer 0): last sale date, flood zone, zoning",
+    url: COJ_PARCELS_URL,
+    format: "arcgis rest json (2000/page)",
+    cadence: "at least monthly; full paged pull, idempotent by RE hash",
+    targetTable: "coj_parcels",
+    implemented: true,
+    requiresUsEgress: true,
+    probeUrl: `${COJ_PARCELS_URL}?where=1%3D1&returnCountOnly=true&f=json`,
+    knownExpectedCount: 407986,
+    limitations: ["US egress only (COJ hosts block non-US and cloud IPs)", "Paged at 2000 rows, concurrency 2, 250 ms delay"],
+  },
+  coj_addresses: {
+    track: "coj_addresses",
+    coverageSource: "addresses",
+    sourceSystem: "coj_address_points",
+    title: "COJ address points (ERAT MapServer layer 41), incremental by EDIT_DATE",
+    url: COJ_ADDRESSES_URL,
+    format: "arcgis rest json (2000/page)",
+    cadence: "continuous (EDIT_DATE >= last run)",
+    targetTable: "address_points",
+    implemented: true,
+    requiresUsEgress: true,
+    probeUrl: `${COJ_ADDRESSES_URL}?where=1%3D1&returnCountOnly=true&f=json`,
+    knownExpectedCount: 671814,
+    limitations: ["US egress only (COJ hosts block non-US and cloud IPs)", "First run is a full paged pull; later runs filter EDIT_DATE"],
+  },
+  contractors: {
+    track: "contractors",
+    coverageSource: "contractors",
+    sourceSystem: "dbpr_cilb",
+    title: "Florida DBPR CILB licensee extracts (certified + registered), filtered to Duval",
+    url: "https://www2.myfloridalicense.com/sto/file_download/extracts/cilb_certified.csv",
+    format: "csv (statewide, ~750 MB certified)",
+    cadence: "weekly",
+    targetTable: "contractors",
+    implemented: true,
+    requiresUsEgress: true,
+    probeUrl: "https://www2.myfloridalicense.com/sto/file_download/extracts/cilb_registered.csv",
+    limitations: [
+      "HTTP 403 from non-US IPs; from a US runner with a browser UA the files download",
+      "BBB not used: terms forbid aggregation",
     ],
   },
   permits: {
     track: "permits",
     coverageSource: "permits",
     sourceSystem: "coj_jaxepics",
-    title: "City of Jacksonville JaxEPICS permit pages",
+    title: "City of Jacksonville JaxEPICS permits (bounded enumeration of permit numbers)",
     url: "https://jaxepics.coj.net/Permit/View/",
-    format: "html/json (undocumented SPA API)",
-    cadence: "continuous; enumerated by permit number in bounded windows",
+    format: "html shell + json api (discovered at run time)",
+    cadence: "continuous; --window permits per run; cursor journaled",
     targetTable: "permits",
-    implemented: false,
+    implemented: true,
+    requiresUsEgress: true,
+    probeUrl: "https://jaxepics.coj.net/Permit/View/B-25-279425.000",
     limitations: [
-      "No open-data permit layer found; search/reports require login",
-      "US egress only (COJ hosts block non-US and cloud IPs)",
-      "Enumeration only (B-YY-nnnnnn.nnn); concurrency kept at 2; throughput to be measured",
+      "No open-data permit layer; search/reports need login; enumeration only",
+      "US egress only; concurrency 2; 500 ms delay; throughput recorded per run",
+      "API shape discovered from the Angular bundle at run time; unknown fields kept in source_payload",
     ],
-  },
-  contractors: {
-    track: "contractors",
-    coverageSource: "contractors",
-    sourceSystem: "dbpr_cilb",
-    title: "Florida DBPR CILB licensee extracts (statewide, filtered to Duval)",
-    url: "https://www2.myfloridalicense.com/sto/file_download/extracts/cilb_certified.csv",
-    format: "csv",
-    cadence: "weekly",
-    targetTable: "contractors",
-    implemented: false,
-    limitations: [
-      "Cloudflare JS challenge; needs a headless browser fetch step",
-      "BBB not used: terms forbid aggregation",
-    ],
-  },
-  businesses: {
-    track: "businesses",
-    coverageSource: "sunbiz",
-    sourceSystem: "sunbiz",
-    title: "Florida Division of Corporations (Sunbiz) daily corporate files",
-    url: "sftp://sftp.floridados.gov/doc/cor/",
-    format: "fixed-length 1440-char records",
-    cadence: "daily deltas; quarterly full (1.8 GB)",
-    targetTable: "businesses",
-    implemented: false,
-    limitations: ["No county filter; filtered on Jacksonville/Duval ZIPs", "SFTP host key must be trusted"],
-  },
-  places: {
-    track: "places",
-    coverageSource: "places",
-    sourceSystem: "overture_places",
-    title: "Overture Maps Places (Duval bbox)",
-    url: "s3://overturemaps-us-west-2/release/2026-08-19.0/theme=places/type=place/",
-    format: "geoparquet",
-    cadence: "monthly releases",
-    targetTable: "places",
-    implemented: false,
-    limitations: ["Brand matching by name (Starbucks); confidence varies"],
-  },
-  transit: {
-    track: "transit",
-    coverageSource: "transit",
-    sourceSystem: "jta_gtfs",
-    title: "JTA GTFS static feed",
-    url: "https://ride.jtafla.com/gtfs-archive/gtfs.zip",
-    format: "gtfs zip",
-    cadence: "irregular releases; poll ETag/Last-Modified",
-    targetTable: "transit_stops",
-    implemented: false,
-    limitations: ["No GTFS-RT; no licence text published"],
-  },
-  water: {
-    track: "water",
-    coverageSource: "hydrography",
-    sourceSystem: "coj_hydrography",
-    title: "COJ St Johns River / Jax_River polygons + USGS NHD",
-    url: "https://services1.arcgis.com/NXfNVaFp7QMxnE3j/arcgis/rest/services/stjohnsriver/FeatureServer/0",
-    format: "arcgis feature service",
-    cadence: "static",
-    targetTable: "water_bodies",
-    implemented: false,
-    limitations: ["Water view is a proximity proxy (distance to water polygon), not a sightline analysis"],
-  },
-  addresses: {
-    track: "addresses",
-    coverageSource: "addresses",
-    sourceSystem: "coj_address_points",
-    title: "COJ address points (ERAT MapServer layer 41)",
-    url: "https://maps.coj.net/coj/rest/services/ERAT/EratDashboard_3000/MapServer/41/query",
-    format: "arcgis mapserver",
-    cadence: "continuous (EDIT_DATE)",
-    targetTable: "address_points",
-    implemented: false,
-    limitations: ["US egress only (COJ hosts block non-US and cloud IPs)"],
   },
 };
 
 export const ALL_TRACKS = Object.keys(SOURCES) as TrackName[];
-export const DEFAULT_TRACKS: TrackName[] = ["appraisal", "sales", "geometry"];
+/** Tracks every scheduled run executes (US-only ones self-skip outside the US). */
+export const DEFAULT_TRACKS: TrackName[] = [
+  "appraisal", "sales", "geometry", "transit", "water", "places", "businesses",
+  "coj_parcels", "coj_addresses", "contractors", "permits", "links",
+];
+/** Reachable from anywhere. */
+export const LOCAL_TRACKS: TrackName[] = ["appraisal", "sales", "geometry", "transit", "water", "places", "businesses", "links"];
 
 export function parseTracks(raw: string | undefined): TrackName[] {
   if (raw === undefined || raw.trim() === "" || raw.trim() === "default") return DEFAULT_TRACKS;
   if (raw.trim() === "all") return ALL_TRACKS;
+  if (raw.trim() === "local") return LOCAL_TRACKS;
   const out: TrackName[] = [];
   for (const part of raw.split(",")) {
     const trimmed = part.trim();
@@ -191,5 +260,7 @@ export function parseTracks(raw: string | undefined): TrackName[] {
     if (!(t in SOURCES)) throw new Error(`Unknown track "${t}". Known: ${ALL_TRACKS.join(", ")}`);
     out.push(t);
   }
+  // links always last so it sees this run's loads
+  if (out.includes("links")) return [...out.filter((t) => t !== "links"), "links"];
   return out;
 }

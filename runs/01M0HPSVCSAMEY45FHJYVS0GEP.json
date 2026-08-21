@@ -1,0 +1,170 @@
+{
+  "run_id": "01M0HPSVCSAMEY45FHJYVS0GEP",
+  "county": "duval",
+  "started_at": "2026-08-21 08:25:36.41",
+  "finished_at": "2026-08-21 08:26:00.295",
+  "status": "completed",
+  "trigger": "manual",
+  "git_sha": "a56e979b36a20aa91b9b520f54baa5341ceb0e5f",
+  "tracks": [
+    "links"
+  ],
+  "window": null,
+  "sources": [
+    {
+      "track": "links",
+      "source_system": "duval_reconciliation",
+      "target_table": "entity_links",
+      "source_url": "derived",
+      "artifact_path": null,
+      "artifact_sha256": null,
+      "artifact_etag": null,
+      "artifact_last_modified": null,
+      "artifact_bytes": null,
+      "download_status": null,
+      "rows_staged": 323925,
+      "inserted": 0,
+      "updated": 1519,
+      "unchanged": 322406,
+      "missing_in_source": 127,
+      "table_total_after": 324052,
+      "delta_vs_prev_total": 0,
+      "started_at": "2026-08-21T08:25:36.565Z",
+      "finished_at": "2026-08-21T08:25:46.643Z",
+      "status": "completed",
+      "limitations": [
+        "Address matching is exact on the normalized line 1 + ZIP5; unit-level mismatches are not linked"
+      ],
+      "notes": {
+        "links": [
+          {
+            "link_type": "business_parcel",
+            "match_method": "owner_name_match",
+            "n": 3
+          },
+          {
+            "link_type": "business_parcel",
+            "match_method": "situs_address_match",
+            "n": 655
+          },
+          {
+            "link_type": "parcel_owner",
+            "match_method": "owner_name_mailing_hash",
+            "n": 404023
+          }
+        ],
+        "parcelsLinkedToBusiness": 577,
+        "businessesLinkedToParcel": 570,
+        "owners": 324052
+      },
+      "error": null
+    }
+  ],
+  "limitations": [
+    "links: Address matching is exact on the normalized line 1 + ZIP5; unit-level mismatches are not linked"
+  ],
+  "totals": {
+    "parcels": 404023,
+    "parcel_geometry": 405716,
+    "sales_history": 64532,
+    "permits": 0,
+    "contractors": 0,
+    "businesses": 1024,
+    "business_events": 17919,
+    "places": 3084,
+    "transit_stops": 2501,
+    "transit_routes": 45,
+    "water_bodies": 757,
+    "address_points": 0,
+    "coj_parcels": 0,
+    "owners": 324052,
+    "entity_links": 404681,
+    "derived.properties_features": 404023
+  },
+  "artifacts": {
+    "queryTable": {
+      "path": "query-table.parquet",
+      "rows": 404023,
+      "bytes": 33565765,
+      "sha256": "4dce05401f34f3911c13fb8572e8642648b674c0424ab59c0323b8b3a968f02a",
+      "cid": "QmRyUY5G129xXyi5x1P4ZA8RkM1fxRszQ77Kqfq9E8cijG",
+      "cidV1": "bafybeibwaigfakyh2qwdvsmhzqjp7pgnlict5wdnvcnr3mhg7pzdnkbul4",
+      "validationOk": true,
+      "problems": []
+    },
+    "tables": {
+      "parcels": {
+        "path": "tables/parcels.parquet",
+        "rows": 404023,
+        "bytes": 38911589,
+        "sha256": "c5c5a5b1746d48ded732eee500024c3fe521653c9d83d70f2fb08a08f0e000c4",
+        "cid": "QmfZMzL3RqSqhLMYLtB4g8dRtcZfZTaXHxPfbVdkern2y6",
+        "cidV1": "bafybeih73bjjgtupi3leywt6quamozyf3cl5rzpti7ewvsmtfqbhu6tb2e"
+      },
+      "parcel_geometry": {
+        "path": "tables/parcel_geometry.parquet",
+        "rows": 405716,
+        "bytes": 25307296,
+        "sha256": "9bc99c87ed404eab5e67e67fad392eb36738ecf6230087e92a3b2b4c1ab76763",
+        "cid": "QmVcD9Knx3t5NWCZky7VgkWyJxWLbXDruUPxg5u32EDSo6",
+        "cidV1": "bafybeidl7yy5xzjdhqdsd6y53zfo33eapcsssipj5kdx3rp5spe3irbqyu"
+      },
+      "sales_history": {
+        "path": "tables/sales_history.parquet",
+        "rows": 64532,
+        "bytes": 3076215,
+        "sha256": "19b51a73f7a7988f7c5a27575e5787beee75d9c5dd21667a07e71f5ae543d821",
+        "cid": "QmNXY7mgvnhqM3A459LaAbQS5JUzKfSwhpv3e7nBuBWhA3",
+        "cidV1": "bafybeiaczhxxbr6kiul4jdlz4zd3yi2ixyhbamv6fsrzeilb5nwxfydmkq"
+      },
+      "businesses": {
+        "path": "tables/businesses.parquet",
+        "rows": 1024,
+        "bytes": 108419,
+        "sha256": "a811ecb5b19697e47301fa367e9f3681e27e8b9f91cacb579070f94526d852b4",
+        "cid": "QmXZ8xNgLvaWwrMhvrVfMiA5jxq2vE7m7khqAE5r6WVdhU",
+        "cidV1": "bafybeiei5qlqhhomexq5q4zpezmumms4q33l27jy7vtxzontekbxtswizm"
+      },
+      "places": {
+        "path": "tables/places.parquet",
+        "rows": 3084,
+        "bytes": 382955,
+        "sha256": "fd370a529ce6fef6250d0285f4e0484e1d4dfc13718f38fece9e417239021658",
+        "cid": "QmbmdL3BJXYrRYkfWia7LpHvhTKzJpNmwnaFipA8Hx9QP1",
+        "cidV1": "bafybeighrxr2yqpuoaci6q7k3ylxq5po7wb35wex7d5lazdctrnhyzxafa"
+      },
+      "transit_stops": {
+        "path": "tables/transit_stops.parquet",
+        "rows": 2501,
+        "bytes": 110120,
+        "sha256": "1d1d18e45ac873e927d78d6ffe5c2977e7d7ed37b7e945cc6c1d0b7bc1b9d9ca",
+        "cid": "QmRWTAjYGb6HY1J44cz5hZjgF2Q6c7BRixAvtSce5561U6",
+        "cidV1": "bafybeibpcxi4zje5kw5sgzzvpmp5iz7t3yeaqkvryxrov3h77cf23qv5nm"
+      },
+      "water_bodies": {
+        "path": "tables/water_bodies.parquet",
+        "rows": 757,
+        "bytes": 3161846,
+        "sha256": "dfbb7b9fcc9516ab9d438842a7b104eb79bc584debc78bfd2c659d8961f095e3",
+        "cid": "QmaFpUm99hp84ugckG2PpzkPjsAu6waVxFian1zkLzWgi4",
+        "cidV1": "bafybeifrb5rm3pp77oxwi3poxrlxvaduc5z6pdzd2uvcxgil4sv5ilyfae"
+      },
+      "entity_links": {
+        "path": "tables/entity_links.parquet",
+        "rows": 404681,
+        "bytes": 15904617,
+        "sha256": "547893058766c5f36cca48fa9740f3b8c047b6bea34765198a9c4fa61fa37ece",
+        "cid": "Qmf61tKA6q8CLXQ1jwMPvV78M18CWP41ci1gF3qMNdz6Fr",
+        "cidV1": "bafybeihy23umzywwa5ypbgdwkcgd6dtxsl3uk2qlxrzpm5zqvczto5edle"
+      }
+    },
+    "coverage": {
+      "path": "dataset-coverage.json",
+      "bytes": 12264,
+      "sha256": "eb64c1d5a8e87665b919b46134c5dacb6bb7b2c931dcf0c308e92d9b3e1ae2bb",
+      "cid": "QmZfn99y2oJmZZevp2hmQpV7Wk7rfZqSYqKQRuYMuHy6xH",
+      "cidV1": "bafybeifik37kxzjh6ag5fvd2gwfedmjrjpd37dytsf3gjh5ktavptdvo7i"
+    }
+  },
+  "error": null
+}

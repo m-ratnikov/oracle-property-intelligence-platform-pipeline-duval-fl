@@ -1,0 +1,22 @@
+{
+  "_fixture": "SYNTHETIC. The real JaxEPICS JSON shape is discovered at run time (US egress only) and recorded in DATA_DIR/artifacts/permits/discovered-api.json. This document exercises the case-insensitive deep-key mapper with plausible key names; unknown keys are kept in source_payload.",
+  "permit": {
+    "permitNumber": "B-25-279425.000",
+    "permitType": "Building",
+    "workType": "Residential Re-Roof",
+    "description": "REROOF SHINGLE TO SHINGLE 28 SQ",
+    "status": "Issued",
+    "appliedDate": "2025-06-02T00:00:00",
+    "issueDate": "2025-06-05T00:00:00",
+    "jobCost": "12500.00",
+    "location": {
+      "fullAddress": "1303 W DEFENDER CT, JACKSONVILLE, FL 32218",
+      "reNumber": "168871-2134"
+    },
+    "contractor": {
+      "companyName": "RIVERSIDE ROOFING LLC",
+      "licenseNumber": "CCC1330001"
+    },
+    "inspections": [{ "type": "Final", "result": "Pass" }]
+  }
+}

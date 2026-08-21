@@ -30,11 +30,19 @@ export const ENTITY_KEYS: Record<string, string[]> = {
   permits: ["permit_no"],
   contractors: ["license_no"],
   businesses: ["doc_number"],
+  business_events: ["event_key"],
   places: ["place_id"],
   transit_stops: ["stop_id"],
+  transit_routes: ["route_id"],
   water_bodies: ["water_id"],
   address_points: ["address_id"],
+  coj_parcels: ["re"],
+  owners: ["owner_id"],
 };
+
+/** Bump when a table definition below changes; empty tables are recreated, non-empty ones are kept
+ *  (and the run fails loudly in mergeStaging if the new staging columns do not fit). */
+export const SCHEMA_VERSION = 2;
 
 const DDL = `
 CREATE SCHEMA IF NOT EXISTS staging;
@@ -181,17 +189,19 @@ CREATE TABLE IF NOT EXISTS sales_history (
 CREATE TABLE IF NOT EXISTS permits (
   permit_no         VARCHAR NOT NULL,
   parcel_id         VARCHAR,
+  re_raw            VARCHAR,
   address           VARCHAR,
   permit_type       VARCHAR,
   work_type         VARCHAR,
   description       VARCHAR,
   status            VARCHAR,
+  applied_date      DATE,
   issue_date        DATE,
   final_date        DATE,
   job_cost          DOUBLE,
   contractor_name   VARCHAR,
   contractor_license VARCHAR,
-  is_roof           BOOLEAN,
+  is_roof_permit    BOOLEAN,
   source_payload    JSON,
   ${PROVENANCE_COLUMNS}
 );
@@ -214,6 +224,7 @@ CREATE TABLE IF NOT EXISTS contractors (
   effective_date    DATE,
   expiration_date   DATE,
   is_roofing        BOOLEAN,
+  extract_file      VARCHAR,
   source_payload    JSON,
   ${PROVENANCE_COLUMNS}
 );
@@ -228,16 +239,34 @@ CREATE TABLE IF NOT EXISTS businesses (
   principal_city    VARCHAR,
   principal_state   VARCHAR,
   principal_zip     VARCHAR,
+  principal_country VARCHAR,
   mail_addr1        VARCHAR,
   mail_addr2        VARCHAR,
   mail_city         VARCHAR,
   mail_state        VARCHAR,
   mail_zip          VARCHAR,
+  mail_country      VARCHAR,
   file_date         DATE,
   fei_number        VARCHAR,
+  last_trx_date     DATE,
+  state_country     VARCHAR,
   registered_agent  VARCHAR,
+  registered_agent_type VARCHAR,
+  ra_addr1          VARCHAR,
+  ra_city           VARCHAR,
+  ra_state          VARCHAR,
+  ra_zip            VARCHAR,
   officers          JSON,
-  source_payload    JSON,
+  officer_count     INTEGER,
+  source_file       VARCHAR,
+  ${PROVENANCE_COLUMNS}
+);
+
+CREATE TABLE IF NOT EXISTS business_events (
+  event_key         VARCHAR NOT NULL,
+  doc_number        VARCHAR,
+  raw_line          VARCHAR,
+  source_file       VARCHAR,
   ${PROVENANCE_COLUMNS}
 );
 
@@ -248,9 +277,12 @@ CREATE TABLE IF NOT EXISTS places (
   categories        JSON,
   brand             VARCHAR,
   address           VARCHAR,
+  locality          VARCHAR,
+  postcode          VARCHAR,
   latitude          DOUBLE,
   longitude         DOUBLE,
   confidence        DOUBLE,
+  sources           JSON,
   is_starbucks      BOOLEAN,
   release           VARCHAR,
   ${PROVENANCE_COLUMNS}
@@ -258,11 +290,26 @@ CREATE TABLE IF NOT EXISTS places (
 
 CREATE TABLE IF NOT EXISTS transit_stops (
   stop_id           VARCHAR NOT NULL,
+  stop_code         VARCHAR,
   stop_name         VARCHAR,
   latitude          DOUBLE,
   longitude         DOUBLE,
   location_type     VARCHAR,
+  wheelchair_boarding VARCHAR,
   route_types       VARCHAR,
+  route_short_names VARCHAR,
+  route_count       INTEGER,
+  feed_version      VARCHAR,
+  ${PROVENANCE_COLUMNS}
+);
+
+CREATE TABLE IF NOT EXISTS transit_routes (
+  route_id          VARCHAR NOT NULL,
+  route_short_name  VARCHAR,
+  route_long_name   VARCHAR,
+  route_type        INTEGER,
+  route_type_name   VARCHAR,
+  route_color       VARCHAR,
   feed_version      VARCHAR,
   ${PROVENANCE_COLUMNS}
 );
@@ -272,13 +319,17 @@ CREATE TABLE IF NOT EXISTS water_bodies (
   name              VARCHAR,
   water_type        VARCHAR,
   layer             VARCHAR,
+  ftype             VARCHAR,
   geom_wkb          BLOB,
-  area_sqm          DOUBLE,
+  geom_kind         VARCHAR,
+  area_sqkm         DOUBLE,
+  length_km         DOUBLE,
   ${PROVENANCE_COLUMNS}
 );
 
 CREATE TABLE IF NOT EXISTS address_points (
   address_id        VARCHAR NOT NULL,
+  re_raw            VARCHAR,
   parcel_id         VARCHAR,
   whole_address     VARCHAR,
   zipcode           VARCHAR,
@@ -290,6 +341,70 @@ CREATE TABLE IF NOT EXISTS address_points (
   subdivision       VARCHAR,
   edit_date         TIMESTAMP,
   ${PROVENANCE_COLUMNS}
+);
+
+CREATE TABLE IF NOT EXISTS coj_parcels (
+  re                VARCHAR NOT NULL,
+  re_nospace        VARCHAR,
+  parcel_id         VARCHAR,
+  owner_name        VARCHAR,
+  mail_addr1        VARCHAR,
+  mail_city         VARCHAR,
+  mail_state        VARCHAR,
+  mail_zip          VARCHAR,
+  situs_address     VARCHAR,
+  property_use      VARCHAR,
+  property_use_desc VARCHAR,
+  zoning            VARCHAR,
+  fld_zone          VARCHAR,
+  acres             DOUBLE,
+  latitude          DOUBLE,
+  longitude         DOUBLE,
+  last_sale_date    DATE,
+  cama_value        DOUBLE,
+  building_value    DOUBLE,
+  building_count    INTEGER,
+  source_payload    JSON,
+  ${PROVENANCE_COLUMNS}
+);
+
+CREATE TABLE IF NOT EXISTS owners (
+  owner_id          VARCHAR NOT NULL,
+  owner_name        VARCHAR,
+  name_norm         VARCHAR,
+  mailing_norm      VARCHAR,
+  mailing_addr1     VARCHAR,
+  mailing_city      VARCHAR,
+  mailing_state     VARCHAR,
+  mailing_zip       VARCHAR,
+  owner_kind        VARCHAR,
+  parcel_count      INTEGER,
+  ${PROVENANCE_COLUMNS}
+);
+
+CREATE TABLE IF NOT EXISTS source_files (
+  track         VARCHAR NOT NULL,
+  file_name     VARCHAR NOT NULL,
+  remote_path   VARCHAR,
+  bytes         BIGINT,
+  sha256        VARCHAR,
+  rows_parsed   BIGINT,
+  rows_kept     BIGINT,
+  processed_at  TIMESTAMP NOT NULL,
+  run_id        VARCHAR NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS track_state (
+  track      VARCHAR NOT NULL,
+  key        VARCHAR NOT NULL,
+  value      VARCHAR,
+  updated_at TIMESTAMP NOT NULL,
+  run_id     VARCHAR NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS schema_meta (
+  key   VARCHAR NOT NULL,
+  value VARCHAR
 );
 
 CREATE TABLE IF NOT EXISTS entity_links (
@@ -369,8 +484,43 @@ export async function openDb(path: string, opts: { readOnly?: boolean } = {}): P
   };
 }
 
+/** Tables safe to recreate when empty on a schema bump (never parcels / sales / geometry / run_log). */
+const RECREATE_WHEN_EMPTY = [
+  "permits", "contractors", "businesses", "business_events", "places", "transit_stops", "transit_routes",
+  "water_bodies", "address_points", "coj_parcels", "owners", "entity_links",
+];
+
 export async function ensureSchema(conn: DuckDBConnection): Promise<void> {
   await conn.run(DDL);
+  const rows = await all<{ value: string }>(conn, "SELECT value FROM schema_meta WHERE key = 'schema_version'");
+  const current = rows[0] ? Number(rows[0].value) : 1;
+  if (current < SCHEMA_VERSION) {
+    for (const t of RECREATE_WHEN_EMPTY) {
+      if (await tableExists(conn, "main", t)) {
+        const n = Number(await scalar<string | number>(conn, `SELECT count(*) FROM ${t}`));
+        if (n === 0) await conn.run(`DROP TABLE ${t}`);
+      }
+    }
+    await conn.run(DDL);
+    await conn.run("DELETE FROM schema_meta WHERE key = 'schema_version'");
+    await conn.run(`INSERT INTO schema_meta VALUES ('schema_version', '${SCHEMA_VERSION}')`);
+  }
+}
+
+/** Read / write small per-track state (cursors, last EDIT_DATE, discovered endpoints). */
+export async function getTrackState(conn: DuckDBConnection, track: string, key: string): Promise<string | null> {
+  const rows = await all<{ value: string | null }>(
+    conn,
+    `SELECT value FROM track_state WHERE track = ${q(track)} AND key = ${q(key)} ORDER BY updated_at DESC LIMIT 1`,
+  );
+  return rows[0]?.value ?? null;
+}
+
+export async function setTrackState(conn: DuckDBConnection, track: string, key: string, value: string, runId: string): Promise<void> {
+  await conn.run(`DELETE FROM track_state WHERE track = ${q(track)} AND key = ${q(key)}`);
+  await conn.run(
+    `INSERT INTO track_state VALUES (${q(track)}, ${q(key)}, ${q(value)}, ${q(new Date().toISOString())}::TIMESTAMP, ${q(runId)})`,
+  );
 }
 
 /** Load DuckDB spatial (downloads the extension the first time). */
