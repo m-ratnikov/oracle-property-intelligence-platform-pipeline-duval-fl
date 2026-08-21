@@ -1,100 +1,237 @@
 /**
- * Provider switch. The kit standard is Bedrock; this deployment runs on the
- * Anthropic API because the assignment deploys to Vercel without an AWS
- * account. Both paths go through the Vercel AI SDK, so the agent loop, tools
- * and response shape are identical and swapping is an env var:
+ * The provider switch.
  *
- *   AGENT_PROVIDER=anthropic  (default) needs ANTHROPIC_API_KEY
- *   AGENT_PROVIDER=bedrock    needs AWS credentials in the environment
- *                             (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY /
- *                             AWS_REGION, or AWS_BEARER_TOKEN_BEDROCK)
- *   AGENT_MODEL               model id, default claude-opus-5 for Anthropic,
- *                             anthropic.claude-opus-5 for Bedrock. Set
- *                             AGENT_MODEL=claude-sonnet-5 to trade some answer
- *                             quality for latency during a live demo.
+ * Every provider goes through the Vercel AI SDK, so the agent loop, the five
+ * tools and the response contract are identical whichever one answers. Adding
+ * a provider is one entry in the registry (providers.ts) plus one branch in
+ * `createProviderModel` below. Nothing else in the agent knows or cares.
+ *
+ * There are two ways a model gets chosen, and they are not equal:
+ *
+ *   1. A visitor's own credential, arriving per request in the `x-llm-api-key`
+ *      header (see credentials.ts). It is used to build one client for one
+ *      request and is then dropped. It is never stored, never logged, never
+ *      returned. This is the primary path.
+ *
+ *   2. The server environment, when one is configured. Read from the registry's
+ *      `envKeys`, so the server can be pointed at any listed provider:
+ *
+ *        AGENT_PROVIDER   one of the registry ids, optional. When unset, the
+ *                         first provider with a key present in the environment
+ *                         wins, in registry order.
+ *        AGENT_MODEL      model id, optional. Must be listed for the provider.
+ *        <provider key>   GOOGLE_GENERATIVE_AI_API_KEY, GROQ_API_KEY,
+ *                         CEREBRAS_API_KEY, AI_GATEWAY_API_KEY,
+ *                         ANTHROPIC_API_KEY, AWS_BEARER_TOKEN_BEDROCK, ...
+ *
+ * This deployment ships with NO server key set, on purpose: a public,
+ * unauthenticated route attached to somebody's API budget is a bill waiting to
+ * happen. With nothing configured the route answers 501 and says so, and the
+ * settings page is the way in. Setting one env var flips path 2 on without
+ * another code change.
  */
 
 import type { Env } from "./types";
 import type { LanguageModel, SystemModelMessage } from "ai";
 import { NOT_CONFIGURED_MESSAGE } from "./types";
+import { AgentBadRequestError, AgentNotConfiguredError } from "./errors";
+import type { UserCredential } from "./credentials";
+import {
+  PROVIDERS,
+  findModel,
+  findProvider,
+  defaultModelFor,
+  type AgentProvider,
+  type ProviderDefinition,
+} from "./providers";
 
-export type AgentProvider = "anthropic" | "bedrock";
+export { AgentNotConfiguredError } from "./errors";
+export type { AgentProvider } from "./providers";
 
 export interface ResolvedModel {
   provider: AgentProvider;
   modelId: string;
   model: LanguageModel;
+  /** Whose credential built this client. Drives error wording, not behaviour. */
+  source: "user" | "server";
   /** Wrap the system prompt with the provider's cache marker. */
   instructions: (system: string) => SystemModelMessage;
 }
 
+/** Where the server would look, and what it would run, if it is configured. */
+export interface ServerSelection {
+  provider: AgentProvider;
+  modelId: string;
+  /** Which environment variable supplied the credential. Name only, never the value. */
+  envKey: string;
+  /** The credential itself. Absent for Bedrock SigV4, which the SDK resolves itself. */
+  apiKey?: string;
+}
+
+/**
+ * Reported by GET /api/agent when nothing at all is configured, so the label
+ * has something truthful to say about what the server would run.
+ */
+export const FALLBACK_PROVIDER: AgentProvider = "google";
+
+/** Kept for callers that only want a provider id. */
 export const DEFAULT_ANTHROPIC_MODEL = "claude-opus-5";
-// Bedrock ids carry an `anthropic.` prefix and no date suffix.
 export const DEFAULT_BEDROCK_MODEL = "anthropic.claude-opus-5";
 
-export class AgentNotConfiguredError extends Error {
-  constructor(message = NOT_CONFIGURED_MESSAGE) {
-    super(message);
-    this.name = "AgentNotConfiguredError";
+function firstConfiguredEnvKey(provider: ProviderDefinition, env: Env): string | null {
+  for (const key of provider.envKeys) {
+    if (env[key]?.trim()) return key;
   }
-}
-
-export function readProvider(env: Env = process.env): AgentProvider {
-  const raw = env.AGENT_PROVIDER?.trim().toLowerCase();
-  return raw === "bedrock" ? "bedrock" : "anthropic";
-}
-
-export function isAgentConfigured(env: Env = process.env): boolean {
-  const provider = readProvider(env);
-  if (provider === "bedrock") {
-    return Boolean(
-      env.AWS_BEARER_TOKEN_BEDROCK?.trim() ||
-        (env.AWS_ACCESS_KEY_ID?.trim() && env.AWS_SECRET_ACCESS_KEY?.trim()),
-    );
+  // Bedrock also authenticates through a long lived access key pair.
+  if (provider.id === "bedrock" && env.AWS_ACCESS_KEY_ID?.trim() && env.AWS_SECRET_ACCESS_KEY?.trim()) {
+    return "AWS_ACCESS_KEY_ID";
   }
-  return Boolean(env.ANTHROPIC_API_KEY?.trim());
+  return null;
 }
 
-export async function resolveModel(env: Env = process.env): Promise<ResolvedModel> {
-  const provider = readProvider(env);
+/**
+ * What the server environment configures, or null when it configures nothing.
+ *
+ * An explicit AGENT_PROVIDER is honoured only if that provider actually has a
+ * credential present. Naming a provider without giving it a key is a
+ * misconfiguration, and silently falling through to a different provider's key
+ * would hide it, so that case returns null and the route reports 501.
+ */
+export function serverSelection(env: Env = process.env): ServerSelection | null {
+  const named = env.AGENT_PROVIDER?.trim().toLowerCase();
+  const candidates = named ? [findProvider(named)].filter((p): p is ProviderDefinition => p !== null) : [...PROVIDERS];
 
-  if (provider === "bedrock") {
-    if (!isAgentConfigured(env)) {
-      throw new AgentNotConfiguredError(
-        "agent not configured: AGENT_PROVIDER=bedrock needs AWS credentials (AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, or AWS_BEARER_TOKEN_BEDROCK)",
-      );
-    }
-    const [{ createAmazonBedrock }, { withBedrockPromptCaching }] = await Promise.all([
-      import("@ai-sdk/amazon-bedrock"),
-      import("./bedrock-prompt-cache"),
-    ]);
-    const modelId = env.AGENT_MODEL?.trim() || DEFAULT_BEDROCK_MODEL;
-    const bedrock = createAmazonBedrock({ region: env.AWS_REGION?.trim() || "us-east-1" });
+  for (const provider of candidates) {
+    const envKey = firstConfiguredEnvKey(provider, env);
+    if (!envKey) continue;
+
+    const requested = env.AGENT_MODEL?.trim();
+    // An AGENT_MODEL that belongs to a different provider is ignored rather
+    // than fatal, so setting the pair in the wrong order still boots.
+    const modelId = requested && findModel(provider.id, requested) ? requested : defaultModelFor(provider.id);
+
     return {
-      provider,
+      provider: provider.id,
       modelId,
-      model: withBedrockPromptCaching(bedrock(modelId)),
-      // The middleware adds the cache point; nothing to do on the message.
-      instructions: (system) => ({ role: "system", content: system }),
+      envKey,
+      apiKey: envKey === "AWS_ACCESS_KEY_ID" ? undefined : env[envKey]?.trim(),
     };
   }
+  return null;
+}
 
-  const apiKey = env.ANTHROPIC_API_KEY?.trim();
-  if (!apiKey) throw new AgentNotConfiguredError();
-  const { createAnthropic } = await import("@ai-sdk/anthropic");
-  const modelId = env.AGENT_MODEL?.trim() || DEFAULT_ANTHROPIC_MODEL;
-  const anthropic = createAnthropic({ apiKey });
-  return {
-    provider,
-    modelId,
-    model: anthropic(modelId),
-    // Anthropic prompt caching: mark the system prompt as a cache breakpoint.
+/** True when the server can answer without the caller supplying a key. */
+export function isAgentConfigured(env: Env = process.env): boolean {
+  return serverSelection(env) !== null;
+}
+
+/** The provider the server would use. Falls back to a label when unconfigured. */
+export function readProvider(env: Env = process.env): AgentProvider {
+  return serverSelection(env)?.provider ?? FALLBACK_PROVIDER;
+}
+
+/** Anthropic and Bedrock get prompt caching; the rest take the system prompt plain. */
+function instructionsFor(provider: AgentProvider): (system: string) => SystemModelMessage {
+  if (provider === "anthropic") {
     // The system prompt plus tool definitions are the stable prefix of every
     // turn in a session, so this is where cache reads pay off.
-    instructions: (system) => ({
+    return (system) => ({
       role: "system",
       content: system,
       providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
-    }),
+    });
+  }
+  return (system) => ({ role: "system", content: system });
+}
+
+/**
+ * Build the provider client. One branch per registry entry.
+ *
+ * Every provider package here accepts a plain `apiKey` string, which is what
+ * makes the bring your own key path uniform. The import is dynamic so a
+ * deployment only loads the SDK for the provider it is actually asked for.
+ */
+async function createProviderModel(
+  provider: AgentProvider,
+  modelId: string,
+  apiKey: string | undefined,
+  env: Env,
+): Promise<LanguageModel> {
+  switch (provider) {
+    case "anthropic": {
+      const { createAnthropic } = await import("@ai-sdk/anthropic");
+      return createAnthropic({ apiKey })(modelId);
+    }
+    case "google": {
+      const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
+      return createGoogleGenerativeAI({ apiKey })(modelId);
+    }
+    case "groq": {
+      const { createGroq } = await import("@ai-sdk/groq");
+      return createGroq({ apiKey })(modelId);
+    }
+    case "cerebras": {
+      const { createCerebras } = await import("@ai-sdk/cerebras");
+      return createCerebras({ apiKey })(modelId);
+    }
+    case "vercel-ai-gateway": {
+      const { createGateway } = await import("@ai-sdk/gateway");
+      return createGateway({ apiKey })(modelId);
+    }
+    case "bedrock": {
+      const [{ createAmazonBedrock }, { withBedrockPromptCaching }] = await Promise.all([
+        import("@ai-sdk/amazon-bedrock"),
+        import("./bedrock-prompt-cache"),
+      ]);
+      // Without an apiKey the provider falls back to SigV4 over the ambient
+      // AWS credentials, which is the only path here that is not a bare string.
+      const bedrock = createAmazonBedrock({ apiKey, region: env.AWS_REGION?.trim() || "us-east-1" });
+      return withBedrockPromptCaching(bedrock(modelId));
+    }
+    default: {
+      // Exhaustiveness: a new registry id with no branch fails loudly here
+      // rather than silently answering with the wrong model.
+      const unreachable: never = provider;
+      throw new AgentBadRequestError(`Provider "${String(unreachable)}" is in the registry but has no client branch.`);
+    }
+  }
+}
+
+/**
+ * Resolve the model for one request.
+ *
+ * A visitor credential always wins over the server environment. That is the
+ * whole point: someone who brings a key gets their model, not mine.
+ */
+export async function resolveModel(
+  env: Env = process.env,
+  credential?: UserCredential | null,
+): Promise<ResolvedModel> {
+  if (credential) {
+    // credentials.ts already checked the pair against the registry; re-check
+    // here so a direct caller of resolveModel cannot skip the gate.
+    if (!findModel(credential.provider, credential.modelId)) {
+      throw new AgentBadRequestError(
+        `Model "${credential.modelId}" is not supported for provider "${credential.provider}".`,
+      );
+    }
+    return {
+      provider: credential.provider,
+      modelId: credential.modelId,
+      source: "user",
+      model: await createProviderModel(credential.provider, credential.modelId, credential.apiKey, env),
+      instructions: instructionsFor(credential.provider),
+    };
+  }
+
+  const selection = serverSelection(env);
+  if (!selection) throw new AgentNotConfiguredError(NOT_CONFIGURED_MESSAGE);
+
+  return {
+    provider: selection.provider,
+    modelId: selection.modelId,
+    source: "server",
+    model: await createProviderModel(selection.provider, selection.modelId, selection.apiKey, env),
+    instructions: instructionsFor(selection.provider),
   };
 }

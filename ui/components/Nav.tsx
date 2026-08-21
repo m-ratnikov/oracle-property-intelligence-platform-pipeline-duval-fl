@@ -12,6 +12,7 @@ const LINKS = [
   { href: "/questions", label: "Questions" },
   { href: "/agent", label: "Agent" },
   { href: "/mcp", label: "MCP" },
+  { href: "/settings", label: "Settings" },
 ];
 
 export function Nav() {

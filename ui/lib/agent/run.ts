@@ -12,6 +12,9 @@ import { ToolLoopAgent, stepCountIs, type ModelMessage } from "ai";
 import { getPropertyDb, type PropertyDb } from "./db";
 import { loadRunHistory } from "./artifacts";
 import { resolveModel, type ResolvedModel } from "./model";
+import type { UserCredential } from "./credentials";
+import { classifyProviderError } from "./errors";
+import { keyFingerprint, safeMessage } from "./redact";
 import { SYSTEM_PROMPT } from "./prompt";
 import { createAgentTools, newTrace } from "./tools";
 import { logAgent } from "./log";
@@ -26,6 +29,12 @@ export interface RunAgentOptions {
   model?: ResolvedModel;
   /** Injected for tests; the cached process wide database otherwise. */
   db?: PropertyDb;
+  /**
+   * The visitor's own credential for this one request. Beats the server
+   * environment when present, and is dropped when the turn ends: nothing here
+   * writes it anywhere, and every error path that could quote it is redacted.
+   */
+  credential?: UserCredential | null;
   env?: Env;
   fetchImpl?: typeof fetch;
   maxSteps?: number;
@@ -73,7 +82,7 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentResponse>
   }
 
   const [resolved, db] = await Promise.all([
-    options.model ? Promise.resolve(options.model) : resolveModel(env),
+    options.model ? Promise.resolve(options.model) : resolveModel(env, options.credential),
     options.db ? Promise.resolve(options.db) : getPropertyDb(),
   ]);
 
@@ -92,7 +101,26 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentResponse>
     temperature: 0.2,
   });
 
-  const result = await agent.generate({ messages: modelMessages, abortSignal: options.abortSignal });
+  // The provider call is the one place a caller's key can come back at us,
+  // because several providers quote the offending credential in the body of a
+  // 401. Redact first, classify second, and never let the raw error escape.
+  const secrets = [options.credential?.apiKey];
+  let result;
+  try {
+    result = await agent.generate({ messages: modelMessages, abortSignal: options.abortSignal });
+  } catch (error: unknown) {
+    const safe = safeMessage(error, secrets);
+    const typed = classifyProviderError(error, safe, resolved.source);
+    logAgent("warn", "provider call failed", {
+      provider: resolved.provider,
+      model: resolved.modelId,
+      credential_source: resolved.source,
+      error_name: typed.name,
+      // Already redacted. Logged so a real outage is diagnosable.
+      error: safe,
+    });
+    throw typed;
+  }
 
   let answer = result.text.trim();
   if (!answer) {
@@ -109,7 +137,7 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentResponse>
     try {
       freshness = (await loadRunHistory(env, options.fetchImpl)).freshness;
     } catch (error) {
-      logAgent("warn", "run history unavailable for freshness badge", { error: String(error) });
+      logAgent("warn", "run history unavailable for freshness badge", { error: safeMessage(error, secrets) });
       freshness = null;
     }
   }
@@ -132,6 +160,9 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentResponse>
   logAgent("info", "agent turn", {
     provider: resolved.provider,
     model: resolved.modelId,
+    credential_source: resolved.source,
+    // A fingerprint, not the key. See redact.ts for why this is not a prefix.
+    key: keyFingerprint(options.credential?.apiKey),
     steps: result.steps.length,
     tool_calls: trace.calls.length,
     evidence_rows: trace.evidence.length,

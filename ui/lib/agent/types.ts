@@ -90,7 +90,8 @@ export interface AgentRequestBody {
   messages: AgentChatMessage[];
 }
 
-export const NOT_CONFIGURED_MESSAGE = "agent not configured: set ANTHROPIC_API_KEY";
+export const NOT_CONFIGURED_MESSAGE =
+  "agent not configured: choose a model and add your own API key on the settings page";
 
 export function emptyResponse(
   status: AgentResponse["status"],

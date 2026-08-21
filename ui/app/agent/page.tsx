@@ -14,6 +14,7 @@ import type {
 import { PageHeader, Callout, Spinner } from "@/components/ui";
 import { EngineStatus } from "@/components/EngineStatus";
 import { formatTimestamp, relativeTime } from "@/lib/format";
+import { credentialHeaders, useAgentSettings } from "@/lib/agent/settings-client";
 
 interface ChatMessage {
   id: string;
@@ -23,7 +24,20 @@ interface ChatMessage {
   hint?: string;
   notImplemented?: boolean;
   error?: boolean;
-  meta?: { model: string | null; usage: AgentUsage | null; elapsed_ms?: number; toolCalls: number };
+  meta?: {
+    model: string | null;
+    usage: AgentUsage | null;
+    elapsed_ms?: number;
+    toolCalls: number;
+    /** Whose credential paid for this answer, as the browser knows it. */
+    source: "your key" | "server default";
+  };
+}
+
+interface AgentConfig {
+  configured: boolean;
+  active: { provider: string; model: string; source: "user" | "server" } | null;
+  server_default: { provider: string; model: string; env_key: string } | null;
 }
 
 const DEMO_PROMPTS = [
@@ -177,24 +191,37 @@ export default function AgentPage() {
   const [evidence, setEvidence] = useState<AgentEvidenceRow[]>([]);
   const [assumptions, setAssumptions] = useState<string[]>([]);
   const [freshness, setFreshness] = useState<AgentDataFreshness | null>(null);
-  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [config, setConfig] = useState<AgentConfig | null>(null);
   const scroller = useRef<HTMLDivElement | null>(null);
+  // The visitor's own provider, model and key, read from this browser.
+  const { settings, loaded: settingsLoaded } = useAgentSettings();
 
   useEffect(() => {
     let cancelled = false;
     fetch("/api/agent", { method: "GET" })
       .then((response) => response.json())
-      .then((payload: { configured?: boolean }) => {
-        if (!cancelled) setConfigured(Boolean(payload.configured));
+      .then((payload: AgentConfig) => {
+        if (!cancelled) setConfig(payload);
       })
       .catch(() => {
-        if (!cancelled) setConfigured(null);
+        if (!cancelled) setConfig(null);
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
+  // Which model will answer the next question, and on whose budget. A visitor
+  // has to be able to read this off the page they are asking on, not only off
+  // the settings page.
+  const activeModel = settings
+    ? { label: `${settings.provider}:${settings.modelId}`, source: "your key" as const }
+    : config?.configured && config.server_default
+      ? { label: `${config.server_default.provider}:${config.server_default.model}`, source: "server default" as const }
+      : null;
+
+  // `settings` is read on every send rather than captured once, so changing the
+  // model in another tab takes effect on the next question without a reload.
   const send = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || pending) return;
@@ -212,7 +239,10 @@ export default function AgentPage() {
     try {
       const response = await fetch("/api/agent", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        // The credential rides on this one request and is not persisted server
+        // side. With nothing stored, credentialHeaders is empty and the server
+        // answers with its own configuration, or 501 when it has none.
+        headers: { "content-type": "application/json", ...credentialHeaders(settings) },
         body: JSON.stringify({
           messages: [...messages, outgoing]
             .filter((message) => message.role !== "system" && !message.notImplemented && !message.error)
@@ -242,6 +272,7 @@ export default function AgentPage() {
             usage: payload.usage ?? null,
             elapsed_ms: payload.elapsed_ms,
             toolCalls: (payload.toolCalls ?? payload.tool_calls ?? []).length,
+            source: settings ? "your key" : "server default",
           },
           at: new Date().toISOString(),
         },
@@ -276,10 +307,23 @@ export default function AgentPage() {
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <EngineStatus compact />
-        {configured === false ? (
-          <span className="badge badge-warn">agent not configured: set ANTHROPIC_API_KEY</span>
-        ) : configured === true ? (
-          <span className="badge badge-good">agent configured</span>
+        {settingsLoaded && activeModel ? (
+          <span className="flex flex-wrap items-center gap-1.5 text-[11.5px]">
+            <span className={`badge ${activeModel.source === "your key" ? "badge-accent" : "badge-good"}`}>
+              {activeModel.source}
+            </span>
+            <span className="mono text-muted">{activeModel.label}</span>
+            <Link href="/settings" className="text-[11.5px]">
+              change
+            </Link>
+          </span>
+        ) : settingsLoaded && config ? (
+          <span className="flex flex-wrap items-center gap-1.5 text-[11.5px]">
+            <span className="badge badge-warn">no model configured</span>
+            <Link href="/settings" className="text-[11.5px]">
+              add your own key
+            </Link>
+          </span>
         ) : null}
         <FreshnessBadge freshness={freshness} />
       </div>
@@ -355,6 +399,7 @@ export default function AgentPage() {
                       {message.meta && !message.notImplemented && !message.error ? (
                         <div className="mt-2 flex flex-wrap gap-x-3 text-[11px] text-faint mono">
                           <span>{message.meta.model ?? "model unknown"}</span>
+                          <span>{message.meta.source}</span>
                           <span>{message.meta.toolCalls} tool calls</span>
                           {message.meta.usage ? (
                             <span>

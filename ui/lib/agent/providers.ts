@@ -1,0 +1,316 @@
+/**
+ * The provider registry: one piece of data that both the server and the
+ * settings UI read, so they can never disagree about what is supported.
+ *
+ * Everything downstream is derived from this array. `AgentProvider` is the
+ * union of the ids below, the settings page renders the providers and their
+ * models straight from it, and the server refuses any provider or model that
+ * is not listed. Adding a provider means adding an entry here plus one branch
+ * in `createProviderModel` in model.ts, not editing three places that drift.
+ *
+ * FREE TIER CLAIMS. Every `free: true` below was checked against the
+ * provider's own published page on 2026-08-21 and the URL is recorded in
+ * `freeTier.source`. These numbers move monthly. Re-read the sources before
+ * trusting them: the labels here are a snapshot with a date on it, not a
+ * promise, and the UI shows the date next to the claim for that reason.
+ */
+
+export type AgentProvider =
+  | "google"
+  | "groq"
+  | "cerebras"
+  | "vercel-ai-gateway"
+  | "anthropic"
+  | "bedrock";
+
+export interface ProviderModel {
+  id: string;
+  label: string;
+  /** True when this model is usable at no cost on the provider's free tier. */
+  free: boolean;
+  /** The honest caveat: what the free tier actually gives, or why it costs. */
+  notes: string;
+}
+
+export interface ProviderFreeTier {
+  /** Free tier that needs no credit card at all. */
+  available: boolean;
+  /** One line describing the allowance, as published. */
+  summary: string;
+  /** The provider page the claim was read from. */
+  source: string;
+  /** ISO date the source was read. */
+  readOn: string;
+}
+
+export interface ProviderDefinition {
+  id: AgentProvider;
+  label: string;
+  /**
+   * Server side environment variables that configure this provider without a
+   * per request key. The first one present wins. These are read on the server
+   * only and are never sent to the browser.
+   */
+  envKeys: string[];
+  models: ProviderModel[];
+  docsUrl: string;
+  /** Where a visitor goes to mint a key for this provider. */
+  keyUrl: string;
+  /** False when the provider cannot be driven by a single pasted string. */
+  acceptsUserKey: boolean;
+  /** What the settings panel says above the key field. */
+  keyHint: string;
+  freeTier: ProviderFreeTier;
+}
+
+/** The date every free tier claim in this file was verified. */
+export const FREE_TIER_VERIFIED_ON = "2026-08-21";
+
+export const PROVIDERS: readonly ProviderDefinition[] = [
+  {
+    id: "google",
+    label: "Google AI Studio (Gemini)",
+    envKeys: ["GOOGLE_GENERATIVE_AI_API_KEY", "GOOGLE_API_KEY"],
+    models: [
+      {
+        id: "gemini-3.7-flash",
+        label: "Gemini 3.7 Flash",
+        free: true,
+        notes:
+          "Latest stable Flash, documented for agentic workflows and multi step tool execution. Free tier request and token caps are per model and visible in AI Studio.",
+      },
+      {
+        id: "gemini-3.5-flash",
+        label: "Gemini 3.5 Flash",
+        free: true,
+        notes: "Older Flash kept for high throughput. Free of charge on the same free tier.",
+      },
+      {
+        id: "gemini-2.5-flash",
+        label: "Gemini 2.5 Flash",
+        free: true,
+        notes: "Long lived, widely tested Flash. Free of charge, useful as a fallback if a newer id is rejected.",
+      },
+      {
+        id: "gemini-2.5-pro",
+        label: "Gemini 2.5 Pro",
+        free: true,
+        notes:
+          "Strongest free Gemini and the slowest. Google's free tier daily request cap is tightest here, so a demo can exhaust it.",
+      },
+    ],
+    docsUrl: "https://ai.google.dev/gemini-api/docs/models",
+    keyUrl: "https://aistudio.google.com/apikey",
+    acceptsUserKey: true,
+    keyHint: "An AI Studio API key. Starts with AIza.",
+    freeTier: {
+      available: true,
+      summary:
+        "New accounts start on the free tier with no billing account and no card. Gemini Flash input and output tokens are listed as free of charge, subject to per model rate limits.",
+      source: "https://ai.google.dev/gemini-api/docs/pricing",
+      readOn: FREE_TIER_VERIFIED_ON,
+    },
+  },
+  {
+    id: "groq",
+    label: "Groq",
+    envKeys: ["GROQ_API_KEY"],
+    models: [
+      {
+        id: "openai/gpt-oss-120b",
+        label: "GPT-OSS 120B",
+        free: true,
+        notes:
+          "Free tier published as 30 requests/min, 1,000 requests/day, 8,000 tokens/min, 200,000 tokens/day. The tokens per minute cap is the binding one for this agent, whose system prompt plus tool schemas are large.",
+      },
+      {
+        id: "openai/gpt-oss-20b",
+        label: "GPT-OSS 20B",
+        free: true,
+        notes: "Same published free tier limits as the 120B, smaller and faster, weaker at multi step planning.",
+      },
+      {
+        id: "qwen/qwen3.6-27b",
+        label: "Qwen 3.6 27B",
+        free: true,
+        notes: "Same published free tier limits: 30 requests/min, 1,000 requests/day, 8,000 tokens/min.",
+      },
+    ],
+    docsUrl: "https://console.groq.com/docs/rate-limits",
+    keyUrl: "https://console.groq.com/keys",
+    acceptsUserKey: true,
+    keyHint: "A Groq console key. Starts with gsk_.",
+    freeTier: {
+      available: true,
+      summary:
+        "Free tier with published per model rate limits. The 8,000 tokens/min ceiling throttles a tool loop with a large system prompt well before the daily cap.",
+      source: "https://console.groq.com/docs/rate-limits",
+      readOn: FREE_TIER_VERIFIED_ON,
+    },
+  },
+  {
+    id: "cerebras",
+    label: "Cerebras",
+    envKeys: ["CEREBRAS_API_KEY"],
+    models: [
+      {
+        id: "gpt-oss-120b",
+        label: "GPT-OSS 120B",
+        free: true,
+        notes:
+          "Cerebras gives $5 of signup credit rather than a recurring free allowance, so this runs free until that credit is spent.",
+      },
+      {
+        id: "gemma-4-31b",
+        label: "Gemma 4 31B",
+        free: true,
+        notes: "Second public endpoint model. Same $5 signup credit applies.",
+      },
+    ],
+    docsUrl: "https://inference-docs.cerebras.ai/models/overview",
+    keyUrl: "https://cloud.cerebras.ai",
+    acceptsUserKey: true,
+    keyHint: "A Cerebras Cloud key. Starts with csk-.",
+    freeTier: {
+      available: true,
+      summary:
+        "$5 in free credits after making an account. This is one time signup credit, not a monthly refresh, so it runs out.",
+      source: "https://www.cerebras.ai/pricing",
+      readOn: FREE_TIER_VERIFIED_ON,
+    },
+  },
+  {
+    id: "vercel-ai-gateway",
+    label: "Vercel AI Gateway",
+    envKeys: ["AI_GATEWAY_API_KEY"],
+    models: [
+      {
+        id: "poolside/laguna-s-2.1-free",
+        label: "Poolside Laguna S 2.1 (free tier)",
+        free: true,
+        notes:
+          "The only chat model in the Gateway free tier catalog tagged for tool use. The rest of that catalog is speech, transcription and Perplexity search, so it is the only free Gateway model this agent can drive at all.",
+      },
+      {
+        id: "anthropic/claude-opus-5",
+        label: "Claude Opus 5 (via Gateway)",
+        free: false,
+        notes: "Outside the free tier catalog. Needs purchased AI Gateway credits, billed at provider list price with no markup.",
+      },
+      {
+        id: "google/gemini-3.7-flash",
+        label: "Gemini 3.7 Flash (via Gateway)",
+        free: false,
+        notes: "Outside the free tier catalog. Cheaper per token than Opus, but still needs purchased credits.",
+      },
+    ],
+    docsUrl: "https://vercel.com/docs/ai-gateway/pricing",
+    keyUrl: "https://vercel.com/d?to=%2F%5Bteam%5D%2F~%2Fai-gateway",
+    acceptsUserKey: true,
+    keyHint: "An AI Gateway key from the Vercel dashboard. Starts with vck_.",
+    freeTier: {
+      available: true,
+      summary:
+        "$5 of monthly AI Gateway credit per team, but usable only on a subset of the catalog. That subset contains one tool calling chat model, which is why the Gateway is offered here as a choice rather than as the default.",
+      source: "https://vercel.com/docs/ai-gateway/pricing",
+      readOn: FREE_TIER_VERIFIED_ON,
+    },
+  },
+  {
+    id: "anthropic",
+    label: "Anthropic",
+    envKeys: ["ANTHROPIC_API_KEY"],
+    models: [
+      {
+        id: "claude-opus-5",
+        label: "Claude Opus 5",
+        free: false,
+        notes: "The quality option. Best multi step tool planning of anything here, and the most expensive per answer.",
+      },
+      {
+        id: "claude-sonnet-5",
+        label: "Claude Sonnet 5",
+        free: false,
+        notes: "Trades some answer quality for latency, which matters when a turn already runs 30 to 90 seconds.",
+      },
+      {
+        id: "claude-haiku-4-5-20251001",
+        label: "Claude Haiku 4.5",
+        free: false,
+        notes: "Fastest and cheapest Claude. Weaker at planning a five tool loop unaided.",
+      },
+    ],
+    docsUrl: "https://docs.anthropic.com/en/docs/about-claude/models",
+    keyUrl: "https://console.anthropic.com/settings/keys",
+    acceptsUserKey: true,
+    keyHint: "An Anthropic console key. Starts with sk-ant-.",
+    freeTier: {
+      available: false,
+      summary: "No free tier. The console requires a prepaid balance before the first API call.",
+      source: "https://docs.anthropic.com/en/api/rate-limits",
+      readOn: FREE_TIER_VERIFIED_ON,
+    },
+  },
+  {
+    id: "bedrock",
+    label: "Amazon Bedrock",
+    envKeys: ["AWS_BEARER_TOKEN_BEDROCK", "AWS_ACCESS_KEY_ID"],
+    models: [
+      {
+        id: "anthropic.claude-opus-5",
+        label: "Claude Opus 5 (Bedrock)",
+        free: false,
+        notes: "Bedrock ids carry an anthropic. prefix and no date suffix. Billed to the AWS account behind the token.",
+      },
+      {
+        id: "anthropic.claude-sonnet-5",
+        label: "Claude Sonnet 5 (Bedrock)",
+        free: false,
+        notes: "Same Bedrock billing, lower cost and latency than Opus.",
+      },
+    ],
+    docsUrl: "https://docs.aws.amazon.com/bedrock/latest/userguide/models-supported.html",
+    keyUrl: "https://console.aws.amazon.com/bedrock/home#/api-keys",
+    acceptsUserKey: true,
+    keyHint:
+      "A Bedrock API key (bearer token). Long lived AWS access keys need SigV4 signing and cannot be pasted here; set them server side instead.",
+    freeTier: {
+      available: false,
+      summary: "No free tier for these models. Usage bills to the AWS account that issued the token.",
+      source: "https://aws.amazon.com/bedrock/pricing/",
+      readOn: FREE_TIER_VERIFIED_ON,
+    },
+  },
+] as const;
+
+export const PROVIDER_IDS: readonly AgentProvider[] = PROVIDERS.map((provider) => provider.id);
+
+export function findProvider(id: string | null | undefined): ProviderDefinition | null {
+  if (!id) return null;
+  return PROVIDERS.find((provider) => provider.id === id) ?? null;
+}
+
+export function findModel(providerId: string | null | undefined, modelId: string | null | undefined) {
+  const provider = findProvider(providerId);
+  if (!provider || !modelId) return null;
+  return provider.models.find((model) => model.id === modelId) ?? null;
+}
+
+/** True when the pair is one this build supports. The server gates on this. */
+export function isSupported(providerId: string, modelId: string): boolean {
+  return findModel(providerId, modelId) !== null;
+}
+
+/** The model a provider uses when the caller names the provider but not the model. */
+export function defaultModelFor(providerId: AgentProvider): string {
+  const provider = findProvider(providerId);
+  if (!provider) throw new Error(`unknown provider: ${providerId}`);
+  // Prefer the first free model so a caller who names only a provider does not
+  // silently land on a billed one.
+  return (provider.models.find((model) => model.free) ?? provider.models[0]).id;
+}
+
+/** `provider:model`, the string the AgentResponse reports and the UI shows. */
+export function modelLabel(providerId: AgentProvider, modelId: string): string {
+  return `${providerId}:${modelId}`;
+}

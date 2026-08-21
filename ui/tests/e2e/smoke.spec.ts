@@ -170,13 +170,47 @@ test.describe("MCP page", () => {
 test.describe("agent shell", () => {
   test("shows an honest not wired state rather than inventing an answer", async ({ page }) => {
     await page.goto("/agent");
+    // Nothing stored in this browser and no server key: the page says so and
+    // offers the way in, rather than a badge naming one vendor's env var.
+    await expect(page.getByText("no model configured")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("link", { name: "add your own key" })).toBeVisible();
+
     await page.getByRole("button", { name: /Which properties have roofs older/ }).click();
-    // Without ANTHROPIC_API_KEY the route refuses rather than inventing an answer, and the page
-    // says which variable is missing. Assert the copy the route actually returns.
-    await expect(
-      page.getByText("agent not configured: set ANTHROPIC_API_KEY").first(),
-    ).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText("ANTHROPIC_API_KEY").first()).toBeVisible();
+    // The route refuses rather than inventing an answer, and points at settings.
+    await expect(page.getByText(/agent not configured/).first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/settings page/).first()).toBeVisible();
+  });
+});
+
+test.describe("model settings", () => {
+  test("lists the provider registry and stores a key in the browser only", async ({ page }) => {
+    await page.goto("/settings");
+
+    // The registry drives the UI, so every provider the server supports is here.
+    await expect(page.getByText("Google AI Studio (Gemini)")).toBeVisible();
+    await expect(page.getByText("Vercel AI Gateway")).toBeVisible();
+    await expect(page.getByText("Amazon Bedrock")).toBeVisible();
+    await expect(page.getByText("nothing configured")).toBeVisible();
+
+    // The warning has to be in plain words, not buried in a tooltip.
+    await expect(page.getByText(/saved in .*localStorage.* in this browser/i).first()).toBeVisible();
+
+    await page.getByRole("textbox").fill("test-key-not-a-real-credential-0000");
+    await page.getByRole("button", { name: "save to this browser" }).click();
+    await expect(page.getByText("your key")).toBeVisible();
+
+    // Stored in this browser, and nowhere else.
+    const stored = await page.evaluate(() => window.localStorage.getItem("duval-oracle.agent.llm"));
+    expect(stored).toContain("test-key-not-a-real-credential-0000");
+
+    // The agent page reads the same store and names the model that will answer.
+    await page.goto("/agent");
+    await expect(page.getByText("google:gemini-3.7-flash")).toBeVisible();
+
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "clear stored key" }).click();
+    await expect(page.getByText("nothing configured")).toBeVisible();
+    expect(await page.evaluate(() => window.localStorage.getItem("duval-oracle.agent.llm"))).toBeNull();
   });
 });
 

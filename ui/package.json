@@ -20,6 +20,10 @@
   "dependencies": {
     "@ai-sdk/amazon-bedrock": "^5.0.59",
     "@ai-sdk/anthropic": "^4.0.40",
+    "@ai-sdk/cerebras": "^3.0.32",
+    "@ai-sdk/gateway": "^4.0.56",
+    "@ai-sdk/google": "^4.0.47",
+    "@ai-sdk/groq": "^4.0.29",
     "@duckdb/duckdb-wasm": "^1.32.0",
     "@duckdb/node-api": "1.5.5-r.4",
     "ai": "^7.0.70",

@@ -31,16 +31,22 @@ nothing is being billed.
 | `/query` | SQL workbench over the view `properties`, schema sidebar from `DESCRIBE`, preset buttons, result grid, CSV export, read only guard | parquet |
 | `/questions` | The six assignment questions plus two combined presets. Each card carries the rule in plain English, a run button, the evidence columns highlighted, a provenance badge per row and an assumptions list | parquet |
 | `/property/[id]` | One parcel: every published column grouped, sales, permits, an OpenStreetMap thumbnail, provenance, and a link to the per property IPFS JSON | parquet, open-data/index.json |
-| `/agent` | Chat shell with a tool call transcript panel and an evidence panel, posting to `/api/agent` | `/api/agent` |
+| `/agent` | Chat shell with a tool call transcript panel and an evidence panel, posting to `/api/agent`, showing which model is answering and on whose credential | `/api/agent` |
+| `/settings` | Pick a model provider and model from the registry, paste your own API key, test it against a real provider call, and clear it. The key is stored in your browser only | `/api/agent`, `/api/agent/test` |
 | `/mcp` | How to connect a client over streamable HTTP or stdio, the environment map we deploy the MCP server with, and a live check that resolves the artifact and verifies its parquet header | parquet (HEAD + 4 byte range), catalog.json |
 
 ## Environment variables
 
 Every variable the explorer pages read is `NEXT_PUBLIC_*` and therefore public. That is deliberate:
 all of them are public content addressed URLs, and the browser talks to the gateway directly with
-no server in between. The only secret is the model key for the optional agent route
-(`ANTHROPIC_API_KEY`, server side only, see the Agent section). See `.env.example` for the full
-annotated list.
+no server in between.
+
+`/api/agent` is the exception, and the only place this application can hold a secret. It runs on
+the server and can be given a model provider API key. **This deployment sets none of them**: the
+route is public and unauthenticated, so a server side key attached to it is a bill any stranger can
+run up. Visitors bring their own key on `/settings`. Every provider key the registry supports is
+documented in `.env.example`; setting one turns the server side default back on with no code
+change. See the Agent section.
 
 | Variable | Required | Falls back to |
 |---|---|---|
@@ -197,8 +203,10 @@ coverage percentage is only shown when the source publishes an expected total.
 
 ## Engineering guideline deviations
 
-Applied: TypeScript everywhere and `strict` on, no secrets anywhere (there is nothing to keep
-secret), tests at both the unit and browser level, structured honesty about data gaps.
+Applied: TypeScript everywhere and `strict` on, tests at both the unit and browser level,
+structured honesty about data gaps, and no secret in the repository. The application does now have
+a place a secret can live (the model key for `/api/agent`); the handling rules for it are in the
+Agent section and enforced by `tests/agent-secrets.test.ts`.
 
 Deviated, by requirement of the assignment:
 
@@ -207,15 +215,18 @@ Deviated, by requirement of the assignment:
 - **No structured logging or metrics backend.** There is no server to emit them from. The equivalent
   observability lives in the UI itself: the engine status line, the live MCP resolution check and the
   per column coverage panel all report real state rather than assumed state.
-- **`/api/agent` returns 501 until a model key is configured.** Without `ANTHROPIC_API_KEY` the
-  route answers `501 {"status":"not_implemented","message":"agent not configured: set
-  ANTHROPIC_API_KEY"}` and the chat UI renders that as an explicit "agent not configured" state.
-  Returning a plausible sounding answer with no tool call behind it would be worse than returning
-  nothing on a submission judged on evidence. See the Agent section below.
-- **Anthropic API instead of Bedrock for the agent.** The kit standard is the Vercel AI SDK
-  `ToolLoopAgent` on Amazon Bedrock with prompt caching. This deployment has no AWS account, so the
-  default provider is `@ai-sdk/anthropic` with Anthropic prompt caching on the system prompt; the
-  Bedrock path (with the kit's cache point middleware) is kept behind `AGENT_PROVIDER=bedrock`.
+- **`/api/agent` returns 501 until a model key is configured.** With no key on the request and none
+  in the server environment, the route answers `501 {"status":"not_implemented","message":"agent
+  not configured: choose a model and add your own API key on the settings page"}` and the chat UI
+  renders that as an explicit state with a link to `/settings`. Returning a plausible sounding
+  answer with no tool call behind it would be worse than returning nothing on a submission judged
+  on evidence. See the Agent section below.
+- **Bring your own key, no server side default.** The kit standard is the Vercel AI SDK
+  `ToolLoopAgent` on Amazon Bedrock with prompt caching. This deployment has no AWS account, and it
+  deliberately ships no server side key of any kind: `/api/agent` is public and unauthenticated, so
+  a key configured there is a budget any visitor can drain. Any of six providers can be selected
+  per request with a visitor's own key, and the Bedrock path (with the kit's cache point
+  middleware) is one of them.
   Asana ingress, DynamoDB chat state, AgentCore memory and LangSmith are not applicable to a single
   page chat on Vercel; the equivalent is the in page transcript plus one JSON log line per tool call
   and per turn on the server.
@@ -255,15 +266,62 @@ the rule and thresholds stated, a total match count, an explicit "Assumptions an
 section, no invented rows, `preset_question` for the six standard questions and `run_sql` for
 combinations, and a stated heuristic score for "strong candidates for further review".
 
+### Which model answers
+
+The agent is provider agnostic. `lib/agent/providers.ts` is a registry, read by both the server and
+the settings UI so the two can never disagree about what is supported:
+
+| Provider | Free tier, read from the provider's own page on 2026-08-21 | Models here |
+|---|---|---|
+| Google AI Studio | Yes, and no card. New accounts start on the free tier and Gemini Flash tokens are listed as free of charge ([pricing](https://ai.google.dev/gemini-api/docs/pricing), [billing](https://ai.google.dev/gemini-api/docs/billing)) | `gemini-3.7-flash`, `gemini-3.5-flash`, `gemini-2.5-flash`, `gemini-2.5-pro` |
+| Groq | Yes. 30 req/min, 1,000 req/day, 8,000 tokens/min ([rate limits](https://console.groq.com/docs/rate-limits)). The tokens per minute cap is the binding one for a tool loop | `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `qwen/qwen3.6-27b` |
+| Cerebras | $5 of one time signup credit, not a recurring allowance ([pricing](https://www.cerebras.ai/pricing)) | `gpt-oss-120b`, `gemma-4-31b` |
+| Vercel AI Gateway | $5 monthly credit per team, but only on a subset of the catalog ([pricing](https://vercel.com/docs/ai-gateway/pricing)). That subset holds exactly one tool calling chat model | `poolside/laguna-s-2.1-free` (free), `anthropic/claude-opus-5`, `google/gemini-3.7-flash` |
+| Anthropic | No | `claude-opus-5` (the quality option), `claude-sonnet-5`, `claude-haiku-4-5-20251001` |
+| Amazon Bedrock | No | `anthropic.claude-opus-5`, `anthropic.claude-sonnet-5` |
+
+Those numbers move monthly. Each claim carries the source URL and the date it was read, in the
+registry and on the settings page, so a stale one is visible rather than implied.
+
+Resolution order per request: the caller's own credential first, then the server environment, then
+501. A visitor who brings a key always gets their model, never the deployment's.
+
+**The key handling rules**, enforced by `tests/agent-secrets.test.ts`:
+
+- The key lives in the visitor's browser (`localStorage`), never in a cookie, never in a server side
+  store, never in a database. There is no database in this application at all.
+- It travels per request in the `x-llm-api-key` header over HTTPS, is used to build one provider
+  client for that request, and is discarded.
+- It is never logged. Every message on the request path goes through `lib/agent/redact.ts` first,
+  which strips both the literal key and anything shaped like a vendor key, because several providers
+  quote the offending credential in the body of a 401. The key itself is logged only as a non
+  reversible fingerprint. A static test reads every logger call under `lib/agent` and `app/api` and
+  fails if a credential is passed to one.
+- It is never returned in any response, including `GET /api/agent`, which reports whether a key is
+  set and the NAME of the environment variable that supplies it, never a value.
+- A bad key produces a typed `AgentCredentialError` and a `401` with a readable message, not a `500`
+  and not a stack trace.
+- `/api/agent` is rate limited per client address whoever supplies the key, because the cost being
+  protected is compute on a 300 second function as well as tokens. The limiter is in process and
+  therefore per instance; `lib/agent/ratelimit.ts` states that limitation rather than implying
+  protection it does not deliver.
+
+`POST /api/agent/test` makes one real, short provider call to validate a credential before a visitor
+spends a 90 second question finding out it is wrong. It also reports whether the model actually
+emitted a tool call, because a model that authenticates but will not call tools is useless to a five
+tool agent, and the settings page shows those two results separately.
+
 ### Environment
 
 | Variable | Required | Notes |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | yes, for the agent | Server only. Without it the route returns 501 and the page shows "agent not configured". |
-| `AGENT_MODEL` | no | Default `claude-opus-5` (Anthropic) or `anthropic.claude-opus-5` (Bedrock). Set `claude-sonnet-5` to trade some answer quality for latency. |
-| `AGENT_PROVIDER` | no | `anthropic` (default) or `bedrock`. Bedrock needs `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_REGION` or `AWS_BEARER_TOKEN_BEDROCK`. |
+| provider key | no | One of `GOOGLE_GENERATIVE_AI_API_KEY`, `GROQ_API_KEY`, `CEREBRAS_API_KEY`, `AI_GATEWAY_API_KEY`, `ANTHROPIC_API_KEY`, `AWS_BEARER_TOKEN_BEDROCK`. **This deployment sets none of them.** Setting one turns the server side default on. |
+| `AGENT_PROVIDER` | no | One of the registry ids. When unset, the first provider with a key present wins. Naming a provider with no key reports "not configured" rather than falling through to another provider's key. |
+| `AGENT_MODEL` | no | Must be a model the registry lists for that provider. An id belonging to another provider is ignored and the provider's default free model is used. |
 | `QUERY_TABLE_URL` | no | Server side parquet URL (IPNS root or direct object). Falls back to `NEXT_PUBLIC_QUERY_TABLE_URL`, then to `public/sample/query-table.parquet`. |
 | `RUN_HISTORY_URL`, `OPEN_DATA_INDEX_URL` | no | Server side overrides; fall back to the `NEXT_PUBLIC_*` values, then to the sample files. |
+| `AGENT_RATE_LIMIT`, `AGENT_RATE_WINDOW_MS` | no | Default 15 questions per 10 minutes per address. |
+| `AGENT_TEST_RATE_LIMIT`, `AGENT_TEST_RATE_WINDOW_MS` | no | Default 10 credential tests per minute per address. |
 | `AGENT_LOG` | no | `off` silences the JSON log lines. |
 
 ### Running it
@@ -271,15 +329,32 @@ combinations, and a stated heuristic score for "strong candidates for further re
 ```bash
 cd ui
 pnpm install
-ANTHROPIC_API_KEY=sk-ant-... pnpm dev        # then open http://localhost:3000/agent
-# or against the published data:
-ANTHROPIC_API_KEY=sk-ant-... QUERY_TABLE_URL=https://ipfs.filebase.io/ipns/k51.../ pnpm dev
+pnpm dev                 # open http://localhost:3000/settings, paste a key, then /agent
 
-# from the command line
-curl -s http://localhost:3000/api/agent          # 200 {"configured":true,...} or 501
+# or with a server side default, which no deployed instance of this app uses:
+GOOGLE_GENERATIVE_AI_API_KEY=AIza... pnpm dev
+GOOGLE_GENERATIVE_AI_API_KEY=AIza... QUERY_TABLE_URL=https://ipfs.filebase.io/ipns/k51.../ pnpm dev
+
+# what would answer, and everything supported. Never a key.
+curl -s http://localhost:3000/api/agent
+
+# what would answer for a caller carrying their own credential
+curl -s http://localhost:3000/api/agent \
+  -H 'x-llm-provider: google' -H 'x-llm-model: gemini-3.7-flash' -H "x-llm-api-key: $GOOGLE_KEY"
+
+# does this key work, and will this model call tools
+curl -s -X POST http://localhost:3000/api/agent/test \
+  -H 'x-llm-provider: google' -H 'x-llm-model: gemini-3.7-flash' -H "x-llm-api-key: $GOOGLE_KEY"
+
+# ask a question with your own key
 curl -s -X POST http://localhost:3000/api/agent \
   -H 'content-type: application/json' \
+  -H 'x-llm-provider: google' -H 'x-llm-model: gemini-3.7-flash' -H "x-llm-api-key: $GOOGLE_KEY" \
   -d '{"messages":[{"role":"user","content":"Which properties have roofs older than 15 years and have not exchanged ownership in more than 10 years?"}]}'
+
+# with no key anywhere: 501, and it says where to go
+curl -s -X POST http://localhost:3000/api/agent \
+  -H 'content-type: application/json' -d '{"messages":[{"role":"user","content":"hello"}]}'
 ```
 
 On Vercel set the same variables in Project Settings (they are server side; no redeploy is needed
@@ -297,5 +372,19 @@ JSON, and `get_run_history` records freshness. `tests/agent-loop.test.ts` runs t
 `ToolLoopAgent` with a `MockLanguageModelV3` from `ai/test` that answers with a tool call and then
 text, asserting the tool actually executed, the JSON contract holds (transcript, evidence with
 provenance, assumptions, freshness, usage, cache marker on the system prompt), that a rejected
-mutation does not break the loop, and that the step cap stops a runaway loop. No test calls a real
-model.
+mutation does not break the loop, and that the step cap stops a runaway loop.
+
+`tests/agent-providers.test.ts` covers the registry and the credential path: ids and model ids are
+unique, every free tier claim carries a source URL and a read date, no model is marked free under a
+provider with no free tier, a client can be built for every registry provider (so a registry entry
+can never lack a client branch), the header parser rejects an unknown provider, an unlisted model,
+a key shaped wrong and provider headers arriving without a key, and a visitor's credential beats a
+configured server default.
+
+`tests/agent-secrets.test.ts` is the one that matters most, because the app is public. It proves a
+provider error quoting the key comes back redacted as a typed 401 rather than a 500, that a genuine
+outage is not misread as a bad key, that running the failure path with the console captured writes
+no key material anywhere, that `GET /api/agent` never echoes a credential, and, statically, that no
+logger call under `lib/agent` or `app/api` is handed a credential.
+
+No test calls a real model or a real provider.

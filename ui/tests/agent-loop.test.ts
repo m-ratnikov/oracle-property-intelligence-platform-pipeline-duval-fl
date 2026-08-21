@@ -66,6 +66,7 @@ function resolved(model: LanguageModelV3): ResolvedModel {
     provider: "anthropic",
     modelId: "mock-sonnet",
     model,
+    source: "server",
     instructions: (system) => ({
       role: "system",
       content: system,
