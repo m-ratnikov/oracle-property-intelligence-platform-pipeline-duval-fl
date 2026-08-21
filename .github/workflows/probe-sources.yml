@@ -1,0 +1,23 @@
+name: probe-sources
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Egress + reachability
+        run: |
+          curl -s --max-time 10 https://ipinfo.io/json | head -c 200; echo
+          for u in \
+            "https://paopropertysearch.coj.net/Basic/Search.aspx" \
+            "https://maps.coj.net/coagis/rest/services?f=json" \
+            "https://opendata.coj.net/" \
+            "https://data.jacksonville.gov" \
+            "https://www2.myfloridalicense.com/" \
+            "https://dos.fl.gov/sunbiz/" \
+            "https://sftp.floridados.gov" \
+            "https://floridarevenue.com/property/Pages/DataPortal.aspx" \
+            "https://www.jtafla.com/" \
+            "https://duvalpa.com/" ; do
+            curl -s -o /dev/null -w "%{http_code} %{time_total}s $u\n" --max-time 20 "$u" || echo "ERR $u"
+          done
