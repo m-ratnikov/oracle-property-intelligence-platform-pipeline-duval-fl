@@ -61,3 +61,17 @@ jobs:
         with:
           name: jaxepics-probe
           path: out/
+      - name: DBPR CILB extract layout (headerless; column positions are the only contract)
+        run: |
+          mkdir -p out
+          for n in cilb_certified cilb_registered; do
+            echo "=== $n ==="
+            curl -s -A "$UA" --max-time 300 -r 0-400000 \
+              "https://www2.myfloridalicense.com/sto/file_download/extracts/$n.csv" -o "out/$n.head"
+            echo "--- first 6 lines ---"
+            head -6 "out/$n.head"
+            echo "--- field count of first 5 lines (naive comma split) ---"
+            head -5 "out/$n.head" | awk -F',' '{print NR": "NF" fields"}'
+            echo "--- lines mentioning DUVAL or JACKSONVILLE in this prefix ---"
+            grep -m 3 -iE 'duval|jacksonville' "out/$n.head" || echo "none in first 400KB"
+          done
