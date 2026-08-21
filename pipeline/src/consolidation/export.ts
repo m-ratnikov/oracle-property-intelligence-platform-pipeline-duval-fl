@@ -7,6 +7,7 @@ import { all, count, one, q, scalar, tableExists } from "../db.js";
 import type { Logger } from "../log.js";
 import { computeCid } from "../publish/cid.js";
 import { describeQueryTableArtifact, type ExportResult, type QueryTableArtifact, type ValidationReport } from "../features/export.js";
+import { tableDelta, type RunSourceRecord } from "../run.js";
 
 /**
  * Elephant open-data consolidation export (county-open-data-publish convention):
@@ -42,6 +43,78 @@ export interface ConsolidationStats {
   indexCid: string;
   manifestCid: string;
   ms: number;
+}
+
+/** The track name the consolidation pass records itself under in `run_log_sources`. */
+export const CONSOLIDATION_TRACK = "consolidation";
+
+export interface ConsolidationSourceInput {
+  stats: ConsolidationStats;
+  /** ISO-8601 UTC, the same shape every other run source is stamped with. */
+  startedAt: string;
+  finishedAt: string;
+  /** Where this pass wrote its open-data tree, relative to the publish directory. */
+  artifactPath: string;
+  /** `table_total_after` of the previous recorded consolidation pass; null when there is none. */
+  prevTotal: number | null;
+  since: string;
+  limit: number | null;
+}
+
+/**
+ * How a consolidation pass describes itself as a run source.
+ *
+ * This exists so the pass stops hand rolling its own `INSERT INTO run_log_sources` with positional
+ * literals. It built the published `sources` JSON and the table row from two separate expressions,
+ * and they disagreed: the row put `stats.exported` in `delta_vs_prev_total`, the JSON carried no
+ * such key at all, and the UI's fallback then derived `inserted + updated`, which is the same wrong
+ * number by a different route. Both now come from this one record.
+ *
+ * `delta_vs_prev_total` is movement in `consolidation_state`'s own total against the previous
+ * recorded consolidation pass, exactly as `tableDelta` defines it for every ingestion track.
+ * `stats.exported` is how many property records THIS pass re-hashed and republished. A pass that
+ * re-exported 337 unchanged-in-count properties moved the table by 0, and it published "+337".
+ * Null stays null: no previous consolidation pass recorded is unknown, never zero.
+ */
+export function consolidationSourceRecord(input: ConsolidationSourceInput): RunSourceRecord {
+  const { stats, prevTotal } = input;
+  return {
+    track: CONSOLIDATION_TRACK,
+    source_system: "duval_consolidation",
+    target_table: "consolidation_state",
+    source_url: "derived",
+    artifact_path: input.artifactPath,
+    artifact_sha256: null,
+    artifact_etag: null,
+    artifact_last_modified: null,
+    artifact_bytes: null,
+    download_status: "derived",
+    rows_staged: stats.candidates,
+    // Every candidate whose content hash moved is deleted from consolidation_state and written
+    // back, so this counts republished records: new properties and re-hashed ones together. See
+    // the note in cli.ts; it is not split into inserted vs updated because the pass never
+    // measures the split.
+    inserted: stats.exported,
+    updated: 0,
+    unchanged: stats.unchanged,
+    missing_in_source: 0,
+    table_total_after: stats.totalInState,
+    delta_vs_prev_total: tableDelta(stats.totalInState, prevTotal),
+    started_at: input.startedAt,
+    finished_at: input.finishedAt,
+    status: "completed",
+    limitations: [],
+    notes: {
+      shards: stats.shards,
+      totalBytes: stats.totalBytes,
+      indexCid: stats.indexCid,
+      manifestCid: stats.manifestCid,
+      ms: stats.ms,
+      limit: input.limit,
+      since: input.since,
+    },
+    error: null,
+  };
 }
 
 export async function ensureConsolidationState(conn: DuckDBConnection): Promise<void> {

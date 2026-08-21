@@ -1,7 +1,7 @@
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { ulid } from "ulid";
 import { COUNTY, getPaths } from "./config.js";
-import { consolidationArtifacts, consolidationStateStats, exportConsolidation } from "./consolidation/export.js";
+import { CONSOLIDATION_TRACK, consolidationArtifacts, consolidationSourceRecord, consolidationStateStats, exportConsolidation } from "./consolidation/export.js";
 import { formatOpenDataResult, publishOpenData } from "./publish/openData.js";
 import { all, ensureSchema, openDb, q } from "./db.js";
 import { buildFeatures } from "./features/build.js";
@@ -9,8 +9,8 @@ import { exportEntityTables, exportQueryTable, formatValidation, validateQueryTa
 import { log } from "./log.js";
 import { executePublish, formatManifest, formatPlan, planPublish } from "./publish/index.js";
 import { readFilebaseEnv } from "./publish/filebase.js";
-import { loadRunHistory, runPipeline, tableTotals, writeRunHistoryFiles } from "./run.js";
-import { rehydrateRunLog } from "./runLog.js";
+import { loadRunHistory, previousTotal, runPipeline, tableTotals, writeRunHistoryFiles } from "./run.js";
+import { insertRunSource, rehydrateRunLog } from "./runLog.js";
 import { parseTracks } from "./sources.js";
 
 interface Args {
@@ -144,8 +144,29 @@ async function main(): Promise<void> {
         // and CID shape the ingestion run uses, so it joins the published artifacts index.
         const artifacts = await consolidationArtifacts({ outDir, stats, exported, validation: report });
         const finishedAt = new Date().toISOString();
-        const sources = [{ track: "consolidation", source_system: "duval_consolidation", target_table: "consolidation_state", source_url: "derived", rows_staged: stats.candidates, inserted: stats.exported, updated: 0, unchanged: stats.unchanged, missing_in_source: 0, table_total_after: stats.totalInState, status: "completed", started_at: startedAt, finished_at: finishedAt, limitations: [], notes: { shards: stats.shards, totalBytes: stats.totalBytes, indexCid: stats.indexCid, manifestCid: stats.manifestCid, ms: stats.ms, limit, since } }];
-        await db.conn.run(`INSERT INTO run_log_sources VALUES (${q(runId)}, 'consolidation', 'duval_consolidation', 'consolidation_state', 'derived', ${q(outDir)}, NULL, NULL, NULL, NULL, 'derived', ${stats.candidates}, ${stats.exported}, 0, ${stats.unchanged}, 0, ${stats.totalInState}, ${stats.exported}, ${q(startedAt)}::TIMESTAMP, ${q(finishedAt)}::TIMESTAMP, 'completed', '[]'::JSON, NULL)`);
+        // The pass describes itself as one run source, and the SAME record becomes both the
+        // published `sources` JSON and the `run_log_sources` row, through the one INSERT the
+        // ingestion tracks and the rehydrate path already share. It used to be two hand written
+        // expressions: the row put `stats.exported` (records republished) in
+        // `delta_vs_prev_total`, and the JSON carried no delta key at all.
+        // `updated` is 0 and `missing_in_source` is 0 because this pass never measures either:
+        // it deletes and rewrites every candidate whose content hash moved, so a re-hashed
+        // property is counted under `inserted`, and it never looks for state rows the candidate
+        // set no longer contains.
+        const prevTotal = await previousTotal(db, CONSOLIDATION_TRACK);
+        const source = consolidationSourceRecord({
+          stats,
+          startedAt,
+          finishedAt,
+          // Relative to the publish directory, so a runner local absolute path stays out of the
+          // published run history now that the row and the JSON are the same object.
+          artifactPath: relative(paths.publishDir, outDir) || ".",
+          prevTotal,
+          since,
+          limit,
+        });
+        const sources = [source];
+        await insertRunSource(db, runId, source);
         await db.conn.run(`UPDATE run_log SET finished_at = ${q(finishedAt)}::TIMESTAMP, status = 'completed', sources = ${q(JSON.stringify(sources))}::JSON, limitations = '[]'::JSON,
           totals = ${q(JSON.stringify({ consolidation_state: stats.totalInState, totalBytes: stats.totalBytes, shards: stats.shards }))}::JSON,
           artifacts = ${q(JSON.stringify(artifacts))}::JSON WHERE run_id = ${q(runId)}`);
