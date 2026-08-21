@@ -1,0 +1,39 @@
+{
+  "name": "@duval-oracle/pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Duval County (FL) Oracle ingestion pipeline: FDOR/COJ sources -> DuckDB -> Elephant IPFS artifacts",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "pipeline": "tsx src/cli.ts run",
+    "features": "tsx src/cli.ts features",
+    "validate": "tsx src/cli.ts validate",
+    "publish:ipfs": "tsx src/cli.ts publish",
+    "status": "tsx src/cli.ts status",
+    "query": "tsx src/cli.ts query",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1115.0",
+    "@duckdb/node-api": "1.5.5-r.4",
+    "adm-zip": "^0.5.16",
+    "ipfs-only-hash": "^4.0.0",
+    "multiformats": "^13.4.2",
+    "ulid": "^3.0.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@smithy/types": "^4.17.2",
+    "@types/adm-zip": "^0.5.7",
+    "@types/node": "^22.17.0",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.11"
+  },
+  "packageManager": "pnpm@11.22.0"
+}

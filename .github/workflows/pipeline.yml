@@ -1,0 +1,134 @@
+name: pipeline
+
+# Continuous, incremental Duval ingestion: every 6 hours and on demand. Each run downloads only
+# sources whose ETag/Last-Modified changed, merges by row hash (inserted/updated/unchanged deltas),
+# rebuilds the query table, records the run in runs/<run_id>.json (committed back) and, when the
+# Filebase secrets exist, re-publishes the artifacts to IPFS and re-points the IPNS names.
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      tracks:
+        description: "Comma-separated tracks (appraisal,sales,geometry | all | default)"
+        required: false
+        default: "default"
+      window:
+        description: "Optional window for windowed tracks (e.g. 30d, 2026-08-01..2026-08-21, 500)"
+        required: false
+        default: ""
+      publish:
+        description: "Upload to Filebase + re-point IPNS (requires secrets)"
+        required: false
+        default: "true"
+
+concurrency:
+  group: duval-pipeline
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  DATA_DIR: ${{ github.workspace }}/.data
+  NODE_OPTIONS: --max-old-space-size=6144
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: pipeline
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pipeline/pnpm-lock.yaml
+
+      - name: Restore source artifacts + DuckDB from the previous run
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .data/artifacts/appraisal
+            .data/artifacts/sales
+            .data/artifacts/geometry
+            .data/duval.duckdb
+          key: duval-data-${{ github.run_id }}
+          restore-keys: |
+            duval-data-
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Egress check (COJ portals block non-US IPs; FDOR does not)
+        run: curl -s --max-time 10 https://ipinfo.io/json | head -c 300; echo
+
+      - name: Run pipeline
+        env:
+          TRACKS: ${{ github.event.inputs.tracks || 'default' }}
+          WINDOW: ${{ github.event.inputs.window || '' }}
+        run: |
+          ARGS="--tracks $TRACKS --trigger ${{ github.event_name }}"
+          if [ -n "$WINDOW" ]; then ARGS="$ARGS --window $WINDOW"; fi
+          pnpm run pipeline -- $ARGS
+
+      - name: Publish to Filebase / IPFS (dry-run when secrets are absent)
+        env:
+          FILEBASE_ACCESS_KEY: ${{ secrets.FILEBASE_ACCESS_KEY }}
+          FILEBASE_SECRET_KEY: ${{ secrets.FILEBASE_SECRET_KEY }}
+          FILEBASE_BUCKET_DUVAL: ${{ secrets.FILEBASE_BUCKET_DUVAL }}
+          PUBLISH: ${{ github.event.inputs.publish || 'true' }}
+        run: |
+          if [ -n "$FILEBASE_ACCESS_KEY" ] && [ "$PUBLISH" = "true" ]; then
+            pnpm run publish:ipfs -- --publish
+          else
+            echo "Filebase secrets not configured (or publish=false): dry-run only"
+            pnpm run publish:ipfs
+          fi
+
+      - name: Save source artifacts + DuckDB for the next run
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .data/artifacts/appraisal
+            .data/artifacts/sales
+            .data/artifacts/geometry
+            .data/duval.duckdb
+          key: duval-data-${{ github.run_id }}
+
+      - name: Upload publish artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: duval-publish-${{ github.run_id }}
+          path: .data/artifacts/publish/duval/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Commit run history
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: |
+          git config user.name "duval-oracle-pipeline[bot]"
+          git config user.email "pipeline@users.noreply.github.com"
+          mkdir -p runs
+          cp .data/artifacts/publish/duval/publish-manifest.json runs/latest-publish-manifest.json 2>/dev/null || true
+          cp .data/artifacts/publish/duval/dataset-coverage.json runs/latest-dataset-coverage.json 2>/dev/null || true
+          git add runs/
+          if git diff --cached --quiet; then echo "no run history changes"; exit 0; fi
+          git commit -m "pipeline: run history $(date -u +%Y-%m-%dT%H:%MZ) [skip ci]"
+          git pull --rebase origin ${GITHUB_REF_NAME}
+          git push origin HEAD:${GITHUB_REF_NAME}

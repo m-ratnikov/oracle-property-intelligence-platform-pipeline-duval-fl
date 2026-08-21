@@ -1,0 +1,114 @@
+{
+  "run_id": "01M0HK3J44NRBS7YE2N10C2SWK",
+  "county": "duval",
+  "started_at": "2026-08-21 07:21:00.294",
+  "finished_at": "2026-08-21 07:21:28.437",
+  "status": "completed",
+  "trigger": "manual",
+  "git_sha": "373da525857c4965dd0ea56f1d1a5c76f39261f0",
+  "tracks": [
+    "geometry"
+  ],
+  "window": null,
+  "sources": [
+    {
+      "track": "geometry",
+      "source_system": "fdor_par",
+      "target_table": "parcel_geometry",
+      "source_url": "https://floridarevenue.com/property/dataportal/Documents/PTO%20Data%20Portal/Map%20Data/2026F/2026F%20PAR/duval_2026Ppar.zip",
+      "artifact_path": "geometry/duval_2026ppar.zip",
+      "artifact_sha256": "ba461d7ef298801fe50fd28a880c2504e5afdcaff9384c6bf8521f9556963244",
+      "artifact_etag": "\"{DC343265-01E9-4E74-9894-75E0DA1A24FF},2\"",
+      "artifact_last_modified": "Fri, 07 Aug 2026 12:43:19 GMT",
+      "artifact_bytes": 192382098,
+      "download_status": "existing",
+      "rows_staged": 405716,
+      "inserted": 405716,
+      "updated": 0,
+      "unchanged": 0,
+      "missing_in_source": 0,
+      "table_total_after": 405716,
+      "delta_vs_prev_total": 405716,
+      "started_at": "2026-08-21T07:21:00.398Z",
+      "finished_at": "2026-08-21T07:21:17.764Z",
+      "status": "completed",
+      "limitations": [
+        "192 MB archive; centroids computed from polygons (not rooftop points)",
+        "Parcels present in NAL but missing from the shapefile get no coordinates"
+      ],
+      "notes": {
+        "shapefile": "duval_2026Ppar.shp",
+        "featureCount": 405716,
+        "sourceCrs": "NAD83(HARN) / Florida East (ftUS) [EPSG:2881]",
+        "readMs": 13065,
+        "parcelsWithCoordinates": 403813,
+        "parcelsTotal": 404023
+      },
+      "error": null
+    }
+  ],
+  "limitations": [
+    "geometry: 192 MB archive; centroids computed from polygons (not rooftop points)",
+    "geometry: Parcels present in NAL but missing from the shapefile get no coordinates"
+  ],
+  "totals": {
+    "parcels": 404023,
+    "parcel_geometry": 405716,
+    "sales_history": 64532,
+    "permits": 0,
+    "contractors": 0,
+    "businesses": 0,
+    "places": 0,
+    "transit_stops": 0,
+    "water_bodies": 0,
+    "address_points": 0,
+    "entity_links": 0,
+    "derived.properties_features": 404023
+  },
+  "artifacts": {
+    "queryTable": {
+      "path": "query-table.parquet",
+      "rows": 404023,
+      "bytes": 29088884,
+      "sha256": "192d6cad7b7e2d34caa84cbcdaf4fdaf17d25758a1821cf578cc616fe7499fcf",
+      "cid": "QmVi7faSZZU58TDp8hSmdhaon2QM8kZtGHhqBQzYb82715",
+      "cidV1": "bafybeidnqf6dhqlqglc6ghyhe2qqribyfqxubh3rwlh3denvud7xmoiw6q",
+      "validationOk": true,
+      "problems": []
+    },
+    "tables": {
+      "parcels": {
+        "path": "tables/parcels.parquet",
+        "rows": 404023,
+        "bytes": 38911589,
+        "sha256": "c5c5a5b1746d48ded732eee500024c3fe521653c9d83d70f2fb08a08f0e000c4",
+        "cid": "QmfZMzL3RqSqhLMYLtB4g8dRtcZfZTaXHxPfbVdkern2y6",
+        "cidV1": "bafybeih73bjjgtupi3leywt6quamozyf3cl5rzpti7ewvsmtfqbhu6tb2e"
+      },
+      "parcel_geometry": {
+        "path": "tables/parcel_geometry.parquet",
+        "rows": 405716,
+        "bytes": 25307296,
+        "sha256": "9bc99c87ed404eab5e67e67fad392eb36738ecf6230087e92a3b2b4c1ab76763",
+        "cid": "QmVcD9Knx3t5NWCZky7VgkWyJxWLbXDruUPxg5u32EDSo6",
+        "cidV1": "bafybeidl7yy5xzjdhqdsd6y53zfo33eapcsssipj5kdx3rp5spe3irbqyu"
+      },
+      "sales_history": {
+        "path": "tables/sales_history.parquet",
+        "rows": 64532,
+        "bytes": 3076215,
+        "sha256": "19b51a73f7a7988f7c5a27575e5787beee75d9c5dd21667a07e71f5ae543d821",
+        "cid": "QmNXY7mgvnhqM3A459LaAbQS5JUzKfSwhpv3e7nBuBWhA3",
+        "cidV1": "bafybeiaczhxxbr6kiul4jdlz4zd3yi2ixyhbamv6fsrzeilb5nwxfydmkq"
+      }
+    },
+    "coverage": {
+      "path": "dataset-coverage.json",
+      "bytes": 7931,
+      "sha256": "694f3b349dc1507d48e77d06599b98379069ae143b3fa45cb963e9005c25b14b",
+      "cid": "Qmc3FWH6uCEcxZrrHb4xhofQgCMpVFFr2uAAR5a2P5Wdod",
+      "cidV1": "bafybeiglr2a2mmjczzglzq2bu5f6phqbrhq6uky2vwvjvpbg2yfx7ahk5a"
+    }
+  },
+  "error": null
+}
