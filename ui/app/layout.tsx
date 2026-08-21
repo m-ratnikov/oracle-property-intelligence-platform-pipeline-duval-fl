@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Nav } from "@/components/Nav";
+import { ResizableColumns } from "@/components/ResizableColumns";
 import { SampleBanner } from "@/components/SampleBanner";
 import { config } from "@/lib/config";
 
@@ -19,6 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <SampleBanner />
         <Nav />
+        <ResizableColumns />
         <main className="mx-auto w-full max-w-[1400px] px-4 py-6 md:px-6">{children}</main>
         <footer className="mx-auto w-full max-w-[1400px] px-4 pb-10 pt-4 text-xs text-faint md:px-6">
           <div className="hairline pt-3">

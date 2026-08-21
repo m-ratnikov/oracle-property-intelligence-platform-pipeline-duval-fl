@@ -262,6 +262,53 @@ table.grid thead th.num {
   text-align: right;
 }
 
+/* ------------------------------------------------------- resizable columns */
+
+.col-resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  z-index: 3;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  /* Without this a drag on a touch screen scrolls the table instead. */
+  touch-action: none;
+}
+
+.col-resize::after {
+  content: "";
+  position: absolute;
+  top: 20%;
+  bottom: 20%;
+  left: 3px;
+  width: 1px;
+  background: var(--color-border-strong);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.col-resize:hover::after,
+.col-resize:focus-visible::after {
+  opacity: 1;
+}
+
+.col-resize:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+/*
+ * Only once a column has been resized. Under the default auto layout a cell is
+ * always as wide as its content, so clipping would never show; under the fixed
+ * layout a narrowed column has to say that it is hiding something.
+ */
+table.grid[data-resize-frozen="true"] thead th,
+table.grid[data-resize-frozen="true"] tbody td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ------------------------------------------------------------------- misc */
 
 textarea.sql {

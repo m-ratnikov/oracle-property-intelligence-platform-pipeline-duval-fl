@@ -179,8 +179,8 @@ export default function DataPage() {
                 <thead>
                   <tr>
                     <th>source</th>
-                    <th>ingested</th>
-                    <th>expected</th>
+                    <th className="num">ingested</th>
+                    <th className="num">expected</th>
                     <th style={{ minWidth: 210 }}>coverage</th>
                     <th>first loaded</th>
                     <th>last loaded</th>
@@ -235,7 +235,7 @@ export default function DataPage() {
                     <thead>
                       <tr>
                         <th>source_system</th>
-                        <th>rows</th>
+                        <th className="num">rows</th>
                         <th>first fetched</th>
                         <th>last fetched</th>
                       </tr>
@@ -271,7 +271,7 @@ export default function DataPage() {
                     <thead>
                       <tr>
                         <th>run_id</th>
-                        <th>parcels touched</th>
+                        <th className="num">parcels touched</th>
                         <th>last fetched</th>
                       </tr>
                     </thead>
@@ -342,7 +342,7 @@ export default function DataPage() {
                     <th>column</th>
                     <th>type</th>
                     <th>contract</th>
-                    <th>non null</th>
+                    <th className="num">non null</th>
                     <th style={{ minWidth: 190 }}>coverage</th>
                   </tr>
                 </thead>

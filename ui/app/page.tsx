@@ -118,11 +118,11 @@ export default function OverviewPage() {
                 <thead>
                   <tr>
                     <th>source</th>
-                    <th>rows fetched</th>
-                    <th>inserted</th>
-                    <th>updated</th>
-                    <th>unchanged</th>
-                    <th>delta vs previous</th>
+                    <th className="num">rows fetched</th>
+                    <th className="num">inserted</th>
+                    <th className="num">updated</th>
+                    <th className="num">unchanged</th>
+                    <th className="num">delta vs previous</th>
                     <th>limitations</th>
                   </tr>
                 </thead>
