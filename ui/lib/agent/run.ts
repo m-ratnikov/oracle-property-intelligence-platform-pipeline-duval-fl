@@ -35,6 +35,8 @@ export interface RunAgentOptions {
    * writes it anywhere, and every error path that could quote it is redacted.
    */
   credential?: UserCredential | null;
+  /** Model picked from the dropdown by a caller with no key of their own. */
+  modelChoice?: string | null;
   env?: Env;
   fetchImpl?: typeof fetch;
   maxSteps?: number;
@@ -82,7 +84,7 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentResponse>
   }
 
   const [resolved, db] = await Promise.all([
-    options.model ? Promise.resolve(options.model) : resolveModel(env, options.credential),
+    options.model ? Promise.resolve(options.model) : resolveModel(env, options.credential, options.modelChoice),
     options.db ? Promise.resolve(options.db) : getPropertyDb(),
   ]);
 

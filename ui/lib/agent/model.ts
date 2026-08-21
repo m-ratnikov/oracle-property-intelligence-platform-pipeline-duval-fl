@@ -28,7 +28,7 @@
  * This deployment ships with NO server key set, on purpose: a public,
  * unauthenticated route attached to somebody's API budget is a bill waiting to
  * happen. With nothing configured the route answers 501 and says so, and the
- * settings page is the way in. Setting one env var flips path 2 on without
+ * x-llm-api-key header is the way in. Setting one env var flips path 2 on without
  * another code change.
  */
 
@@ -291,9 +291,40 @@ async function createProviderModel(
  * A visitor credential always wins over the server environment. That is the
  * whole point: someone who brings a key gets their model, not mine.
  */
+/**
+ * The models a visitor may pick without supplying their own key.
+ *
+ * Bounded on purpose. The endpoint is public and the server key is billed, so an arbitrary model id
+ * from a header must never reach the provider: a stranger could otherwise point a paid key at the
+ * most expensive model in the catalogue. The choices are the registry's entries for whichever
+ * provider the server is configured with, and AGENT_MODEL_CHOICES can narrow that further to a
+ * comma separated subset when a deployment wants a tighter cost ceiling.
+ */
+export function serverModelChoices(env: Env = process.env): { id: string; label: string }[] {
+  const selection = serverSelection(env);
+  if (!selection) return [];
+  const provider = findProvider(selection.provider);
+  if (!provider) return [];
+
+  const allowed = env.AGENT_MODEL_CHOICES?.split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+  return provider.models
+    .filter((model) => (allowed && allowed.length > 0 ? allowed.includes(model.id) : true))
+    .map((model) => ({ id: model.id, label: model.label }));
+}
+
+/** True when `modelId` is one the server will run on its own key. */
+export function isSelectableModel(modelId: string, env: Env = process.env): boolean {
+  return serverModelChoices(env).some((choice) => choice.id === modelId);
+}
+
 export async function resolveModel(
   env: Env = process.env,
   credential?: UserCredential | null,
+  /** A model the caller picked from the dropdown; only honoured against the server's own choices. */
+  modelOverride?: string | null,
 ): Promise<ResolvedModel> {
   if (credential) {
     // credentials.ts already checked the pair against the registry; re-check
@@ -315,11 +346,19 @@ export async function resolveModel(
   const selection = serverSelection(env);
   if (!selection) throw new AgentNotConfiguredError(NOT_CONFIGURED_MESSAGE);
 
+  const picked = modelOverride?.trim();
+  if (picked && !isSelectableModel(picked, env)) {
+    throw new AgentBadRequestError(
+      `Model "${picked}" is not one this deployment offers. See GET /api/agent for the selectable list.`,
+    );
+  }
+  const modelId = picked || selection.modelId;
+
   return {
     provider: selection.provider,
-    modelId: selection.modelId,
+    modelId,
     source: "server",
-    model: await createProviderModel(selection.provider, selection.modelId, selection.apiKey, env),
+    model: await createProviderModel(selection.provider, modelId, selection.apiKey, env),
     instructions: instructionsFor(selection.provider),
   };
 }

@@ -22,8 +22,8 @@ import {
   modelLabel,
   type AgentProvider,
 } from "@/lib/agent/providers";
-import { resolveModel, serverSelection, isAgentConfigured, readProvider } from "@/lib/agent/model";
-import { readUserCredential, KEY_HEADER, PROVIDER_HEADER, MODEL_HEADER } from "@/lib/agent/credentials";
+import { resolveModel, serverSelection, serverModelChoices, isSelectableModel, isAgentConfigured, readProvider } from "@/lib/agent/model";
+import { readUserCredential, readModelChoice, KEY_HEADER, PROVIDER_HEADER, MODEL_HEADER } from "@/lib/agent/credentials";
 import { AgentBadRequestError, AgentNotConfiguredError } from "@/lib/agent/errors";
 import { RateLimiter, clientAddress } from "@/lib/agent/ratelimit";
 
@@ -178,10 +178,22 @@ describe("credential headers", () => {
     expect(credential?.provider).toBe("vercel-ai-gateway");
   });
 
-  it("refuses provider or model headers that arrive without a key", () => {
-    // Otherwise a stranger could point a server side key at an expensive model.
+  it("refuses a provider header without a key, because switching provider means switching who pays", () => {
     expect(() => readUserCredential(headers({ [PROVIDER_HEADER]: "anthropic" }))).toThrow(AgentBadRequestError);
-    expect(() => readUserCredential(headers({ [MODEL_HEADER]: "claude-opus-5" }))).toThrow(AgentBadRequestError);
+  });
+
+  it("allows a bare model header, which is the dropdown, and reads it as a choice", () => {
+    // No credential is produced: the model is only a preference until resolveModel checks it
+    // against what this deployment actually offers.
+    expect(readUserCredential(headers({ [MODEL_HEADER]: "gpt-4.1-mini" }))).toBeNull();
+    expect(readModelChoice(headers({ [MODEL_HEADER]: "gpt-4.1-mini" }))).toBe("gpt-4.1-mini");
+  });
+
+  it("ignores the model header when the caller brought their own key", () => {
+    // With a key the model belongs to the credential, not to the dropdown, so the two cannot
+    // disagree about which model was asked for.
+    const withKey = headers({ [KEY_HEADER]: FAKE_KEY, [PROVIDER_HEADER]: "google", [MODEL_HEADER]: "gemini-3.5-flash" });
+    expect(readModelChoice(withKey)).toBeNull();
   });
 
   it("refuses a key with no provider", () => {
@@ -316,5 +328,32 @@ describe("per address rate limiting", () => {
     expect(clientAddress(new Headers({ "x-real-ip": "198.51.100.9" }))).toBe("198.51.100.9");
     // Stripping the headers must not buy a private budget.
     expect(clientAddress(new Headers({}))).toBe("unknown");
+  });
+});
+
+describe("the model dropdown is bounded to what the server will pay for", () => {
+  const SERVER = { OPENAI_API_KEY: FAKE_KEY } as unknown as NodeJS.ProcessEnv;
+
+  it("offers the configured provider's models and nothing else", () => {
+    const ids = serverModelChoices(SERVER).map((choice) => choice.id);
+    expect(ids).toContain("gpt-4.1-mini");
+    // never another vendor's catalogue, whatever a header asks for
+    expect(ids.some((id) => id.startsWith("claude") || id.startsWith("gemini"))).toBe(false);
+  });
+
+  it("AGENT_MODEL_CHOICES narrows the list further", () => {
+    const ids = serverModelChoices({ ...SERVER, AGENT_MODEL_CHOICES: "gpt-4.1-mini" }).map((c) => c.id);
+    expect(ids).toEqual(["gpt-4.1-mini"]);
+    expect(isSelectableModel("gpt-5", { ...SERVER, AGENT_MODEL_CHOICES: "gpt-4.1-mini" })).toBe(false);
+  });
+
+  it("refuses a model the deployment does not offer, so a header cannot pick an arbitrary one", async () => {
+    // the whole point of the bound: a public endpoint on a billed key
+    await expect(resolveModel(SERVER, null, "gpt-5-pro-max-expensive")).rejects.toThrow(/not one this deployment offers/);
+    expect(isSelectableModel("claude-opus-5", SERVER)).toBe(false);
+  });
+
+  it("offers nothing when the server has no key at all", () => {
+    expect(serverModelChoices({})).toEqual([]);
   });
 });

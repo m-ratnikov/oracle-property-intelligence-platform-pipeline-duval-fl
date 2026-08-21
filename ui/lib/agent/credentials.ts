@@ -75,9 +75,12 @@ export function readUserCredential(headers: Headers): UserCredential | null {
   const rawModel = headers.get(MODEL_HEADER)?.trim() || null;
 
   if (!rawKey?.trim()) {
-    if (rawProvider || rawModel) {
+    // A model on its own is the dropdown, and it is validated against the server's own bounded
+    // choices in resolveModel. A provider on its own is still refused: switching provider without a
+    // key would mean asking this deployment to pay on an account it has not been configured with.
+    if (rawProvider) {
       throw new AgentBadRequestError(
-        `${PROVIDER_HEADER} and ${MODEL_HEADER} only apply to a request that also carries ${KEY_HEADER}. Without your own key the server answers with its own configured model.`,
+        `${PROVIDER_HEADER} only applies to a request that also carries ${KEY_HEADER}. Without your own key the server answers with its own configured provider.`,
       );
     }
     return null;
@@ -104,4 +107,13 @@ export function readUserCredential(headers: Headers): UserCredential | null {
   }
 
   return { provider: provider.id, modelId, apiKey };
+}
+
+/**
+ * The model a keyless caller picked from the dropdown, or null. Validation lives in resolveModel,
+ * which is the only place that knows what this deployment is willing to run on its own key.
+ */
+export function readModelChoice(headers: Headers): string | null {
+  if (headers.get(KEY_HEADER)?.trim()) return null;
+  return headers.get(MODEL_HEADER)?.trim() || null;
 }

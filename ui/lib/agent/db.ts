@@ -26,6 +26,7 @@ import { resolve } from "node:path";
 import { DuckDBInstance, type DuckDBConnection, type DuckDBValue } from "@duckdb/node-api";
 import { VIEW_NAME } from "@/lib/sql";
 import { QUERY_TABLE_OBJECT, resolveArtifactUrl } from "@/lib/config";
+import { logAgent } from "./log";
 
 export type Plain = string | number | boolean | null | Plain[] | { [key: string]: Plain };
 export type Row = Record<string, Plain>;
@@ -123,9 +124,15 @@ async function localCopy(source: string): Promise<string | null> {
     const target = resolve(dir, `${digest}.parquet`);
     if (existsSync(target) && statSync(target).size > 0) return target;
 
+    const started = Date.now();
     const response = await fetch(source, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      logAgent("warn", "query table download rejected", { status: response.status, ms: Date.now() - started });
+      return null;
+    }
     const body = Buffer.from(await response.arrayBuffer());
+    // cold start is the only place this runs, and it dominates the first answer, so it is measured
+    logAgent("info", "query table downloaded", { bytes: body.length, ms: Date.now() - started });
     // a truncated or error body is worse than no cache: refuse anything that is not a parquet
     if (body.length < 8 || body.subarray(0, 4).toString("latin1") !== "PAR1") return null;
     const partial = `${target}.${process.pid}.partial`;
@@ -138,6 +145,7 @@ async function localCopy(source: string): Promise<string | null> {
 }
 
 async function createInstance(source: string): Promise<DuckDBInstance> {
+  const openedAt = Date.now();
   const isHttp = /^https?:\/\//i.test(source);
   const cached = isHttp ? await localCopy(source) : null;
   const readFrom = cached ?? source;
@@ -160,6 +168,7 @@ async function createInstance(source: string): Promise<DuckDBInstance> {
   } finally {
     setup.closeSync();
   }
+  logAgent("info", "query table opened", { ms: Date.now() - openedAt, cached: cached !== null, httpfs: needsHttpfs });
   return instance;
 }
 

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { serverSelection, AgentNotConfiguredError } from "@/lib/agent/model";
+import { serverSelection, serverModelChoices, AgentNotConfiguredError } from "@/lib/agent/model";
 import { runAgent } from "@/lib/agent/run";
 import { logAgent } from "@/lib/agent/log";
-import { readUserCredential, KEY_HEADER, PROVIDER_HEADER, MODEL_HEADER } from "@/lib/agent/credentials";
+import { readUserCredential, readModelChoice, KEY_HEADER, PROVIDER_HEADER, MODEL_HEADER } from "@/lib/agent/credentials";
 import {
   isAgentError,
   providerSpecificHint,
@@ -34,7 +34,7 @@ import {
  *   2. the server environment, when a key is configured there.
  * With neither, the route returns 501 and a typed body saying so, rather than
  * inventing an answer. This deployment ships with no server key, so path 1 is
- * the normal path and the settings page is where a visitor sets it up.
+ * the normal path; a caller may still send their own key by header.
  *
  * THE KEY. It exists for the duration of one request. It is not stored, not
  * cached, not written to a cookie, and not logged: every log line and every
@@ -52,7 +52,7 @@ export const maxDuration = 300;
 export type { AgentResponse, AgentToolCall, AgentEvidenceRow } from "@/lib/agent/types";
 
 const NOT_CONFIGURED_HINT =
-  "Open the settings page, pick a provider and model, and paste your own API key. It stays in your browser and travels with each question. Every question the agent answers is also answerable on the Questions page, which runs the same SQL rules in the browser with no model at all.";
+  "No model is configured on this deployment. Every question the agent answers is also answerable on the Questions page, which runs the same SQL rules in the browser with no model at all.";
 
 function notConfigured(message = NOT_CONFIGURED_MESSAGE): NextResponse<AgentResponse> {
   return NextResponse.json(emptyResponse("not_implemented", message, NOT_CONFIGURED_HINT), {
@@ -69,8 +69,8 @@ function toErrorResponse(
   error: unknown,
   secrets: (string | undefined)[],
   // Whose credential the turn used. A visitor can fix their own key; they cannot fix this
-  // deployment's, so pointing them at the settings page for a server side failure sends them to
-  // a control that will not help. Defaults to "user" because that is the safe thing to say when
+  // deployment's, so telling them to fix a key for a server side failure points at something they
+  // do not control. Defaults to "user" because that is the safe thing to say when
   // the failure happened before a credential was resolved.
   credentialSource: "user" | "server" = "user",
 ): NextResponse<AgentResponse> {
@@ -81,17 +81,17 @@ function toErrorResponse(
       providerSpecificHint(error.message) ??
       (error.name === "AgentCredentialError"
         ? credentialSource === "server"
-          ? "The provider rejected this deployment's own key, so there is nothing to fix on your side. Add your own key on the settings page to keep going, or let the operator know the server credential needs attention."
-          : "The provider rejected that credential. Check the key on the settings page, confirm it belongs to the provider you selected, and test it there before asking again."
+          ? "The provider rejected this deployment's own key, so there is nothing to fix on your side. The operator needs to attend to the server credential."
+          : "The provider rejected that credential. Confirm the key belongs to the provider named in the x-llm-provider header, and test it against /api/agent/test before asking again."
         : error instanceof AgentRateLimitError
           ? error.scope === "provider"
             ? error.perDay
-              ? "This deployment's model provider has hit its quota for the day, so waiting will not clear it. Add your own key on the settings page to keep going; the operator needs to raise the provider's limit."
-              : "The model provider is throttling this deployment's key, not you. Try again shortly, or add your own key on the settings page to be independent of it."
+              ? "This deployment's model provider has hit its quota for the day, so waiting will not clear it. The operator needs to raise the provider's limit; the Questions page answers the same rules meanwhile with no model at all."
+              : "The model provider is throttling this deployment's key, not you. Try again shortly; the Questions page answers the same rules meanwhile with no model at all."
             : "This is a public endpoint, so it is capped per address. Wait for the window to roll over, or supply your own key to keep your questions independent of everyone else's."
           : error.name === "AgentBadRequestError"
             ? "Fix the request headers and try again. GET /api/agent lists every provider and model this build supports."
-            : "The model provider failed the call. Nothing was fabricated. Retrying, or picking a different model on the settings page, is usually enough.");
+            : "The model provider failed the call. Nothing was fabricated. Retrying, or picking a different model from the dropdown, is usually enough.");
 
     const headers: Record<string, string> = {};
     if (error instanceof AgentRateLimitError) headers["retry-after"] = String(error.retryAfterSeconds);
@@ -175,7 +175,12 @@ export async function POST(request: Request): Promise<NextResponse<AgentResponse
   }
 
   try {
-    const response = await runAgent({ messages, credential, abortSignal: request.signal });
+    const response = await runAgent({
+      messages,
+      credential,
+      modelChoice: readModelChoice(request.headers),
+      abortSignal: request.signal,
+    });
     return NextResponse.json(response);
   } catch (error: unknown) {
     return toErrorResponse(error, secrets, credential ? "user" : "server");
@@ -183,7 +188,7 @@ export async function POST(request: Request): Promise<NextResponse<AgentResponse
 }
 
 /**
- * Health / capability probe for the settings page, the chat page and for curl.
+ * Health / capability probe for the chat page and for curl.
  *
  * Reports which provider and model would answer, the full supported registry,
  * and whether a server side key exists. It reports the NAME of the environment
@@ -203,9 +208,13 @@ export async function GET(request: Request): Promise<NextResponse> {
     : null;
   let headerError: string | null = null;
 
+  const choices = serverModelChoices();
+
   try {
     const credential = readUserCredential(request.headers);
     if (credential) active = { provider: credential.provider, model: credential.modelId, source: "user" };
+    const picked = readModelChoice(request.headers);
+    if (picked && active && choices.some((choice) => choice.id === picked)) active = { ...active, model: picked };
   } catch (error: unknown) {
     headerError = error instanceof AgentBadRequestError ? error.message : "credential headers rejected";
   }
@@ -216,11 +225,13 @@ export async function GET(request: Request): Promise<NextResponse> {
     active,
     // The server side default, by variable NAME. Never a value.
     server_default: server ? { provider: server.provider, model: server.modelId, env_key: server.envKey } : null,
+    // What the model dropdown offers. Bounded to this deployment's own provider so a header cannot
+    // point a billed key at an arbitrary model; see serverModelChoices.
+    model_choices: choices,
     bring_your_own_key: {
       headers: { key: KEY_HEADER, provider: PROVIDER_HEADER, model: MODEL_HEADER },
-      settings_url: "/settings",
       test_url: "/api/agent/test",
-      storage: "browser localStorage only; the server keeps no copy",
+      storage: "sent per request, never stored server side",
     },
     header_error: headerError,
     providers: PROVIDERS.map((provider) => ({

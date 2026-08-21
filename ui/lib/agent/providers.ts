@@ -3,7 +3,7 @@
  * settings UI read, so they can never disagree about what is supported.
  *
  * Everything downstream is derived from this array. `AgentProvider` is the
- * union of the ids below, the settings page renders the providers and their
+ * union of the ids below, GET /api/agent publishes the providers and their
  * models straight from it, and the server refuses any provider or model that
  * is not listed. Adding a provider means adding an entry here plus one branch
  * in `createProviderModel` in model.ts, not editing three places that drift.

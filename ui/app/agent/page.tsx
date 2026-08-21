@@ -14,7 +14,6 @@ import type {
 import { PageHeader, Callout, Spinner } from "@/components/ui";
 import { EngineStatus } from "@/components/EngineStatus";
 import { formatTimestamp, relativeTime } from "@/lib/format";
-import { credentialHeaders, useAgentSettings } from "@/lib/agent/settings-client";
 
 interface ChatMessage {
   id: string;
@@ -38,6 +37,8 @@ interface AgentConfig {
   configured: boolean;
   active: { provider: string; model: string; source: "user" | "server" } | null;
   server_default: { provider: string; model: string; env_key: string } | null;
+  /** Models this deployment will run on its own key. Bounded server side, see serverModelChoices. */
+  model_choices: { id: string; label: string }[];
 }
 
 const DEMO_PROMPTS = [
@@ -193,15 +194,18 @@ export default function AgentPage() {
   const [freshness, setFreshness] = useState<AgentDataFreshness | null>(null);
   const [config, setConfig] = useState<AgentConfig | null>(null);
   const scroller = useRef<HTMLDivElement | null>(null);
-  // The visitor's own provider, model and key, read from this browser.
-  const { settings, loaded: settingsLoaded } = useAgentSettings();
+  // Which of the offered models answers the next question. Null until the config arrives, then the
+  // server's own default, so the dropdown never starts on something the server would not run.
+  const [model, setModel] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     fetch("/api/agent", { method: "GET" })
       .then((response) => response.json())
       .then((payload: AgentConfig) => {
-        if (!cancelled) setConfig(payload);
+        if (cancelled) return;
+        setConfig(payload);
+        setModel(payload.server_default?.model ?? payload.model_choices?.[0]?.id ?? null);
       })
       .catch(() => {
         if (!cancelled) setConfig(null);
@@ -211,17 +215,11 @@ export default function AgentPage() {
     };
   }, []);
 
-  // Which model will answer the next question, and on whose budget. A visitor
-  // has to be able to read this off the page they are asking on, not only off
-  // the settings page.
-  const activeModel = settings
-    ? { label: `${settings.provider}:${settings.modelId}`, source: "your key" as const }
-    : config?.configured && config.server_default
-      ? { label: `${config.server_default.provider}:${config.server_default.model}`, source: "server default" as const }
-      : null;
+  const choices = config?.model_choices ?? [];
+  const providerLabel = config?.server_default?.provider ?? null;
 
-  // `settings` is read on every send rather than captured once, so changing the
-  // model in another tab takes effect on the next question without a reload.
+  // The chosen model rides on each request rather than being captured once, so changing the
+  // dropdown takes effect on the next question with no reload.
   const send = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || pending) return;
@@ -242,7 +240,12 @@ export default function AgentPage() {
         // The credential rides on this one request and is not persisted server
         // side. With nothing stored, credentialHeaders is empty and the server
         // answers with its own configuration, or 501 when it has none.
-        headers: { "content-type": "application/json", ...credentialHeaders(settings) },
+        // Only the model travels. The server validates it against the list it published, so a
+        // hand-written header cannot point this deployment's key at a model it does not offer.
+        headers: {
+          "content-type": "application/json",
+          ...(model ? { "x-llm-model": model } : {}),
+        },
         body: JSON.stringify({
           messages: [...messages, outgoing]
             .filter((message) => message.role !== "system" && !message.notImplemented && !message.error)
@@ -272,7 +275,7 @@ export default function AgentPage() {
             usage: payload.usage ?? null,
             elapsed_ms: payload.elapsed_ms,
             toolCalls: (payload.toolCalls ?? payload.tool_calls ?? []).length,
-            source: settings ? "your key" : "server default",
+            source: "server default",
           },
           at: new Date().toISOString(),
         },
@@ -307,23 +310,26 @@ export default function AgentPage() {
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <EngineStatus compact />
-        {settingsLoaded && activeModel ? (
-          <span className="flex flex-wrap items-center gap-1.5 text-[11.5px]">
-            <span className={`badge ${activeModel.source === "your key" ? "badge-accent" : "badge-good"}`}>
-              {activeModel.source}
-            </span>
-            <span className="mono text-muted">{activeModel.label}</span>
-            <Link href="/settings" className="text-[11.5px]">
-              change
-            </Link>
-          </span>
-        ) : settingsLoaded && config ? (
-          <span className="flex flex-wrap items-center gap-1.5 text-[11.5px]">
-            <span className="badge badge-warn">no model configured</span>
-            <Link href="/settings" className="text-[11.5px]">
-              add your own key
-            </Link>
-          </span>
+        {choices.length > 0 ? (
+          <label className="flex flex-wrap items-center gap-1.5 text-[11.5px] text-faint">
+            model
+            <select
+              className="field"
+              value={model ?? ""}
+              onChange={(event) => setModel(event.target.value)}
+              disabled={pending}
+              aria-label="Model"
+            >
+              {choices.map((choice) => (
+                <option key={choice.id} value={choice.id}>
+                  {choice.label}
+                </option>
+              ))}
+            </select>
+            {providerLabel ? <span className="mono text-muted">{providerLabel}</span> : null}
+          </label>
+        ) : config && !config.configured ? (
+          <span className="badge badge-warn">no model configured</span>
         ) : null}
         <FreshnessBadge freshness={freshness} />
       </div>
