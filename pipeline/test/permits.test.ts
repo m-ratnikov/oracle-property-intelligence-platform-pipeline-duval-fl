@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { all, ensureSchema, openDb } from "../src/db.js";
-import { discoverApiPaths, parsePermitDoc, permitNumber, permitWindow, pickDeep, ROOF_RE, stagePermits } from "../src/tracks/permits.js";
+import { discoverApiPaths, parsePermitDoc, permitEndpointCandidates, permitNumber, permitWindow, pickDeep, ROOF_RE, stagePermits } from "../src/tracks/permits.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = JSON.parse(readFileSync(join(here, "fixtures/jaxepics-permit.synthetic.json"), "utf8")) as { permit: unknown };
@@ -42,8 +42,19 @@ describe("JaxEPICS permit parsing (synthetic fixture; real shape discovered in A
     expect(permitWindow("300")).toBe(300);
     expect(permitWindow("50 permits")).toBe(50);
     expect(permitWindow(null, 300)).toBe(300);
-    const bundle = `e.get(this.base+"/api/Permit/View/"+n),fetch("https://jaxepicsapi.coj.net/api/Permits/Search"),x="/api/Inspection/\${id}"`;
-    expect(discoverApiPaths(bundle)).toEqual(["/api/Inspection/${id}", "/api/Permit/View/", "https://jaxepicsapi.coj.net/api/Permits/Search"]);
+    // Angular bundles concatenate an apiUrl with bare "api/..." literals; absolute hosts and {id} slots also appear
+    const bundle = `apiUrl:"https://jaxepicsapi.coj.net/",e.get(this.base+"api/Permit/View/"+n),fetch("https://jaxepicsapi.coj.net/api/Permits/Search"),x="/api/Inspection/\${id}",y="api/Contractor/Lookup"`;
+    const paths = discoverApiPaths(bundle);
+    expect(paths).toContain("api/Permit/View/");
+    expect(paths).toContain("/api/Inspection/${id}");
+    expect(paths).toContain("https://jaxepicsapi.coj.net/api/Permits/Search");
+    expect(paths).toContain("https://jaxepicsapi.coj.net/");
+    expect(paths).toContain("api/Contractor/Lookup");
+    const cands = permitEndpointCandidates(paths);
+    expect(cands[0]).toBe("/api/Permit/View/{permitNumber}");
+    expect(cands).toContain("https://jaxepicsapi.coj.net/api/Permits/Search/{permitNumber}");
+    expect(cands).toContain("/api/Permit/{permitNumber}");
+    expect(discoverApiPaths("nothing here")).toEqual([]);
   });
 
   it("stages permits and links them to parcels by normalized RE", async () => {

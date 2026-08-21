@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tracks:
-        description: "Comma-separated tracks (e.g. permits | businesses | coj_addresses,coj_parcels | contractors)"
+        description: "Comma-separated tracks (e.g. permits | pa_detail | businesses | coj_addresses,coj_parcels | contractors)"
         required: true
         default: "permits"
       window:
@@ -56,16 +56,9 @@ jobs:
           cache-dependency-path: pipeline/pnpm-lock.yaml
       - uses: actions/cache/restore@v4
         with:
-          path: |
-            .data/artifacts/appraisal
-            .data/artifacts/sales
-            .data/artifacts/geometry
-            .data/artifacts/transit
-            .data/artifacts/water
-            .data/artifacts/businesses
-            .data/artifacts/contractors
-            .data/artifacts/permits
-            .data/duval.duckdb
+          # one stable path entry: GitHub derives the cache version from the path list, so a changed
+          # list would orphan every earlier cache (restore-keys cannot cross versions)
+          path: .data
           key: duval-data-${{ github.run_id }}
           restore-keys: |
             duval-data-
@@ -92,16 +85,9 @@ jobs:
       - if: always()
         uses: actions/cache/save@v4
         with:
-          path: |
-            .data/artifacts/appraisal
-            .data/artifacts/sales
-            .data/artifacts/geometry
-            .data/artifacts/transit
-            .data/artifacts/water
-            .data/artifacts/businesses
-            .data/artifacts/contractors
-            .data/artifacts/permits
-            .data/duval.duckdb
+          # one stable path entry: GitHub derives the cache version from the path list, so a changed
+          # list would orphan every earlier cache (restore-keys cannot cross versions)
+          path: .data
           key: duval-data-${{ github.run_id }}
       - if: always()
         uses: actions/upload-artifact@v4

@@ -119,7 +119,7 @@ export function formatValidation(r: ValidationReport): string {
   lines.push(`distinct folios:    ${r.distinctFolios} (source parcels: ${r.sourceDistinctFolios})`);
   lines.push(`null folios:        ${r.nullFolios}`);
   lines.push(`duplicate folios:   ${r.dupFolios}`);
-  lines.push(`property_cid:       ${r.propertyCidFilled} filled (consolidation publish not run; NULL by design)`);
+  lines.push(`property_cid:       ${r.propertyCidFilled} filled${r.propertyCidFilled < r.rows ? " (run export:consolidation to fill the rest)" : ""}`);
   if (r.problems.length > 0) lines.push(`problems:           ${r.problems.join("; ")}`);
   lines.push("per-column non-null coverage:");
   const width = Math.max(...r.columns.map((c) => c.column.length));

@@ -1,12 +1,15 @@
 import { join } from "node:path";
+import { ulid } from "ulid";
 import { getPaths } from "./config.js";
-import { all, ensureSchema, openDb } from "./db.js";
+import { consolidationStateStats, exportConsolidation } from "./consolidation/export.js";
+import { formatOpenDataResult, publishOpenData } from "./publish/openData.js";
+import { all, ensureSchema, openDb, q } from "./db.js";
 import { buildFeatures } from "./features/build.js";
 import { exportEntityTables, exportQueryTable, formatValidation, validateQueryTable } from "./features/export.js";
 import { log } from "./log.js";
 import { executePublish, formatManifest, formatPlan, planPublish } from "./publish/index.js";
 import { readFilebaseEnv } from "./publish/filebase.js";
-import { loadRunHistory, runPipeline, tableTotals } from "./run.js";
+import { loadRunHistory, runPipeline, tableTotals, writeRunHistoryFiles } from "./run.js";
 import { parseTracks } from "./sources.js";
 
 interface Args {
@@ -44,6 +47,8 @@ const HELP = `duval oracle pipeline
   pnpm run features                      rebuild derived.properties_features + query-table.parquet + validate
   pnpm run validate                      re-run the query-table validation gate against the DB
   pnpm run publish:ipfs -- [--publish]   dry-run by default; --publish uploads to Filebase + re-points IPNS
+  pnpm run export:consolidation -- [--since all|changed|<run_id>] [--shard-size 10000] [--limit N] [--out-dir DIR]
+  pnpm run publish:open-data -- [--publish]   per-property open-data files + shards + index; IPNS oracle-open-data-duval
   pnpm run status                        table counts + run history summary
   pnpm run query -- "<sql>"              ad-hoc read-only SQL against the DuckDB file (JSON out)
 `;
@@ -111,12 +116,56 @@ async function main(): Promise<void> {
       process.stdout.write(formatManifest(manifest) + "\n");
       return;
     }
+    case "consolidation": {
+      const db = await openDb(paths.dbPath);
+      await ensureSchema(db.conn);
+      const runId = ulid();
+      const startedAt = new Date().toISOString();
+      const since = args.flags.get("since") ?? "changed";
+      const shardSize = Number(args.flags.get("shard-size") ?? "10000");
+      const limit = args.flags.get("limit") ? Number(args.flags.get("limit")) : null;
+      const outDir = args.flags.get("out-dir") ?? join(paths.publishDir, "open-data");
+      const lexiconDir = join(paths.artifactsDir, "pa_detail", "lexicon");
+      await db.conn.run(`INSERT INTO run_log (run_id, started_at, status, trigger, tracks, "window") VALUES (${q(runId)}, ${q(startedAt)}::TIMESTAMP, 'running', 'consolidation', 'consolidation', ${q(since)})`);
+      try {
+        const stats = await exportConsolidation(db.conn, { outDir, shardSize, since, limit, runId, logger: log, lexiconDir });
+        // refresh the query table so property_cid is filled from consolidation_state
+        const asOf = new Date().toISOString().slice(0, 10);
+        await buildFeatures(db.conn, { asOf, runId });
+        const qt = join(paths.publishDir, "query-table.parquet");
+        await exportQueryTable(db.conn, qt);
+        const report = await validateQueryTable(db.conn, qt);
+        const finishedAt = new Date().toISOString();
+        const sources = [{ track: "consolidation", source_system: "duval_consolidation", target_table: "consolidation_state", source_url: "derived", rows_staged: stats.candidates, inserted: stats.exported, updated: 0, unchanged: stats.unchanged, missing_in_source: 0, table_total_after: stats.totalInState, status: "completed", started_at: startedAt, finished_at: finishedAt, limitations: [], notes: { shards: stats.shards, totalBytes: stats.totalBytes, indexCid: stats.indexCid, manifestCid: stats.manifestCid, ms: stats.ms, limit, since } }];
+        await db.conn.run(`INSERT INTO run_log_sources VALUES (${q(runId)}, 'consolidation', 'duval_consolidation', 'consolidation_state', 'derived', ${q(outDir)}, NULL, NULL, NULL, NULL, 'derived', ${stats.candidates}, ${stats.exported}, 0, ${stats.unchanged}, 0, ${stats.totalInState}, ${stats.exported}, ${q(startedAt)}::TIMESTAMP, ${q(finishedAt)}::TIMESTAMP, 'completed', '[]'::JSON, NULL)`);
+        await db.conn.run(`UPDATE run_log SET finished_at = ${q(finishedAt)}::TIMESTAMP, status = 'completed', sources = ${q(JSON.stringify(sources))}::JSON, limitations = '[]'::JSON,
+          totals = ${q(JSON.stringify({ consolidation_state: stats.totalInState, totalBytes: stats.totalBytes, shards: stats.shards }))}::JSON,
+          artifacts = ${q(JSON.stringify({ openData: { outDir, indexCid: stats.indexCid, manifestCid: stats.manifestCid, propertyCount: stats.totalInState, totalBytes: stats.totalBytes, shards: stats.shards }, queryTable: { rows: report.rows, propertyCidFilled: report.propertyCidFilled } }))}::JSON WHERE run_id = ${q(runId)}`);
+        await writeRunHistoryFiles(db, paths, runId);
+        process.stdout.write(formatValidation(report) + "\n");
+        process.stdout.write(`\n=== CONSOLIDATION ${runId} ===\ncandidates ${stats.candidates}, exported ${stats.exported}, unchanged ${stats.unchanged}, in state ${stats.totalInState}, shards ${stats.shards}, bytes ${stats.totalBytes}, index cid ${stats.indexCid}, ${Math.round(stats.ms / 1000)} s\n`);
+      } catch (err) {
+        await db.conn.run(`UPDATE run_log SET finished_at = now(), status = 'failed', error = ${q(err instanceof Error ? err.message : String(err))} WHERE run_id = ${q(runId)}`);
+        throw err;
+      } finally {
+        await db.close();
+      }
+      return;
+    }
+    case "publish-open-data": {
+      const publish = args.flags.get("publish") === "true" && args.flags.get("dry-run") !== "true";
+      const fb = readFilebaseEnv(env);
+      const result = await publishOpenData({ paths, env, publish, logger: log });
+      process.stdout.write(formatOpenDataResult(result, fb?.bucket ?? null, fb?.gateway ?? "https://ipfs.filebase.io") + "\n");
+      return;
+    }
     case "status": {
       const db = await openDb(paths.dbPath, { readOnly: true });
       const totals = await tableTotals(db);
       const history = await loadRunHistory(db);
       process.stdout.write(`db: ${paths.dbPath}\n`);
       process.stdout.write(`tables: ${JSON.stringify(totals, null, 2)}\n`);
+      process.stdout.write(`consolidation: ${JSON.stringify(await consolidationStateStats(db.conn))}\n`);
       process.stdout.write(`runs (${history.length}):\n`);
       for (const r of history) {
         process.stdout.write(

@@ -38,11 +38,13 @@ export const ENTITY_KEYS: Record<string, string[]> = {
   address_points: ["address_id"],
   coj_parcels: ["re"],
   owners: ["owner_id"],
+  pa_detail_buildings: ["building_key"],
+  pa_detail_sales: ["pa_sale_key"],
 };
 
 /** Bump when a table definition below changes; empty tables are recreated, non-empty ones are kept
  *  (and the run fails loudly in mergeStaging if the new staging columns do not fit). */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 const DDL = `
 CREATE SCHEMA IF NOT EXISTS staging;
@@ -368,6 +370,40 @@ CREATE TABLE IF NOT EXISTS coj_parcels (
   ${PROVENANCE_COLUMNS}
 );
 
+CREATE TABLE IF NOT EXISTS pa_detail_buildings (
+  building_key      VARCHAR NOT NULL,
+  parcel_id         VARCHAR NOT NULL,
+  building_no       INTEGER,
+  building_type     VARCHAR,
+  actual_year_built INTEGER,
+  roof_structure    VARCHAR,
+  roofing_cover     VARCHAR,
+  exterior_wall     VARCHAR,
+  heated_area_sqft  DOUBLE,
+  gross_area_sqft   DOUBLE,
+  effective_area_sqft DOUBLE,
+  elements          JSON,
+  owner_name        VARCHAR,
+  mailing_address   VARCHAR,
+  site_address      VARCHAR,
+  ${PROVENANCE_COLUMNS}
+);
+
+CREATE TABLE IF NOT EXISTS pa_detail_sales (
+  pa_sale_key       VARCHAR NOT NULL,
+  parcel_id         VARCHAR NOT NULL,
+  sale_date         DATE,
+  sale_price        DOUBLE,
+  or_book           VARCHAR,
+  or_page           VARCHAR,
+  book_page         VARCHAR,
+  document_url      VARCHAR,
+  deed_instrument   VARCHAR,
+  qualified         VARCHAR,
+  vacant_improved   VARCHAR,
+  ${PROVENANCE_COLUMNS}
+);
+
 CREATE TABLE IF NOT EXISTS owners (
   owner_id          VARCHAR NOT NULL,
   owner_name        VARCHAR,
@@ -487,7 +523,7 @@ export async function openDb(path: string, opts: { readOnly?: boolean } = {}): P
 /** Tables safe to recreate when empty on a schema bump (never parcels / sales / geometry / run_log). */
 const RECREATE_WHEN_EMPTY = [
   "permits", "contractors", "businesses", "business_events", "places", "transit_stops", "transit_routes",
-  "water_bodies", "address_points", "coj_parcels", "owners", "entity_links",
+  "water_bodies", "address_points", "coj_parcels", "owners", "entity_links", "pa_detail_buildings", "pa_detail_sales",
 ];
 
 export async function ensureSchema(conn: DuckDBConnection): Promise<void> {

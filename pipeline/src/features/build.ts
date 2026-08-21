@@ -34,6 +34,16 @@ export async function buildFeatures(
   const cojParcelsLoaded = (await count(conn, "coj_parcels")) > 0;
   const addressesLoaded = (await count(conn, "address_points")) > 0;
   const linksLoaded = (await count(conn, "entity_links")) > 0;
+  const cidLoaded = (await tableExists(conn, "main", "consolidation_state")) && (await count(conn, "consolidation_state")) > 0;
+  const paLoaded = (await tableExists(conn, "main", "pa_detail_buildings")) && (await count(conn, "pa_detail_buildings")) > 0;
+  const cidJoin = cidLoaded ? "LEFT JOIN consolidation_state cs ON cs.property_id = p.parcel_id" : "";
+  const paJoin = paLoaded
+    ? `LEFT JOIN (SELECT parcel_id, min(roofing_cover) FILTER (WHERE roofing_cover IS NOT NULL) AS roofing_cover,
+                        min(roof_structure) FILTER (WHERE roof_structure IS NOT NULL) AS roof_structure,
+                        min(exterior_wall) FILTER (WHERE exterior_wall IS NOT NULL) AS exterior_wall,
+                        max(actual_year_built) AS pa_year_built, sum(heated_area_sqft) AS pa_heated_area, sum(gross_area_sqft) AS pa_gross_area, count(*) AS pa_buildings
+                 FROM pa_detail_buildings GROUP BY parcel_id) pa ON pa.parcel_id = p.parcel_id`
+    : "";
 
   await conn.run("CREATE OR REPLACE TABLE derived.dor_use_codes (code VARCHAR, description VARCHAR)");
   const values = Object.entries(DOR_USE_CODES)
@@ -100,7 +110,7 @@ export async function buildFeatures(
     SELECT
       -- canonical 37 columns (elephant-query-db order)
       p.parcel_id                                   AS property_id,
-      NULL::VARCHAR                                 AS property_cid,
+      ${cidLoaded ? "cs.cid" : "NULL::VARCHAR"}        AS property_cid,
       p.parcel_id                                   AS request_identifier,
       p.parcel_id                                   AS parcel_identifier,
       ${q(COUNTY.sourceSystem)}                     AS source_system,
@@ -114,13 +124,13 @@ export async function buildFeatures(
       p.longitude                                   AS longitude,
       CASE WHEN p.lnd_sqfoot > 0 THEN round(p.lnd_sqfoot / 43560.0, 4) END AS lot_size_acre,
       CASE WHEN p.lnd_sqfoot > 0 THEN p.lnd_sqfoot END AS lot_area_sqft,
-      NULL::VARCHAR                                 AS exterior_wall_material,
-      NULL::VARCHAR                                 AS roof_covering_material,
+      ${paLoaded ? "pa.exterior_wall" : "NULL::VARCHAR"} AS exterior_wall_material,
+      ${paLoaded ? "regexp_replace(pa.roofing_cover, '^[0-9]+ ', '')" : "NULL::VARCHAR"} AS roof_covering_material,
       ${dorUseGroupSql("p.dor_uc")}                 AS property_type,
       coalesce(uc.description, p.dor_uc)            AS property_usage_type,
       CASE WHEN p.act_yr_blt > 0 THEN p.act_yr_blt END::BIGINT AS built_year,
       CASE WHEN p.tot_lvg_area > 0 THEN p.tot_lvg_area END AS livable_floor_area,
-      NULL::DOUBLE                                  AS total_area,
+      ${paLoaded ? "pa.pa_gross_area" : "NULL::DOUBLE"}  AS total_area,
       p.av_nsd                                      AS assessed_value,
       p.jv                                          AS market_value,
       p.lnd_val                                     AS land_value,
@@ -204,6 +214,9 @@ export async function buildFeatures(
       ${cojParcelsLoaded ? "cj.zoning" : addressesLoaded ? "ap.zoning" : "NULL::VARCHAR"} AS zoning,
       ${cojParcelsLoaded ? "cj.last_sale_date::VARCHAR" : "NULL::VARCHAR"} AS coj_last_sale_date,
       ${addressesLoaded ? "ap.address_point_count::BIGINT" : "NULL::BIGINT"} AS address_point_count,
+      ${paLoaded ? "pa.roof_structure" : "NULL::VARCHAR"} AS roof_structure,
+      ${paLoaded ? "pa.pa_year_built" : "NULL::INTEGER"}  AS pa_actual_year_built,
+      ${paLoaded ? "pa.pa_buildings::BIGINT" : "NULL::BIGINT"} AS pa_building_count,
       p.geometry_source                             AS coordinates_source,
       p.source_artifact                             AS source_artifact,
       p.source_sha256                               AS source_sha256,
@@ -225,6 +238,8 @@ export async function buildFeatures(
     ${waterJoin}
     ${cojJoin}
     ${addrJoin}
+    ${cidJoin}
+    ${paJoin}
   `);
 
   const rows = await count(conn, "derived.properties_features");

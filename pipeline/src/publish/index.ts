@@ -216,8 +216,20 @@ export async function executePublish(opts: {
     gatewayUrl: indexPublished.ipns?.gatewayUrl ?? null,
   };
 
+  const openDataResultPath = join(opts.paths.publishDir, "open-data", "publish-result.json");
+  let openDataIpns = `<k51 of oracle-open-data-${COUNTY.key}; run publish:open-data -- --publish>`;
+  if (existsSync(openDataResultPath)) {
+    try {
+      const r = JSON.parse(readFileSync(openDataResultPath, "utf8")) as { ipnsName?: string | null };
+      if (r.ipnsName) openDataIpns = r.ipnsName;
+    } catch {
+      /* keep placeholder */
+    }
+  }
   const mcpEnv: Record<string, string> = {
     PROPERTY_QUERY_TABLE_MAP: JSON.stringify({ [COUNTY.key]: qtUrl }),
+    ORACLE_OPEN_DATA_IPNS_MAP: JSON.stringify({ [COUNTY.key]: openDataIpns }),
+    ORACLE_OPEN_DATA_DEFAULT_COUNTY: COUNTY.key,
     PROPERTY_QUERY_TABLE_DEFAULT_COUNTY: COUNTY.key,
     DATASET_COVERAGE_MAP: JSON.stringify({ [COUNTY.key]: covUrl }),
     PUBLISHED_COUNTY_CATALOG_URL: byName("published-counties.json")?.gatewayUrl ?? "",

@@ -16,12 +16,15 @@
     "query": "tsx src/cli.ts query",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "export:consolidation": "tsx src/cli.ts consolidation",
+    "publish:open-data": "tsx src/cli.ts publish-open-data"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1115.0",
     "@duckdb/node-api": "1.5.5-r.4",
     "adm-zip": "^0.5.16",
+    "cheerio": "^1.2.0",
     "ipfs-only-hash": "^4.0.0",
     "multiformats": "^13.4.2",
     "ssh2-sftp-client": "^12.1.1",

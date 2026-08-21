@@ -36,13 +36,36 @@ export function permitNumber(prefix: string, yy: number, seq: number, sub = 0): 
   return `${prefix}-${String(yy).padStart(2, "0")}-${String(seq).padStart(6, "0")}.${String(sub).padStart(3, "0")}`;
 }
 
-/** Find JaxEPICS API endpoint templates inside the Angular bundle text. */
+/**
+ * Find JaxEPICS API endpoint literals inside the Angular bundle text: absolute jaxepicsapi URLs,
+ * `/api/...` and bare `api/...` path literals (Angular apps usually concatenate an apiUrl with these),
+ * plus any `apiUrl`/`baseUrl` style config strings.
+ */
 export function discoverApiPaths(bundleText: string): string[] {
   const found = new Set<string>();
-  const re = /(https?:\/\/jaxepicsapi\.coj\.net)?\/api\/[A-Za-z0-9_/${}.-]+/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(bundleText)) !== null) found.add(m[0]);
-  return [...found].sort();
+  const patterns = [
+    /https?:\/\/jaxepicsapi[^"'`\s)]+/g,
+    /(?<![A-Za-z0-9_])\/?api\/[A-Za-z0-9_/${}.-]+/g,
+    /(?:apiUrl|apiBase|baseUrl|apiBaseUrl|API_URL)["']?\s*[:=]\s*["']([^"']+)["']/g,
+  ];
+  for (const re of patterns) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(bundleText)) !== null) found.add((m[1] ?? m[0]).trim());
+  }
+  return [...found].filter((p) => p.length > 4).sort();
+}
+
+/** Rank discovered literals as permit-detail endpoint candidates (templates with a {permitNumber} slot). */
+export function permitEndpointCandidates(paths: string[]): string[] {
+  const out = new Set<string>();
+  for (const p of paths) {
+    if (!/permit/i.test(p)) continue;
+    const norm = p.startsWith("http") || p.startsWith("/") ? p : `/${p}`;
+    const tpl = /\$?\{[^}]+\}/.test(norm) ? norm.replace(/\$?\{[^}]+\}/, "{permitNumber}") : `${norm.replace(/\/+$/, "")}/{permitNumber}`;
+    out.add(tpl);
+  }
+  for (const fallback of ["/api/Permit/View/{permitNumber}", "/api/Permit/{permitNumber}", "/api/permits/{permitNumber}", "/api/Permit/GetPermit?permitNumber={permitNumber}", "/api/Permit/Details/{permitNumber}"]) out.add(fallback);
+  return [...out];
 }
 
 /** Case-insensitive deep key lookup in an unknown JSON document. */
@@ -156,23 +179,79 @@ export const runPermits: TrackRunner = async (ctx, source) => {
   mkdirSync(destDir, { recursive: true });
   const headers = { "User-Agent": BROWSER_UA, Accept: "application/json,text/html,*/*", Referer: JAXEPICS_VIEW };
 
-  // 1. discover API
+  // 1. discover API: fetch the shell, then EVERY script it references (the main-*.js bundle holds the literals)
   let apiPaths: string[] = JSON.parse((await getTrackState(ctx.conn, source.track, STATE_API)) ?? "[]") as string[];
-  const shell = await getJson<unknown>(`${JAXEPICS_VIEW}B-25-279425.000`, { headers, retries: 1, timeoutMs: 30_000 });
+  const knownPermit = ctx.env.PERMITS_KNOWN ?? "B-25-279425.000";
+  const shell = await getJson<unknown>(`${JAXEPICS_VIEW}${knownPermit}`, { headers, retries: 1, timeoutMs: 30_000 });
+  const bundleNotes: { url: string; status: number; bytes: number; literals: number }[] = [];
   if (shell.text) {
     const scripts = [...shell.text.matchAll(/<script[^>]+src="([^"]+\.js)"/g)].map((m) => m[1] as string);
-    for (const s of scripts.slice(0, 6)) {
+    const shellHits = discoverApiPaths(shell.text);
+    apiPaths = [...new Set([...apiPaths, ...shellHits])];
+    for (const s of scripts) {
       const url = s.startsWith("http") ? s : new URL(s, "https://jaxepics.coj.net/").toString();
-      const js = await getJson<unknown>(url, { headers, retries: 1, timeoutMs: 60_000 });
-      if (js.text) apiPaths = [...new Set([...apiPaths, ...discoverApiPaths(js.text)])];
+      const js = await getJson<unknown>(url, { headers, retries: 2, timeoutMs: 120_000 });
+      const hits = js.text ? discoverApiPaths(js.text) : [];
+      bundleNotes.push({ url, status: js.status, bytes: js.text?.length ?? 0, literals: hits.length });
+      if (hits.length > 0) {
+        apiPaths = [...new Set([...apiPaths, ...hits])];
+        writeFileSync(join(destDir, `bundle-${url.split("/").pop()}.literals.json`), JSON.stringify(hits, null, 2));
+      }
     }
-    writeFileSync(join(destDir, "discovered-api.json"), JSON.stringify({ discoveredAt: new Date().toISOString(), scripts, apiPaths }, null, 2));
+    writeFileSync(join(destDir, "discovered-api.json"), JSON.stringify({ discoveredAt: new Date().toISOString(), shellUrl: `${JAXEPICS_VIEW}${knownPermit}`, scripts, bundles: bundleNotes, apiPaths }, null, 2));
     await setTrackState(ctx.conn, source.track, STATE_API, JSON.stringify(apiPaths), ctx.runId);
+  } else {
+    result.limitations.push(`shell page ${JAXEPICS_VIEW}${knownPermit} not fetched (HTTP ${shell.status}${shell.error ? `, ${shell.error}` : ""})`);
   }
   result.notes.apiPathsDiscovered = apiPaths;
-  const permitPaths = apiPaths.filter((p) => /permit/i.test(p));
-  const candidates = permitPaths.length > 0 ? permitPaths : ["/api/Permit/View/{permitNumber}", "/api/Permit/{permitNumber}", "/api/permits/{permitNumber}"];
+  result.notes.bundles = bundleNotes;
+  const candidates = permitEndpointCandidates(apiPaths);
   result.notes.candidateEndpoints = candidates;
+
+  // 1b. probe each candidate with the known permit BEFORE enumerating; record every attempt
+  const attempts: { endpoint: string; url: string; status: number; bytes: number; json: boolean }[] = [];
+  let probedEndpoint: string | null = null;
+  const hosts = [...new Set([JAXEPICS_API_HOST, ...apiPaths.filter((p) => p.startsWith("http")).map((p) => new URL(p).origin)])];
+  for (const tpl of candidates) {
+    if (probedEndpoint !== null) break;
+    const urls = tpl.startsWith("http") ? [tpl.replace("{permitNumber}", encodeURIComponent(knownPermit))] : hosts.map((h) => `${h}${tpl.replace("{permitNumber}", encodeURIComponent(knownPermit))}`);
+    for (const url of urls) {
+      const r = await getJson<unknown>(url, { headers, retries: 0, timeoutMs: 30_000 });
+      const isJson = r.ok && r.body !== null && typeof r.body === "object";
+      attempts.push({ endpoint: tpl, url, status: r.status, bytes: r.text?.length ?? 0, json: isJson });
+      if (isJson) {
+        probedEndpoint = url.replace(encodeURIComponent(knownPermit), "{permitNumber}");
+        writeFileSync(join(destDir, "known-permit-sample.json"), JSON.stringify({ url, permit: knownPermit, body: r.body }, null, 2));
+        break;
+      }
+      await sleep(300);
+    }
+  }
+  result.notes.probeAttempts = attempts;
+  result.limitations.push(`endpoint probe with ${knownPermit}: ${attempts.map((a) => `${a.url} -> ${a.status}${a.json ? " json" : ""} (${a.bytes} B)`).join("; ") || "no candidates"}`);
+  if (probedEndpoint !== null) result.notes.probedEndpoint = probedEndpoint;
+  // Constrained source (decision 2026-08-21): the Angular shell loads its chunks dynamically (static grep finds
+  // no API literals) and every https://jaxepicsapi.coj.net/api/... guess answers Akamai "Access Denied" 403 even
+  // with a browser UA; search/reports need a login; no open permit dataset exists; a public-records request is
+  // the documented path. One cheap discovery + probe per run is kept as evidence; enumeration only runs when a
+  // probe actually returns JSON (or PERMITS_BROWSER=1 is wired to a headless-browser fetch in a later story).
+  if (probedEndpoint === null) {
+    result.notes.constrained = true;
+    result.notes.throughput = { hits: 0, misses: 0, errors: 0, minutes: 0, permitsPerMin: 0 };
+    result.limitations.push(
+      "constrained: JaxEPICS API behind Akamai WAF (403 Access Denied on every /api guess); search/reports require login; no open dataset; public-records request (PRR) is the documented path; enumeration skipped, cursor not advanced",
+    );
+    await stagePermits(ctx.conn, []);
+    result.rowsStaged = 0;
+    const hashedEmpty = await hashStaging(ctx.conn, "staging.permits", {
+      sourceSystem: source.sourceSystem, sourceUrl: JAXEPICS_VIEW, sourceArtifact: "permits/discovered-api.json", sourceSha256: null, fetchedAt: new Date().toISOString(), runId: ctx.runId,
+    });
+    result.merge = await mergeStaging(ctx.conn, { target: "permits", staging: hashedEmpty, keys: ["permit_no"] });
+    result.status = "completed";
+    result.finishedAt = new Date().toISOString();
+    log.warn("permits_constrained", { attempts: attempts.length, bundles: bundleNotes.length });
+    return result;
+  }
 
   // 2. enumerate window
   const window = permitWindow(ctx.window, Number(ctx.env.PERMITS_WINDOW ?? 300));
@@ -185,9 +264,9 @@ export const runPermits: TrackRunner = async (ctx, source) => {
   let hits = 0;
   let misses = 0;
   let errors = 0;
-  let usedEndpoint: string | null = null;
+  let usedEndpoint: string | null = probedEndpoint;
   const rows: PermitRow[] = [];
-  await mapLimit(numbers, 2, 500, async (no) => {
+  await mapLimit(probedEndpoint === null && attempts.length > 0 ? numbers.slice(0, 20) : numbers, 2, 500, async (no) => {
     const tried = usedEndpoint !== null ? [usedEndpoint] : candidates;
     for (const tpl of tried) {
       const path = tpl.replace(/\$?\{[^}]+\}/, encodeURIComponent(no));
@@ -219,9 +298,10 @@ export const runPermits: TrackRunner = async (ctx, source) => {
   result.notes.usedEndpoint = usedEndpoint;
   result.limitations.push(`measured throughput: ${hits} permits in ${Math.round(elapsedMin * 10) / 10} min (${misses} misses, ${errors} errors) at concurrency 2 / 500 ms`);
   if (usedEndpoint === null) {
-    result.limitations.push(`no JSON endpoint answered for ${prefix}-${yy}-${startSeq}..; candidates tried: ${candidates.join(", ")}`);
+    result.limitations.push(`no JSON endpoint answered for ${prefix}-${yy}-${startSeq}..; candidates tried: ${candidates.join(", ")}; cursor NOT advanced`);
+  } else {
+    await setTrackState(ctx.conn, source.track, STATE_CURSOR, String(startSeq + window - 1), ctx.runId);
   }
-  await setTrackState(ctx.conn, source.track, STATE_CURSOR, String(startSeq + window - 1), ctx.runId);
   await stagePermits(ctx.conn, rows);
   result.rowsStaged = Number(await scalar(ctx.conn, "SELECT count(*) FROM staging.permits"));
   result.notes.roofPermits = Number(await scalar(ctx.conn, "SELECT count(*) FROM staging.permits WHERE is_roof_permit"));

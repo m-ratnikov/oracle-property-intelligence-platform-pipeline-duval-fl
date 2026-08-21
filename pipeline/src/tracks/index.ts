@@ -6,6 +6,7 @@ import { runCojParcels } from "./coj_parcels.js";
 import { runContractors } from "./contractors.js";
 import { runGeometry } from "./geometry.js";
 import { runLinks } from "./links.js";
+import { runPaDetail } from "./pa_detail.js";
 import { runPermits } from "./permits.js";
 import { runPlaces } from "./places.js";
 import { runSales } from "./sales.js";
@@ -27,4 +28,5 @@ export const TRACK_RUNNERS: Partial<Record<TrackName, TrackRunner>> = {
   coj_addresses: runCojAddresses,
   contractors: runContractors,
   permits: runPermits,
+  pa_detail: runPaDetail,
 };

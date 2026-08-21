@@ -57,7 +57,9 @@ async function extraNotes(conn: DuckDBConnection, track: TrackName): Promise<Rec
     case "links":
       return { owners: await count(conn, "owners") };
     case "permits":
-      return (await count(conn, "permits")) > 0 ? { roof_permits: await n("SELECT count(*) AS n FROM permits WHERE is_roof_permit") } : {};
+      return (await count(conn, "permits")) > 0
+        ? { roof_permits: await n("SELECT count(*) AS n FROM permits WHERE is_roof_permit") }
+        : { constrained: true, reason: "JaxEPICS API behind Akamai WAF; search/reports require login; no open dataset; PRR is the documented path" };
     case "coj_parcels":
       return (await count(conn, "coj_parcels")) > 0 ? { matched_to_nal: await n("SELECT count(*) AS n FROM coj_parcels WHERE parcel_id IS NOT NULL") } : {};
     default:

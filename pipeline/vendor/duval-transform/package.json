@@ -1,0 +1,6 @@
+{
+  "name": "duval-transform-vendored",
+  "private": true,
+  "type": "commonjs",
+  "description": "Vendored Elephant Duval PA transform scripts (CommonJS); see NOTICE"
+}

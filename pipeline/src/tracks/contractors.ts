@@ -1,3 +1,4 @@
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { all, duckPath, q, scalar } from "../db.js";
 import { downloadArtifact } from "../download.js";
@@ -13,6 +14,57 @@ export const DBPR_EXTRACTS = [
 
 /** Roofing occupation codes in the CILB extracts (CCC certified roofing, RC registered roofing). */
 export const ROOFING_CODES = ["CCC", "RC", "CC", "RCC"];
+
+/**
+ * DBPR extracts are quote/comma files that break DuckDB's dialect sniffer (stray quotes, ragged rows,
+ * non-UTF8 bytes). Read them with an explicit dialect, no sniffing, rejects tolerated and counted.
+ */
+export function dbprReadCsv(csvPath: string, columns: string[]): string {
+  // auto_detect = false + an explicit all-VARCHAR column list skips the dialect sniffer entirely
+  // (the sniffer rejects files with an unterminated quote even when delim/quote/escape are given)
+  const cols = columns.map((c) => `'${c.replace(/'/g, "''")}': 'VARCHAR'`).join(", ");
+  return `read_csv(${q(duckPath(csvPath))}, auto_detect = false, columns = {${cols}}, delim = ',', quote = '"', escape = '"', header = true,
+    strict_mode = false, ignore_errors = true, null_padding = true, max_line_size = 4000000)`;
+}
+
+/** Read the header line of a CSV (comma separated, quotes stripped) without DuckDB. */
+export function readCsvHeader(csvPath: string): string[] {
+  const buf = readFileSync(csvPath, { encoding: "utf8", flag: "r" });
+  const firstLine = buf.slice(0, buf.indexOf("
+") === -1 ? buf.length : buf.indexOf("
+")).replace(/$/, "");
+  const out: string[] = [];
+  let cur = "";
+  let inQ = false;
+  for (const ch of firstLine) {
+    if (ch === '"') inQ = !inQ;
+    else if (ch === "," && !inQ) {
+      out.push(cur.trim());
+      cur = "";
+    } else cur += ch;
+  }
+  out.push(cur.trim());
+  return out.map((c, i) => (c.length === 0 ? `column${i}` : c));
+}
+
+/** Rows the tolerant reader dropped: physical data lines minus parsed rows (DuckDB's rejects table does
+ *  not record every non-strict drop, so count from the raw line total). */
+export async function dbprRejectedCount(conn: import("@duckdb/node-api").DuckDBConnection, csvPath: string, parsedRows: number): Promise<number> {
+  const lines = Number(await scalar(conn, `SELECT count(*) FROM read_csv(${q(duckPath(csvPath))}, header = false, columns = {'raw': 'VARCHAR'}, delim = chr(1), quote = '', escape = '', ignore_errors = true)`));
+  return Math.max(0, lines - 1 - parsedRows);
+}
+
+/** If the file is not valid UTF-8, transcode latin-1 -> UTF-8 in place (returns true when transcoded). */
+export function ensureUtf8(csvPath: string): boolean {
+  const buf = readFileSync(csvPath);
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(buf);
+    return false;
+  } catch {
+    writeFileSync(csvPath, Buffer.from(buf.toString("latin1"), "utf8"));
+    return true;
+  }
+}
 
 /** Resolve a header name case/space-insensitively (DBPR headers vary in casing and spacing). */
 export function pickColumn(columns: string[], ...candidates: string[]): string | null {
@@ -50,7 +102,7 @@ export function contractorSelectSql(columns: string[], csvPath: string, extractN
            ${date("Expiration Date", "ExpirationDate", "Expires")} AS expiration_date,
            ${q(extractName)} AS extract_file,
            to_json(r) AS source_payload
-    FROM read_csv(${q(duckPath(csvPath))}, header = true, all_varchar = true, ignore_errors = true) r`;
+    FROM ${dbprReadCsv(csvPath, columns)} r`;
 }
 
 /**
@@ -70,11 +122,17 @@ export const runContractors: TrackRunner = async (ctx, source) => {
   for (const ex of DBPR_EXTRACTS) {
     const artifact = await downloadArtifact({ url: ex.url, destDir, artifactsRoot: ctx.paths.artifactsDir, fileName: `${ex.name}.csv`, force: ctx.force, logger: log, fetchImpl: headersFetch });
     if (firstArtifact === null) firstArtifact = artifact;
-    const columns = (await all<{ column_name: string }>(ctx.conn, `DESCRIBE SELECT * FROM read_csv(${q(duckPath(artifact.path))}, header = true, all_varchar = true, ignore_errors = true)`)).map((r) => r.column_name);
+    if (artifact.status !== "unchanged" && ensureUtf8(artifact.path)) {
+      result.limitations.push(`${ex.name}: file was not valid UTF-8; transcoded from latin-1`);
+    }
+    const columns = readCsvHeader(artifact.path);
     result.notes[`${ex.name}_columns`] = columns;
     await ctx.conn.run(`CREATE OR REPLACE TABLE staging.${ex.name} AS ${contractorSelectSql(columns, artifact.path, ex.name)}`);
     const n = Number(await scalar(ctx.conn, `SELECT count(*) FROM staging.${ex.name}`));
     result.notes[`${ex.name}_rows_statewide`] = n;
+    const rejected = await dbprRejectedCount(ctx.conn, artifact.path, n);
+    result.notes[`${ex.name}_rows_rejected`] = rejected;
+    if (rejected > 0) result.limitations.push(`${ex.name}: ${rejected} malformed CSV rows rejected (ragged/quoted lines), see DuckDB rejects`);
     result.notes[`${ex.name}_sha256`] = artifact.sha256;
     parts.push(`SELECT * FROM staging.${ex.name}`);
     log.info("extract_staged", { extract: ex.name, rows: n, bytes: artifact.bytes, status: artifact.status });

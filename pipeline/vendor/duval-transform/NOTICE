@@ -1,0 +1,7 @@
+These scripts are copied unchanged from the Elephant "Counties-trasform-scripts/duval" work
+(refs/duval-transform in the prism-task workspace): data_extractor.js, layoutMapping.js,
+ownerMapping.js, structureMapping.js, utilityMapping.js. They parse the Duval Property Appraiser
+Detail.aspx page (input.html + unnormalized_address.json in the working directory) into
+lexicon-style JSON (owners/*.json, data/*.json). The pipeline invokes them per fetched parcel from
+tracks/pa_detail.ts; they are not modified here. Upstream: github.com/elephant-xyz (Elephant oracle
+transform scripts for Duval County, FL).

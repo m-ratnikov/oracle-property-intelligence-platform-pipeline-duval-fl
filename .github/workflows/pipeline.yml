@@ -36,6 +36,7 @@ env:
   NODE_OPTIONS: --max-old-space-size=6144
   SUNBIZ_WINDOW_DAYS: "14"
   PERMITS_WINDOW: "300"
+  PA_DETAIL_WINDOW: "300"
 
 jobs:
   run:
@@ -63,16 +64,9 @@ jobs:
       - name: Restore source artifacts + DuckDB from the previous run
         uses: actions/cache/restore@v4
         with:
-          path: |
-            .data/artifacts/appraisal
-            .data/artifacts/sales
-            .data/artifacts/geometry
-            .data/artifacts/transit
-            .data/artifacts/water
-            .data/artifacts/businesses
-            .data/artifacts/contractors
-            .data/artifacts/permits
-            .data/duval.duckdb
+          # one stable path entry: GitHub derives the cache version from the path list, so a changed
+          # list would orphan every earlier cache (restore-keys cannot cross versions)
+          path: .data
           key: duval-data-${{ github.run_id }}
           restore-keys: |
             duval-data-
@@ -95,6 +89,9 @@ jobs:
           if [ -n "$WINDOW" ]; then ARGS="$ARGS --window $WINDOW"; fi
           pnpm run pipeline -- $ARGS
 
+      - name: Export open-data consolidation (changed properties only; rebuilds shards/index/manifest)
+        run: pnpm run export:consolidation -- --since changed --shard-size 10000
+
       - name: Publish to Filebase / IPFS (dry-run when secrets are absent)
         env:
           FILEBASE_ACCESS_KEY: ${{ secrets.FILEBASE_ACCESS_KEY }}
@@ -103,9 +100,11 @@ jobs:
           PUBLISH: ${{ github.event.inputs.publish || 'true' }}
         run: |
           if [ -n "$FILEBASE_ACCESS_KEY" ] && [ "$PUBLISH" = "true" ]; then
+            pnpm run publish:open-data -- --publish
             pnpm run publish:ipfs -- --publish
           else
             echo "Filebase secrets not configured (or publish=false): dry-run only"
+            pnpm run publish:open-data
             pnpm run publish:ipfs
           fi
 
@@ -113,16 +112,9 @@ jobs:
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: |
-            .data/artifacts/appraisal
-            .data/artifacts/sales
-            .data/artifacts/geometry
-            .data/artifacts/transit
-            .data/artifacts/water
-            .data/artifacts/businesses
-            .data/artifacts/contractors
-            .data/artifacts/permits
-            .data/duval.duckdb
+          # one stable path entry: GitHub derives the cache version from the path list, so a changed
+          # list would orphan every earlier cache (restore-keys cannot cross versions)
+          path: .data
           key: duval-data-${{ github.run_id }}
 
       - name: Upload publish artifacts
@@ -132,6 +124,7 @@ jobs:
           name: duval-publish-${{ github.run_id }}
           path: |
             .data/artifacts/publish/duval/
+            !.data/artifacts/publish/duval/open-data/properties
             .data/artifacts/permits/discovered-api.json
           if-no-files-found: warn
           retention-days: 14

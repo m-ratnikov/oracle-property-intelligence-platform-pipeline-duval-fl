@@ -1,0 +1,61 @@
+{
+  "run_id": "01M0HQQM3549YJPMA3AQZ2H0XS",
+  "county": "duval",
+  "started_at": "2026-08-21 08:41:51.974",
+  "finished_at": "2026-08-21 08:42:47.046",
+  "status": "completed",
+  "trigger": "consolidation",
+  "git_sha": null,
+  "tracks": [
+    "consolidation"
+  ],
+  "window": "all",
+  "sources": [
+    {
+      "track": "consolidation",
+      "source_system": "duval_consolidation",
+      "target_table": "consolidation_state",
+      "source_url": "derived",
+      "rows_staged": 20000,
+      "inserted": 20000,
+      "updated": 0,
+      "unchanged": 0,
+      "missing_in_source": 0,
+      "table_total_after": 20000,
+      "status": "completed",
+      "started_at": "2026-08-21T08:41:51.974Z",
+      "finished_at": "2026-08-21T08:42:47.046Z",
+      "limitations": [],
+      "notes": {
+        "shards": 2,
+        "totalBytes": 87930063,
+        "indexCid": "QmRZi1pDH2dRkVcY81uWChk384GiLkZmGLUECUBj2D72Di",
+        "manifestCid": "QmasHdNH8j5tfUxEpvdqr4M8Bu8Q8FhLxpZpsXb73EDFQd",
+        "ms": 45821,
+        "limit": 20000,
+        "since": "all"
+      }
+    }
+  ],
+  "limitations": [],
+  "totals": {
+    "consolidation_state": 20000,
+    "totalBytes": 87930063,
+    "shards": 2
+  },
+  "artifacts": {
+    "openData": {
+      "outDir": "D:\\__softwisery\\wisery\\prism-task\\data\\artifacts\\publish\\duval\\open-data",
+      "indexCid": "QmRZi1pDH2dRkVcY81uWChk384GiLkZmGLUECUBj2D72Di",
+      "manifestCid": "QmasHdNH8j5tfUxEpvdqr4M8Bu8Q8FhLxpZpsXb73EDFQd",
+      "propertyCount": 20000,
+      "totalBytes": 87930063,
+      "shards": 2
+    },
+    "queryTable": {
+      "rows": 404023,
+      "propertyCidFilled": 20000
+    }
+  },
+  "error": null
+}

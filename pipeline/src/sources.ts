@@ -14,7 +14,8 @@ export type TrackName =
   | "coj_parcels"
   | "coj_addresses"
   | "contractors"
-  | "permits";
+  | "permits"
+  | "pa_detail";
 
 export interface SourceDef {
   track: TrackName;
@@ -232,9 +233,28 @@ export const SOURCES: Record<TrackName, SourceDef> = {
     requiresUsEgress: true,
     probeUrl: "https://jaxepics.coj.net/Permit/View/B-25-279425.000",
     limitations: [
-      "No open-data permit layer; search/reports need login; enumeration only",
-      "US egress only; concurrency 2; 500 ms delay; throughput recorded per run",
-      "API shape discovered from the Angular bundle at run time; unknown fields kept in source_payload",
+      "Constrained source: JaxEPICS API behind Akamai WAF (HTTP 403 Access Denied on every /api guess, browser UA included); search/reports require login; no open permit dataset; public-records request is the documented path",
+      "US egress only; one cheap discovery + probe per run is kept as evidence (status codes recorded); enumeration runs only when a probe returns JSON",
+      "Angular shell loads chunks dynamically, so static literal discovery finds no API paths",
+    ],
+  },
+  pa_detail: {
+    track: "pa_detail",
+    coverageSource: "pa_detail",
+    sourceSystem: "duval_pa_detail",
+    title: "Duval Property Appraiser Detail.aspx pages (seed order, bounded window, lexicon transform)",
+    url: "https://paopropertysearch.coj.net/Basic/Detail.aspx?RE=",
+    format: "html (ASP.NET); vendored Elephant transform -> lexicon JSON",
+    cadence: "continuous; --window parcels per run from a persistent seed cursor",
+    targetTable: "pa_detail_buildings",
+    implemented: true,
+    requiresUsEgress: true,
+    probeUrl: "https://paopropertysearch.coj.net/Basic/Detail.aspx?RE=0020608295R",
+    knownExpectedCount: 398324,
+    limitations: [
+      "US egress only (paopropertysearch.coj.net blocks non-US and cloud IPs); concurrency 2, 400 ms delay",
+      "Slow source by design: ~300 pages per run; full seed (398,324 parcels) needs many runs; throughput recorded per run",
+      "Lexicon transform runs the vendored Elephant scripts per page; owners/*.json prerequisites come from the mapping scripts on the same page",
     ],
   },
 };
@@ -243,7 +263,7 @@ export const ALL_TRACKS = Object.keys(SOURCES) as TrackName[];
 /** Tracks every scheduled run executes (US-only ones self-skip outside the US). */
 export const DEFAULT_TRACKS: TrackName[] = [
   "appraisal", "sales", "geometry", "transit", "water", "places", "businesses",
-  "coj_parcels", "coj_addresses", "contractors", "permits", "links",
+  "coj_parcels", "coj_addresses", "contractors", "permits", "pa_detail", "links",
 ];
 /** Reachable from anywhere. */
 export const LOCAL_TRACKS: TrackName[] = ["appraisal", "sales", "geometry", "transit", "water", "places", "businesses", "links"];
