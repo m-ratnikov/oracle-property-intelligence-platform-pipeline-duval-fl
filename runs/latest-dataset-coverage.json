@@ -1,6 +1,6 @@
 {
   "county": "duval",
-  "exportedAt": "2026-08-21T07:34:50.731Z",
+  "exportedAt": "2026-08-21T08:30:49.909Z",
   "datasets": [
     {
       "county": "duval",
@@ -22,7 +22,7 @@
         "No roof attributes in the bulk roll (ACT_YR_BLT/EFF_YR_BLT used as roof-age proxy)",
         "Sale history limited to the two most recent sales per parcel (SALE_*1/2)"
       ],
-      "last_run_id": "01M0HKSVY2DYQN00WGHCAGM5AY",
+      "last_run_id": "01M0HQ2FTEJAGJ5HCZSYDASDZC",
       "last_run_status": "completed"
     },
     {
@@ -44,7 +44,7 @@
         "Sale dates carry year+month only (day unknown; stored as first of month)",
         "Monthly PA sales files (jacksonville.gov data offerings) rotate GUID URLs and are US-egress only; not yet wired"
       ],
-      "last_run_id": "01M0HKSVY2DYQN00WGHCAGM5AY",
+      "last_run_id": "01M0HQ2FTEJAGJ5HCZSYDASDZC",
       "last_run_status": "completed"
     },
     {
@@ -66,7 +66,7 @@
         "192 MB archive; centroids computed from polygons (not rooftop points)",
         "Parcels present in NAL but missing from the shapefile get no coordinates"
       ],
-      "last_run_id": "01M0HKSVY2DYQN00WGHCAGM5AY",
+      "last_run_id": "01M0HQ2FTEJAGJ5HCZSYDASDZC",
       "last_run_status": "completed",
       "parcels_total": 404023,
       "parcels_with_coordinates": 403813
