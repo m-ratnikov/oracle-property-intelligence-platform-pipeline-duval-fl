@@ -10,14 +10,30 @@ jobs:
           curl -s --max-time 10 https://ipinfo.io/json | head -c 200; echo
           for u in \
             "https://paopropertysearch.coj.net/Basic/Search.aspx" \
-            "https://maps.coj.net/coagis/rest/services?f=json" \
-            "https://opendata.coj.net/" \
-            "https://data.jacksonville.gov" \
-            "https://www2.myfloridalicense.com/" \
-            "https://dos.fl.gov/sunbiz/" \
-            "https://sftp.floridados.gov" \
-            "https://floridarevenue.com/property/Pages/DataPortal.aspx" \
-            "https://www.jtafla.com/" \
-            "https://duvalpa.com/" ; do
-            curl -s -o /dev/null -w "%{http_code} %{time_total}s $u\n" --max-time 20 "$u" || echo "ERR $u"
+            "https://maps.coj.net/coj/rest/services/CityBiz/Parcels/MapServer/0?f=pjson" \
+            "https://maps.coj.net/coj/rest/services/ERAT/EratDashboard_3000/MapServer/41?f=pjson" \
+            "https://www.jacksonville.gov/departments/property-appraiser/data-offerings" \
+            "https://jaxepics.coj.net/Permit/View/B-25-279425.000" \
+            "https://www2.myfloridalicense.com/sto/file_download/extracts/cilb_certified.csv" \
+            "https://floridarevenue.com/property/Pages/DataPortal.aspx" ; do
+            curl -s -o /dev/null -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36" -w "%{http_code} %{time_total}s %{size_download}B $u\n" --max-time 25 "$u" || echo "ERR $u"
           done
+      - name: Sample PA detail page (roof fields?)
+        run: |
+          mkdir -p out
+          curl -s -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36" --max-time 30 "https://paopropertysearch.coj.net/Basic/Detail.aspx?RE=0000010005R" -o out/detail_0000010005R.html -w "detail %{http_code} %{size_download}B\n"
+          curl -s -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36" --max-time 30 "https://paopropertysearch.coj.net/Basic/Detail.aspx?RE=0604480000" -o out/detail_0604480000.html -w "detail2 %{http_code} %{size_download}B\n"
+          python3 - <<'PY'
+          import re,glob
+          for f in glob.glob('out/*.html'):
+              h=open(f,encoding='utf-8',errors='ignore').read()
+              txt=re.sub(r'<[^>]+>',' ',h); txt=re.sub(r'\s+',' ',txt)
+              print('==',f,len(h))
+              for kw in ['Roof','Year Built','Effective','Sale','Owner','Mailing','Heating','Stories','Baths','Exterior Wall','Element','Building']:
+                  for m in list(re.finditer(kw,txt))[:2]:
+                      print('  ',kw,'->',txt[max(0,m.start()-40):m.start()+140])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pa-detail-sample
+          path: out/
