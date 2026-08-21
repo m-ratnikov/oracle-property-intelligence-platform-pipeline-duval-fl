@@ -146,6 +146,50 @@ function instructionsFor(provider: AgentProvider): (system: string) => SystemMod
 }
 
 /**
+ * OpenRouter free models draw on a shared pool that returns 429 without
+ * warning. Measured on 2026-08-21: of six free models, four answered and two
+ * (GLM 5.2 and Gemma 4 31B) came back "temporarily rate-limited upstream"
+ * within the same minute, and which two it is rotates.
+ *
+ * A single free model is therefore not a dependable default, and retrying it is
+ * pointless because the pool, not the account, is exhausted. OpenRouter answers
+ * this with a `models` array: list alternates in priority order and it moves on
+ * by itself on rate limiting or downtime, billing whatever actually ran.
+ *
+ * The AI SDK has no first class field for a provider specific body parameter,
+ * so it is merged into the outgoing JSON here. Only `:free` models get the
+ * treatment: someone who brought a key and deliberately chose a paid model
+ * should get that model or an error, not a silent substitution.
+ */
+function openRouterFallbackFetch(modelId: string): typeof globalThis.fetch | undefined {
+  if (!modelId.endsWith(":free")) return undefined;
+
+  const alternates = (findProvider("openrouter")?.models ?? [])
+    .map((model) => model.id)
+    .filter((id) => id.endsWith(":free") && id !== modelId);
+  if (alternates.length === 0) return undefined;
+
+  // OpenRouter rejects more than three entries outright:
+  //   400 "'models' array must have 3 items or fewer."
+  // So it is the chosen model plus the next two free models in registry order,
+  // not the whole list. Registry order is therefore also the fallback order.
+  const chain = [modelId, ...alternates].slice(0, 3);
+
+  return async (input, init) => {
+    if (init?.body && typeof init.body === "string") {
+      try {
+        const body = JSON.parse(init.body) as Record<string, unknown>;
+        body.models = chain;
+        init = { ...init, body: JSON.stringify(body) };
+      } catch {
+        // Not JSON we understand. Send it untouched rather than break the call.
+      }
+    }
+    return globalThis.fetch(input, init);
+  };
+}
+
+/**
  * Build the provider client. One branch per registry entry.
  *
  * Every provider package here accepts a plain `apiKey` string, which is what
@@ -193,6 +237,7 @@ async function createProviderModel(
           "HTTP-Referer": "https://duval-oracle-ui.vercel.app",
           "X-Title": "Duval County property intelligence",
         },
+        fetch: openRouterFallbackFetch(modelId),
       })(modelId);
     }
     case "huggingface": {

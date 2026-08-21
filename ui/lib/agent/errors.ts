@@ -101,6 +101,9 @@ export function providerSpecificHint(safeText: string): string | null {
   if (/data policy|no endpoints found/i.test(safeText)) {
     return "OpenRouter routes its free models only to providers that may train on your prompt, so a free model needs prompt training enabled at openrouter.ai/settings/privacy. Turn it on, or pick a provider whose free tier does not have that condition.";
   }
+  if (/rate-limited upstream|shared pool/i.test(safeText)) {
+    return "This is the free model pool being busy, not your key and not your daily quota. Free models are already sent with the rest of the free list as fallbacks, so every one of them was busy at once. Wait a moment and ask again, or bring a key for a provider with a dedicated free tier.";
+  }
   return null;
 }
 
@@ -126,7 +129,10 @@ export function classifyProviderError(error: unknown, safeText: string, source: 
   if (looksLikeCredential) {
     return new AgentCredentialError(safeText, source);
   }
-  if (status === 429) {
+  // The status code does not always survive the SDK's retry wrapper, so the
+  // text is checked too. A shared pool 429 from OpenRouter arrives as a generic
+  // "Provider returned error" with the real reason in the response body.
+  if (status === 429 || /rate[\s-]?limit|too many requests|quota exceeded|\b429\b/i.test(safeText)) {
     return new AgentRateLimitError(safeText, 30);
   }
   return new AgentProviderError(safeText);

@@ -168,17 +168,27 @@ test.describe("MCP page", () => {
 });
 
 test.describe("agent shell", () => {
-  test("shows an honest not wired state rather than inventing an answer", async ({ page }) => {
+  test("says which model is answering and on whose credential", async ({ page }) => {
     await page.goto("/agent");
-    // Nothing stored in this browser and no server key: the page says so and
-    // offers the way in, rather than a badge naming one vendor's env var.
-    await expect(page.getByText("no model configured", { exact: true })).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByRole("link", { name: "add your own key" })).toBeVisible();
+    // A visitor who has configured nothing gets the deployment's own free
+    // model, and the page says so rather than leaving them to guess what
+    // produced the answer.
+    await expect(page.getByText("server default", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/^openrouter:/).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: "change" })).toBeVisible();
+  });
 
-    await page.getByRole("button", { name: /Which properties have roofs older/ }).click();
-    // The route refuses rather than inventing an answer, and points at settings.
-    await expect(page.getByText(/agent not configured/).first()).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText(/settings page/).first()).toBeVisible();
+  test("refuses honestly when the caller sends a credential the provider rejects", async ({ page }) => {
+    // The 501 path is unreachable now that a server key is configured, so the
+    // honest failure worth covering is the one a visitor can actually cause:
+    // a key their provider will not accept. It must read as a clean message,
+    // never a stack trace, and never echo the key back.
+    const bad = "sk-or-v1-notARealKeyAtAll000000000000";
+    await page.goto("/settings");
+    await page.locator('input[type="password"]').fill(bad);
+    await page.getByRole("button", { name: "test credentials" }).click();
+    await expect(page.getByText(/credentials rejected/i)).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText(bad)).toHaveCount(0);
   });
 });
 
@@ -190,10 +200,14 @@ test.describe("model settings", () => {
     for (const label of ["OpenRouter", "Google AI Studio (Gemini)", "Groq", "Cerebras", "Hugging Face", "Vercel AI Gateway", "Anthropic", "Amazon Bedrock"]) {
       await expect(page.getByText(label).first()).toBeVisible();
     }
-    await expect(page.getByText("nothing configured", { exact: true })).toBeVisible();
+    await expect(page.getByText("server default", { exact: true })).toBeVisible();
 
     // The warning has to be in plain words, not buried in a tooltip.
     await expect(page.getByText(/saved in .*localStorage.* in this browser/i).first()).toBeVisible();
+
+    // Pick a model that is NOT the server default, so the agent page proves the
+    // stored credential actually won rather than coincidentally matching.
+    await page.getByRole("button", { name: /GPT-OSS 20B \(free\)/ }).click();
 
     // The key field is a password input, so it is deliberately not a textbox role.
     await page.locator('input[type="password"]').fill("test-key-not-a-real-credential-0000");
@@ -206,11 +220,12 @@ test.describe("model settings", () => {
 
     // The agent page reads the same store and names the model that will answer.
     await page.goto("/agent");
-    await expect(page.getByText("openrouter:z-ai/glm-5.2:free", { exact: true })).toBeVisible();
+    await expect(page.getByText("openrouter:openai/gpt-oss-20b:free", { exact: true })).toBeVisible();
 
     await page.goto("/settings");
     await page.getByRole("button", { name: "clear stored key" }).click();
-    await expect(page.getByText("nothing configured", { exact: true })).toBeVisible();
+    // Back to the deployment's own model, not to nothing.
+    await expect(page.getByText("server default", { exact: true })).toBeVisible();
     expect(await page.evaluate(() => window.localStorage.getItem("duval-oracle.agent.llm"))).toBeNull();
   });
 });

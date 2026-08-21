@@ -75,30 +75,44 @@ export const PROVIDERS: readonly ProviderDefinition[] = [
     envKeys: ["OPENROUTER_API_KEY"],
     models: [
       {
-        id: "z-ai/glm-5.2:free",
-        label: "GLM 5.2 (free)",
-        free: true,
-        notes:
-          "Open weight, 256k context, priced at $0.00 per token on OpenRouter with tool calling declared. The default here because it is the strongest free tool caller of the set on paper. Quality on this five tool loop is unverified.",
-      },
-      {
         id: "nvidia/nemotron-3-super-120b-a12b:free",
         label: "Nemotron 3 Super 120B (free)",
         free: true,
-        notes: "NVIDIA open weight, 262k context, $0.00 per token with tool calling declared. Bigger and slower than GLM.",
+        notes:
+          "NVIDIA open weight, 262k context, $0.00 per token, tool calling confirmed against the live API on 2026-08-21. The default: the largest free model that answered on first try rather than a shared pool 429.",
+      },
+      {
+        id: "nvidia/nemotron-3.5-lightning:free",
+        label: "Nemotron 3.5 Lightning (free)",
+        free: true,
+        notes: "NVIDIA open weight, one million token context, $0.00 per token. Fastest of the set, confirmed answering live.",
       },
       {
         id: "openai/gpt-oss-20b:free",
         label: "GPT-OSS 20B (free)",
         free: true,
         notes:
-          "Apache 2.0, the most genuinely open licensed model here, 131k context, $0.00 per token. Smallest of the four, so weakest at planning a multi step loop.",
+          "Apache 2.0, the most genuinely open licensed model here, 131k context, $0.00 per token, tool calling confirmed live. Smallest of the set, so weakest at planning a multi step loop.",
+      },
+      {
+        id: "nvidia/nemotron-3-ultra-550b-a55b:free",
+        label: "Nemotron 3 Ultra 550B (free)",
+        free: true,
+        notes: "NVIDIA open weight, one million token context, $0.00 per token. Biggest free model on the router and the slowest.",
+      },
+      {
+        id: "z-ai/glm-5.2:free",
+        label: "GLM 5.2 (free)",
+        free: true,
+        notes:
+          "Open weight, 256k context, $0.00 per token, tool calling confirmed live. Was rate limited in the shared free pool when this list was built, which is why it is not the default.",
       },
       {
         id: "google/gemma-4-31b-it:free",
         label: "Gemma 4 31B (free)",
         free: true,
-        notes: "Google open weight under the Gemma license, 262k context, $0.00 per token with tool calling declared.",
+        notes:
+          "Google open weight under the Gemma license, 262k context, $0.00 per token. Also rate limited in the shared free pool when this list was built.",
       },
     ],
     docsUrl: "https://openrouter.ai/docs/api-reference/limits",
@@ -109,7 +123,7 @@ export const PROVIDERS: readonly ProviderDefinition[] = [
     freeTier: {
       available: true,
       summary:
-        "The :free model variants cost $0.00 per token, capped at 50 requests a day, or 1,000 a day once $10 of credits has ever been purchased. This agent spends 3 to 6 model calls per question, so that is roughly 12 questions a day free, or 250 after the one time $10. Free models route only to providers that may train on the prompt, which has to be enabled in account settings.",
+        "The :free model variants cost $0.00 per token, capped at 50 requests a day, or 1,000 a day once $10 of credits has ever been purchased. This agent spends 3 to 6 model calls per question, so that is roughly 12 questions a day free, or 250 after the one time $10. Two conditions: free models route only to providers that may train on the prompt, which has to be enabled in account settings, and they draw on a shared pool that returns 429 without warning, so a free model here is sent with the rest of this list as fallbacks.",
       source: "https://openrouter.ai/docs/api-reference/limits",
       readOn: FREE_TIER_VERIFIED_ON,
     },

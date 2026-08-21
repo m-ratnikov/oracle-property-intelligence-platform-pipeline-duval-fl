@@ -42,11 +42,11 @@ all of them are public content addressed URLs, and the browser talks to the gate
 no server in between.
 
 `/api/agent` is the exception, and the only place this application can hold a secret. It runs on
-the server and can be given a model provider API key. **This deployment sets none of them**: the
-route is public and unauthenticated, so a server side key attached to it is a bill any stranger can
-run up. Visitors bring their own key on `/settings`. Every provider key the registry supports is
-documented in `.env.example`; setting one turns the server side default back on with no code
-change. See the Agent section.
+the server and holds one model provider API key: `OPENROUTER_API_KEY`, set on Vercel and never in
+this repository. It points at OpenRouter `:free` models, which cost $0.00 per token, so a visitor
+who configures nothing gets a real answer and there is no budget for a stranger to drain. That is
+the only reason a server side key is defensible on a public, unauthenticated route. Visitors can
+still bring their own key on `/settings`, and theirs always wins. See the Agent section.
 
 | Variable | Required | Falls back to |
 |---|---|---|
@@ -215,18 +215,19 @@ Deviated, by requirement of the assignment:
 - **No structured logging or metrics backend.** There is no server to emit them from. The equivalent
   observability lives in the UI itself: the engine status line, the live MCP resolution check and the
   per column coverage panel all report real state rather than assumed state.
-- **`/api/agent` returns 501 until a model key is configured.** With no key on the request and none
-  in the server environment, the route answers `501 {"status":"not_implemented","message":"agent
-  not configured: choose a model and add your own API key on the settings page"}` and the chat UI
-  renders that as an explicit state with a link to `/settings`. Returning a plausible sounding
-  answer with no tool call behind it would be worse than returning nothing on a submission judged
-  on evidence. See the Agent section below.
-- **Bring your own key, no server side default.** The kit standard is the Vercel AI SDK
-  `ToolLoopAgent` on Amazon Bedrock with prompt caching. This deployment has no AWS account, and it
-  deliberately ships no server side key of any kind: `/api/agent` is public and unauthenticated, so
-  a key configured there is a budget any visitor can drain. Any of six providers can be selected
-  per request with a visitor's own key, and the Bedrock path (with the kit's cache point
-  middleware) is one of them.
+- **`/api/agent` returns 501 when no model is configured at all.** With no key on the request and
+  none in the server environment, the route answers `501 {"status":"not_implemented","message":
+  "agent not configured: choose a model and add your own API key on the settings page"}` and the
+  chat UI renders that as an explicit state with a link to `/settings`. Returning a plausible
+  sounding answer with no tool call behind it would be worse than returning nothing on a submission
+  judged on evidence. The deployed instance does have a key, so a reviewer will not see this state;
+  it is what happens to anyone who clones the repo without configuring anything.
+- **A zero cost server default, plus bring your own key.** The kit standard is the Vercel AI SDK
+  `ToolLoopAgent` on Amazon Bedrock with prompt caching. This deployment has no AWS account. It
+  runs on OpenRouter `:free` open weight models instead, which cost $0.00 per token, because
+  `/api/agent` is public and unauthenticated and a paid key there would be a budget any visitor
+  could drain. Any of eight providers can be selected per request with a visitor's own key, and the
+  Bedrock path (with the kit's cache point middleware) is one of them.
   Asana ingress, DynamoDB chat state, AgentCore memory and LangSmith are not applicable to a single
   page chat on Vercel; the equivalent is the in page transcript plus one JSON log line per tool call
   and per turn on the server.
@@ -304,6 +305,19 @@ provider tool coverage on this router is documented.
 Resolution order per request: the caller's own credential first, then the server environment, then
 501. A visitor who brings a key always gets their model, never the deployment's.
 
+**Measured on the deployed URL, 2026-08-21.** With nothing configured, the roof-and-tenure question
+answered in 82 s on `nvidia/nemotron-3-super-120b-a12b:free`: one `preset_question` call, 25
+evidence rows out of 130,043 matched parcels, real FDOR provenance, `is_sample: false`. The same
+question sent with `x-llm-model: openai/gpt-oss-20b:free` answered as that model instead, which is
+the override working, and that smaller model called the tool and then produced no text, which is
+the honest-failure path working and the reason it is not the default.
+
+**Free pool contention is real.** Of six OpenRouter free models probed within one minute, four
+answered and two returned "temporarily rate-limited upstream" from the shared pool, and which two
+rotates. Every `:free` request is therefore sent with two alternates in OpenRouter's `models` array
+(capped at three entries) so it reroutes by itself, and `AgentResponse.model` reports the model that
+actually served the answer rather than the one that was asked for.
+
 **The key handling rules**, enforced by `tests/agent-secrets.test.ts`:
 
 - The key lives in the visitor's browser (`localStorage`), never in a cookie, never in a server side
@@ -333,7 +347,7 @@ tool agent, and the settings page shows those two results separately.
 
 | Variable | Required | Notes |
 |---|---|---|
-| provider key | no | One of `OPENROUTER_API_KEY` (recommended for a free default), `GOOGLE_GENERATIVE_AI_API_KEY`, `GROQ_API_KEY`, `CEREBRAS_API_KEY`, `HF_TOKEN`, `AI_GATEWAY_API_KEY`, `ANTHROPIC_API_KEY`, `AWS_BEARER_TOKEN_BEDROCK`. **This deployment sets none of them.** Setting one turns the server side default on. |
+| provider key | no | One of `OPENROUTER_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `GROQ_API_KEY`, `CEREBRAS_API_KEY`, `HF_TOKEN`, `AI_GATEWAY_API_KEY`, `ANTHROPIC_API_KEY`, `AWS_BEARER_TOKEN_BEDROCK`. **This deployment sets `OPENROUTER_API_KEY`** and nothing else, pointed at $0.00 per token models. |
 | `AGENT_PROVIDER` | no | One of the registry ids. When unset, the first provider with a key present wins. Naming a provider with no key reports "not configured" rather than falling through to another provider's key. |
 | `AGENT_MODEL` | no | Must be a model the registry lists for that provider. An id belonging to another provider is ignored and the provider's default free model is used. |
 | `QUERY_TABLE_URL` | no | Server side parquet URL (IPNS root or direct object). Falls back to `NEXT_PUBLIC_QUERY_TABLE_URL`, then to `public/sample/query-table.parquet`. |

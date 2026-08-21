@@ -142,6 +142,12 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentResponse>
     }
   }
 
+  // Which model actually answered, which is not always the one that was asked
+  // for: OpenRouter reroutes a busy free model to the next in the fallback list
+  // and reports what it used. Claiming the requested id would be a small lie on
+  // the one line a visitor reads to know what produced the answer.
+  const servedModelId = result.steps[result.steps.length - 1]?.response?.modelId?.trim() || resolved.modelId;
+
   const usage = toUsage(result.totalUsage, result.steps.length);
   const response: AgentResponse = {
     status: "ok",
@@ -152,14 +158,15 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentResponse>
     evidence: trace.evidence,
     assumptions: trace.assumptions,
     data_freshness: freshness,
-    model: `${resolved.provider}:${resolved.modelId}`,
+    model: `${resolved.provider}:${servedModelId}`,
     usage,
     elapsed_ms: Date.now() - started,
   };
 
   logAgent("info", "agent turn", {
     provider: resolved.provider,
-    model: resolved.modelId,
+    model: servedModelId,
+    requested_model: resolved.modelId,
     credential_source: resolved.source,
     // A fingerprint, not the key. See redact.ts for why this is not a prefix.
     key: keyFingerprint(options.credential?.apiKey),
