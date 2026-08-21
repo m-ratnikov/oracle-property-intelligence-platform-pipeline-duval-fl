@@ -36,9 +36,11 @@ nothing is being billed.
 
 ## Environment variables
 
-Every variable is `NEXT_PUBLIC_*` and therefore public. That is deliberate: all of them are public
-content addressed URLs, and the browser talks to the gateway directly with no server in between.
-There are no secrets in this application. See `.env.example` for the full annotated list.
+Every variable the explorer pages read is `NEXT_PUBLIC_*` and therefore public. That is deliberate:
+all of them are public content addressed URLs, and the browser talks to the gateway directly with
+no server in between. The only secret is the model key for the optional agent route
+(`ANTHROPIC_API_KEY`, server side only, see the Agent section). See `.env.example` for the full
+annotated list.
 
 | Variable | Required | Falls back to |
 |---|---|---|
@@ -184,9 +186,95 @@ Deviated, by requirement of the assignment:
 - **No structured logging or metrics backend.** There is no server to emit them from. The equivalent
   observability lives in the UI itself: the engine status line, the live MCP resolution check and the
   per column coverage panel all report real state rather than assumed state.
-- **A stubbed `/api/agent`.** The route returns HTTP 501 with a typed body, and the chat UI renders
-  that as an explicit "agent not wired yet" state. Returning a plausible sounding answer with no tool
-  call behind it would be worse than returning nothing on a submission judged on evidence. The
-  response contract (`AgentResponse`, `AgentToolCall`, `AgentEvidenceRow`) is defined in
-  `app/api/agent/route.ts` and consumed by the chat UI, so wiring the runtime is a swap of that one
-  file.
+- **`/api/agent` returns 501 until a model key is configured.** Without `ANTHROPIC_API_KEY` the
+  route answers `501 {"status":"not_implemented","message":"agent not configured: set
+  ANTHROPIC_API_KEY"}` and the chat UI renders that as an explicit "agent not configured" state.
+  Returning a plausible sounding answer with no tool call behind it would be worse than returning
+  nothing on a submission judged on evidence. See the Agent section below.
+- **Anthropic API instead of Bedrock for the agent.** The kit standard is the Vercel AI SDK
+  `ToolLoopAgent` on Amazon Bedrock with prompt caching. This deployment has no AWS account, so the
+  default provider is `@ai-sdk/anthropic` with Anthropic prompt caching on the system prompt; the
+  Bedrock path (with the kit's cache point middleware) is kept behind `AGENT_PROVIDER=bedrock`.
+  Asana ingress, DynamoDB chat state, AgentCore memory and LangSmith are not applicable to a single
+  page chat on Vercel; the equivalent is the in page transcript plus one JSON log line per tool call
+  and per turn on the server.
+
+## Agent
+
+`/agent` is a chat over the same dataset. Each turn is one Vercel AI SDK `ToolLoopAgent` run
+(`lib/agent/run.ts`) with five explicitly registered, read only tools (`lib/agent/tools.ts`), each
+with a zod input schema:
+
+| Tool | What it does |
+|---|---|
+| `get_schema` | `DESCRIBE properties` plus a one line meaning per column and the eight question rules in plain English |
+| `preset_question` | Runs one of the eight presets from `lib/sql.ts` by name (`roof_over_15`, `water_view`, `no_sale_10y`, `regional_owner`, `near_transit`, `near_starbucks`, `roof15_and_no_sale10y`, `transit_and_regional`), returns rows with evidence and provenance columns, the rule, the total match count and the preset's caveats |
+| `run_sql` | One `SELECT`/`WITH` over `properties`, guarded by the same `guardSql` the workbench uses, capped at 200 rows, with `total_matched` when the cap cut rows off |
+| `get_property` | Full row for one folio plus the per property open data JSON from IPFS when published |
+| `get_run_history` | The run history JSON: runs, timestamps, per source counts and deltas, limitations, published CIDs / IPNS |
+
+Data access is server side: `@duckdb/node-api` opens one in memory instance per warm process
+(cached on `globalThis`) with a view `properties` over `QUERY_TABLE_URL` (httpfs range reads when
+it is a gateway URL; the local sample parquet when unset). The route runs on the Node runtime
+(`runtime = "nodejs"`, `maxDuration = 60`), `@duckdb/node-api` is in `serverExternalPackages` so the
+native binding is traced rather than bundled, and `public/sample/**` is traced into the function so
+the sample fallback works on Vercel too.
+
+The response is the `AgentResponse` contract in `lib/agent/types.ts` (re-exported from the route
+for the original consumers): `answer`/`message` (markdown), `tool_calls`/`toolCalls` (name, input,
+output_summary, elapsed_ms, row_count, total_matched, error), `evidence` (property_id, address,
+the matched columns, source_system, source_url, fetched_at), `assumptions` (preset caveats plus
+notes derived from the returned rows: proxy roof basis counts, NULL nearest_* counts, missing
+sales, sample data), `data_freshness` (latest run_id and finished_at), `model`, `usage` (tokens,
+cache read/write, steps). Transcript, evidence and assumptions come from the tool trace, not from
+the model's prose, so they are faithful even when the answer is not.
+
+The system prompt (`lib/agent/prompt.ts`) requires evidence with provenance for every cited row,
+the rule and thresholds stated, a total match count, an explicit "Assumptions and missing data"
+section, no invented rows, `preset_question` for the six standard questions and `run_sql` for
+combinations, and a stated heuristic score for "strong candidates for further review".
+
+### Environment
+
+| Variable | Required | Notes |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | yes, for the agent | Server only. Without it the route returns 501 and the page shows "agent not configured". |
+| `AGENT_MODEL` | no | Default `claude-sonnet-4-5` (Anthropic) or `us.anthropic.claude-sonnet-4-5-20250929-v1:0` (Bedrock). |
+| `AGENT_PROVIDER` | no | `anthropic` (default) or `bedrock`. Bedrock needs `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_REGION` or `AWS_BEARER_TOKEN_BEDROCK`. |
+| `QUERY_TABLE_URL` | no | Server side parquet URL (IPNS root or direct object). Falls back to `NEXT_PUBLIC_QUERY_TABLE_URL`, then to `public/sample/query-table.parquet`. |
+| `RUN_HISTORY_URL`, `OPEN_DATA_INDEX_URL` | no | Server side overrides; fall back to the `NEXT_PUBLIC_*` values, then to the sample files. |
+| `AGENT_LOG` | no | `off` silences the JSON log lines. |
+
+### Running it
+
+```bash
+cd ui
+pnpm install
+ANTHROPIC_API_KEY=sk-ant-... pnpm dev        # then open http://localhost:3000/agent
+# or against the published data:
+ANTHROPIC_API_KEY=sk-ant-... QUERY_TABLE_URL=https://ipfs.filebase.io/ipns/k51.../ pnpm dev
+
+# from the command line
+curl -s http://localhost:3000/api/agent          # 200 {"configured":true,...} or 501
+curl -s -X POST http://localhost:3000/api/agent \
+  -H 'content-type: application/json' \
+  -d '{"messages":[{"role":"user","content":"Which properties have roofs older than 15 years and have not exchanged ownership in more than 10 years?"}]}'
+```
+
+On Vercel set the same variables in Project Settings (they are server side; no redeploy is needed
+to change the key, one is needed for `NEXT_PUBLIC_*`). The `@duckdb/node-api` binding adds roughly
+40 MB to the `/api/agent` function, well inside the 250 MB uncompressed limit, and nothing else on
+the site depends on it.
+
+### Tests
+
+`tests/agent-tools.test.ts` runs every tool against the sample parquet through a real DuckDB:
+`get_schema` lists every expected column with a meaning, `run_sql` rejects mutations, multi
+statements and extension loads and enforces the row cap while reporting the total, every preset
+returns evidence backed rows, `get_property` returns a full row and resolves the sample open data
+JSON, and `get_run_history` records freshness. `tests/agent-loop.test.ts` runs the real
+`ToolLoopAgent` with a `MockLanguageModelV3` from `ai/test` that answers with a tool call and then
+text, asserting the tool actually executed, the JSON contract holds (transcript, evidence with
+provenance, assumptions, freshness, usage, cache marker on the system prompt), that a rejected
+mutation does not break the loop, and that the step cap stops a runaway loop. No test calls a real
+model.

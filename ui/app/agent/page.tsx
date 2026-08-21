@@ -1,11 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
-import type { AgentResponse, AgentToolCall, AgentEvidenceRow } from "@/app/api/agent/route";
+import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import type {
+  AgentDataFreshness,
+  AgentEvidenceRow,
+  AgentResponse,
+  AgentToolCall,
+  AgentUsage,
+} from "@/lib/agent/types";
 import { PageHeader, Callout, Spinner } from "@/components/ui";
 import { EngineStatus } from "@/components/EngineStatus";
-import { formatTimestamp } from "@/lib/format";
+import { formatTimestamp, relativeTime } from "@/lib/format";
 
 interface ChatMessage {
   id: string;
@@ -14,6 +22,8 @@ interface ChatMessage {
   at: string;
   hint?: string;
   notImplemented?: boolean;
+  error?: boolean;
+  meta?: { model: string | null; usage: AgentUsage | null; elapsed_ms?: number; toolCalls: number };
 }
 
 const DEMO_PROMPTS = [
@@ -23,47 +33,132 @@ const DEMO_PROMPTS = [
 ];
 
 const TOOLS = [
-  { name: "get_schema", description: "DESCRIBE the published query table so the agent knows the columns before it writes SQL." },
-  { name: "run_sql", description: "A single read only SELECT over the view properties, executed against the parquet on IPFS." },
-  { name: "get_property", description: "Fetch one parcel by folio, including the per property JSON when it is published." },
-  { name: "get_evidence", description: "Return source_system, source_url and fetched_at for the rows behind an answer." },
+  { name: "get_schema", description: "DESCRIBE the published query table plus the six question rules, so the agent knows the columns before it writes SQL." },
+  { name: "preset_question", description: "Run one of the eight question presets, the exact SQL the Questions page runs, with evidence and provenance columns and a total match count." },
+  { name: "run_sql", description: "A single read only SELECT over the view properties in server side DuckDB, capped at 200 rows, for combinations and rankings." },
+  { name: "get_property", description: "Fetch one parcel by folio, including the per property JSON on IPFS when it is published." },
+  { name: "get_run_history", description: "Read the pipeline run history for freshness, sources, deltas and documented limitations." },
 ];
 
-function ToolCallRow({ call }: { call: AgentToolCall }) {
+const EVIDENCE_META = new Set(["property_id", "address", "source_system", "source_url", "fetched_at", "via"]);
+
+function ToolCallRow({ call, index }: { call: AgentToolCall; index: number }) {
+  const [open, setOpen] = useState(false);
   return (
     <li className="border-b border-border px-3 py-2 last:border-b-0">
-      <div className="flex items-center gap-2">
-        <span className="badge badge-accent">{call.name}</span>
-        {call.summary ? <span className="text-[12px] text-muted">{call.summary}</span> : null}
-      </div>
-      <pre className="block mt-1.5" style={{ fontSize: 11 }}>
-        {JSON.stringify(call.input, null, 2)}
-      </pre>
-      {call.result ? (
-        <pre className="block mt-1" style={{ fontSize: 11 }}>
-          {JSON.stringify(call.result, null, 2)}
-        </pre>
+      <button
+        type="button"
+        className="flex w-full items-center gap-2 text-left"
+        onClick={() => setOpen((current) => !current)}
+        aria-expanded={open}
+      >
+        <span className="mono text-faint text-[11px]">{index + 1}</span>
+        <span className={`badge ${call.error ? "badge-warn" : "badge-accent"}`}>{call.name}</span>
+        <span className="flex-1 truncate text-[12px] text-muted" title={call.output_summary}>
+          {call.output_summary}
+        </span>
+        <span className="mono text-[11px] text-faint">{call.elapsed_ms} ms</span>
+        <span className="text-faint text-[11px]">{open ? "hide" : "json"}</span>
+      </button>
+      {open ? (
+        <div className="mt-1.5 space-y-1">
+          <div className="text-[11px] text-faint">input</div>
+          <pre className="block" style={{ fontSize: 11 }}>
+            {JSON.stringify(call.input, null, 2)}
+          </pre>
+          <div className="text-[11px] text-faint">result</div>
+          <pre className="block" style={{ fontSize: 11 }}>
+            {JSON.stringify(
+              {
+                row_count: call.row_count,
+                total_matched: call.total_matched ?? null,
+                elapsed_ms: call.elapsed_ms,
+                error: call.error ?? null,
+                ...(call.result ?? {}),
+              },
+              null,
+              2,
+            )}
+          </pre>
+        </div>
       ) : null}
     </li>
   );
 }
 
-function EvidenceRow({ row }: { row: AgentEvidenceRow }) {
+function cellText(value: unknown): string {
+  if (value === null || value === undefined) return "null";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function EvidenceTable({ rows }: { rows: AgentEvidenceRow[] }) {
+  const matched = new Set<string>();
+  for (const row of rows) for (const key of Object.keys(row)) if (!EVIDENCE_META.has(key)) matched.add(key);
+  const columns = [...matched].slice(0, 8);
   return (
-    <li className="border-b border-border px-3 py-2 text-[12px] last:border-b-0">
-      <Link className="mono" prefetch={false} href={`/property/${encodeURIComponent(row.property_id)}`}>
-        {row.property_id}
-      </Link>
-      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11.5px]">
-        <span className="badge badge-neutral">{row.source_system ?? "unknown source"}</span>
-        {row.source_url ? (
-          <a className="mono" href={row.source_url} target="_blank" rel="noreferrer">
-            source
-          </a>
-        ) : null}
-        <span className="mono text-faint">{formatTimestamp(row.fetched_at ?? null)}</span>
-      </div>
-    </li>
+    <div className="overflow-auto">
+      <table className="w-full text-[11.5px]">
+        <thead>
+          <tr className="text-left text-faint">
+            <th className="px-2 py-1 font-semibold">property_id</th>
+            <th className="px-2 py-1 font-semibold">address</th>
+            {columns.map((column) => (
+              <th key={column} className="px-2 py-1 font-semibold mono">
+                {column}
+              </th>
+            ))}
+            <th className="px-2 py-1 font-semibold">source</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={`${row.property_id}-${index}`} className="border-t border-border align-top">
+              <td className="px-2 py-1 mono whitespace-nowrap">
+                <Link prefetch={false} href={`/property/${encodeURIComponent(row.property_id)}`}>
+                  {row.property_id}
+                </Link>
+              </td>
+              <td className="px-2 py-1">{row.address ?? "not available"}</td>
+              {columns.map((column) => (
+                <td key={column} className="px-2 py-1 mono whitespace-nowrap">
+                  {cellText(row[column])}
+                </td>
+              ))}
+              <td className="px-2 py-1 whitespace-nowrap">
+                <span className="badge badge-neutral">{row.source_system ?? "unknown"}</span>{" "}
+                {row.source_url ? (
+                  <a className="mono" href={row.source_url} target="_blank" rel="noreferrer">
+                    source
+                  </a>
+                ) : null}
+                <div className="mono text-faint">{formatTimestamp(row.fetched_at ?? null)}</div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function FreshnessBadge({ freshness }: { freshness: AgentDataFreshness | null }) {
+  if (!freshness) return null;
+  const label = freshness.finished_at
+    ? `data as of ${formatTimestamp(freshness.finished_at)} (${relativeTime(freshness.finished_at)})`
+    : "run history not available";
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-[11.5px]">
+      <span className={`badge ${freshness.is_sample ? "badge-warn" : "badge-good"}`}>
+        {freshness.is_sample ? "SAMPLE run history" : "published run history"}
+      </span>
+      <span className="text-muted">{label}</span>
+      {freshness.run_id ? (
+        <Link className="mono" prefetch={false} href="/runs">
+          run {freshness.run_id}
+        </Link>
+      ) : null}
+    </div>
   );
 }
 
@@ -72,7 +167,7 @@ export default function AgentPage() {
     {
       id: "intro",
       role: "system",
-      text: "Ask a property intelligence question in plain English. The agent plans a tool call, runs read only SQL against the published parquet, and answers with the rows it used.",
+      text: "Ask a property intelligence question in plain English. The agent plans tool calls, runs read only SQL against the published parquet in server side DuckDB, and answers with the rows it used.",
       at: new Date().toISOString(),
     },
   ]);
@@ -81,7 +176,24 @@ export default function AgentPage() {
   const [toolCalls, setToolCalls] = useState<AgentToolCall[]>([]);
   const [evidence, setEvidence] = useState<AgentEvidenceRow[]>([]);
   const [assumptions, setAssumptions] = useState<string[]>([]);
+  const [freshness, setFreshness] = useState<AgentDataFreshness | null>(null);
+  const [configured, setConfigured] = useState<boolean | null>(null);
   const scroller = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/agent", { method: "GET" })
+      .then((response) => response.json())
+      .then((payload: { configured?: boolean }) => {
+        if (!cancelled) setConfigured(Boolean(payload.configured));
+      })
+      .catch(() => {
+        if (!cancelled) setConfigured(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const send = async (text: string) => {
     const trimmed = text.trim();
@@ -103,24 +215,34 @@ export default function AgentPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           messages: [...messages, outgoing]
-            .filter((message) => message.role !== "system")
+            .filter((message) => message.role !== "system" && !message.notImplemented && !message.error)
             .map((message) => ({ role: message.role, content: message.text })),
         }),
       });
 
       const payload = (await response.json()) as AgentResponse;
+      const notImplemented = payload.status === "not_implemented" || response.status === 501;
+      const failed = payload.status === "error" || (!response.ok && !notImplemented);
 
-      setToolCalls(payload.toolCalls ?? []);
+      setToolCalls(payload.toolCalls ?? payload.tool_calls ?? []);
       setEvidence(payload.evidence ?? []);
       setAssumptions(payload.assumptions ?? []);
+      if (payload.data_freshness) setFreshness(payload.data_freshness);
       setMessages((current) => [
         ...current,
         {
           id: `a-${Date.now()}`,
           role: "assistant",
-          text: payload.message,
+          text: payload.answer ?? payload.message,
           hint: payload.hint,
-          notImplemented: payload.status === "not_implemented" || response.status === 501,
+          notImplemented,
+          error: failed,
+          meta: {
+            model: payload.model ?? null,
+            usage: payload.usage ?? null,
+            elapsed_ms: payload.elapsed_ms,
+            toolCalls: (payload.toolCalls ?? payload.tool_calls ?? []).length,
+          },
           at: new Date().toISOString(),
         },
       ]);
@@ -133,7 +255,7 @@ export default function AgentPage() {
           text: `Could not reach the agent endpoint: ${
             error instanceof Error ? error.message : String(error)
           }`,
-          notImplemented: true,
+          error: true,
           at: new Date().toISOString(),
         },
       ]);
@@ -152,12 +274,18 @@ export default function AgentPage() {
         lead="The same dataset, asked in plain English. The transcript panel shows every tool call the agent made and the evidence panel shows the rows the answer rests on, so an answer can always be traced back to a county record."
       />
 
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <EngineStatus compact />
+        {configured === false ? (
+          <span className="badge badge-warn">agent not configured: set ANTHROPIC_API_KEY</span>
+        ) : configured === true ? (
+          <span className="badge badge-good">agent configured</span>
+        ) : null}
+        <FreshnessBadge freshness={freshness} />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="card flex flex-col" style={{ minHeight: 520 }}>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="card flex flex-col" style={{ minHeight: 560 }}>
           <div ref={scroller} className="flex-1 space-y-3 overflow-auto px-4 py-4">
             {messages.map((message) => (
               <div key={message.id}>
@@ -172,21 +300,70 @@ export default function AgentPage() {
                 ) : (
                   <div className="flex justify-start">
                     <div
-                      className={`max-w-[90%] rounded-lg rounded-bl-sm border px-3 py-2 text-[13px] ${
-                        message.notImplemented
+                      className={`max-w-[95%] rounded-lg rounded-bl-sm border px-3 py-2 text-[13px] ${
+                        message.notImplemented || message.error
                           ? "border-warn/40 bg-warn-soft text-warn"
                           : "border-border bg-sunken text-text"
                       }`}
                     >
                       {message.notImplemented ? (
                         <div className="mb-1 text-[11px] font-bold uppercase tracking-wide">
-                          agent not wired yet
+                          agent not configured
+                        </div>
+                      ) : message.error ? (
+                        <div className="mb-1 text-[11px] font-bold uppercase tracking-wide">
+                          agent error
                         </div>
                       ) : null}
-                      <div>{message.text}</div>
+                      <div className="markdown">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            a: ({ href, children }) => (
+                              <a href={href} target="_blank" rel="noreferrer">
+                                {children}
+                              </a>
+                            ),
+                            table: ({ children }) => (
+                              <div className="overflow-auto">
+                                <table className="my-2 w-full text-[12px]">{children}</table>
+                              </div>
+                            ),
+                            th: ({ children }) => (
+                              <th className="border-b border-border px-2 py-1 text-left font-semibold">{children}</th>
+                            ),
+                            td: ({ children }) => (
+                              <td className="border-b border-border px-2 py-1 align-top mono">{children}</td>
+                            ),
+                            h1: ({ children }) => <div className="mt-2 text-[13px] font-bold">{children}</div>,
+                            h2: ({ children }) => <div className="mt-2 text-[13px] font-bold">{children}</div>,
+                            h3: ({ children }) => <div className="mt-2 text-[12.5px] font-semibold">{children}</div>,
+                            ul: ({ children }) => <ul className="my-1 list-disc pl-5">{children}</ul>,
+                            ol: ({ children }) => <ol className="my-1 list-decimal pl-5">{children}</ol>,
+                            p: ({ children }) => <p className="my-1">{children}</p>,
+                            code: ({ children }) => <code className="mono text-[12px]">{children}</code>,
+                          }}
+                        >
+                          {message.text}
+                        </ReactMarkdown>
+                      </div>
                       {message.hint ? (
                         <div className="mt-2 border-t border-current/20 pt-2 text-[12px] opacity-90">
                           {message.hint}
+                        </div>
+                      ) : null}
+                      {message.meta && !message.notImplemented && !message.error ? (
+                        <div className="mt-2 flex flex-wrap gap-x-3 text-[11px] text-faint mono">
+                          <span>{message.meta.model ?? "model unknown"}</span>
+                          <span>{message.meta.toolCalls} tool calls</span>
+                          {message.meta.usage ? (
+                            <span>
+                              {message.meta.usage.steps} steps, {message.meta.usage.input_tokens ?? "?"} in /{" "}
+                              {message.meta.usage.output_tokens ?? "?"} out
+                              {message.meta.usage.cache_read_tokens ? `, ${message.meta.usage.cache_read_tokens} cached` : ""}
+                            </span>
+                          ) : null}
+                          {message.meta.elapsed_ms !== undefined ? <span>{(message.meta.elapsed_ms / 1000).toFixed(1)} s</span> : null}
                         </div>
                       ) : null}
                     </div>
@@ -194,7 +371,7 @@ export default function AgentPage() {
                 )}
               </div>
             ))}
-            {pending ? <Spinner label="Thinking" /> : null}
+            {pending ? <Spinner label="Thinking, running tools" /> : null}
           </div>
 
           <div className="border-t border-border px-4 py-3">
@@ -208,7 +385,7 @@ export default function AgentPage() {
                   onClick={() => void send(prompt)}
                   title={prompt}
                 >
-                  {prompt.length > 52 ? `${prompt.slice(0, 50)}...` : prompt}
+                  {prompt.length > 64 ? `${prompt.slice(0, 62)}...` : prompt}
                 </button>
               ))}
             </div>
@@ -236,17 +413,17 @@ export default function AgentPage() {
         <aside className="space-y-4">
           <div className="card">
             <div className="border-b border-border px-3 py-2 text-[12px] font-semibold">
-              Tool call transcript
+              Tool call transcript {toolCalls.length > 0 ? `(${toolCalls.length})` : ""}
             </div>
             {toolCalls.length === 0 ? (
               <div className="px-3 py-3 text-[12px] text-faint">
-                No tool calls yet. When the agent is wired, every call it makes appears here with its
-                arguments and its result, so the answer can be audited rather than trusted.
+                No tool calls yet. Every call the agent makes appears here with its arguments and
+                its result, so the answer can be audited rather than trusted.
               </div>
             ) : (
               <ul>
                 {toolCalls.map((call, index) => (
-                  <ToolCallRow key={`${call.name}-${index}`} call={call} />
+                  <ToolCallRow key={`${call.name}-${index}`} call={call} index={index} />
                 ))}
               </ul>
             )}
@@ -254,19 +431,15 @@ export default function AgentPage() {
 
           <div className="card">
             <div className="border-b border-border px-3 py-2 text-[12px] font-semibold">
-              Evidence
+              Evidence {evidence.length > 0 ? `(${evidence.length} parcels)` : ""}
             </div>
             {evidence.length === 0 ? (
               <div className="px-3 py-3 text-[12px] text-faint">
-                Rows the answer rests on land here, each with its source system, source URL and
-                collection timestamp.
+                Rows the answer rests on land here, each with the matched columns, its source
+                system, source URL and collection timestamp.
               </div>
             ) : (
-              <ul>
-                {evidence.map((row, index) => (
-                  <EvidenceRow key={`${row.property_id}-${index}`} row={row} />
-                ))}
-              </ul>
+              <EvidenceTable rows={evidence} />
             )}
           </div>
 
@@ -291,8 +464,8 @@ export default function AgentPage() {
               ))}
             </ul>
             <p className="mt-3 text-[12px] text-muted">
-              Until the runtime is attached, the same questions are answerable on the{" "}
-              <Link href="/questions">Questions</Link> page, which runs those rules directly.
+              The same questions are answerable on the <Link href="/questions">Questions</Link> page,
+              which runs those rules directly in the browser.
             </p>
           </div>
         </aside>

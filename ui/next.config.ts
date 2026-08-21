@@ -15,7 +15,14 @@ const nextConfig: NextConfig = {
   // @duckdb/duckdb-wasm is browser only. Nothing should try to bundle it on the
   // server, but keeping it external stops the Next server compiler from tracing
   // the .wasm assets into the serverless output.
-  serverExternalPackages: ["@duckdb/duckdb-wasm"],
+  // @duckdb/node-api is a native addon used by /api/agent on the server; it
+  // must stay external so the bindings binary is traced, not bundled.
+  serverExternalPackages: ["@duckdb/duckdb-wasm", "@duckdb/node-api"],
+  // The agent route reads the sample parquet and sample JSON from disk when no
+  // artifact URL is configured, so those files have to travel with the function.
+  outputFileTracingIncludes: {
+    "/api/agent": ["./public/sample/**/*"],
+  },
   async headers() {
     return [
       {

@@ -1,64 +1,110 @@
 import { NextResponse } from "next/server";
+import { isAgentConfigured, AgentNotConfiguredError, readProvider } from "@/lib/agent/model";
+import { runAgent } from "@/lib/agent/run";
+import { logAgent } from "@/lib/agent/log";
+import {
+  emptyResponse,
+  NOT_CONFIGURED_MESSAGE,
+  type AgentChatMessage,
+  type AgentResponse,
+} from "@/lib/agent/types";
 
 /**
- * Agent endpoint, deliberately a stub.
+ * The agent endpoint.
  *
- * The UI ships before the agent runtime is wired, and a fake answer would be
- * worse than no answer on a submission that is judged on evidence. So this
- * returns 501 with a machine readable body the chat UI renders as an honest
- * "not wired yet" state rather than an error.
+ * POST { messages: [{ role, content }] } runs one ToolLoopAgent turn (Vercel AI
+ * SDK) over five read only tools backed by a server side DuckDB view over the
+ * published parquet, and returns the AgentResponse contract the chat page
+ * renders: markdown answer, tool call transcript, evidence rows, assumptions,
+ * data freshness, model and token usage.
  *
- * The contract the real handler must satisfy is documented below and mirrored by
- * the AgentResponse type on the client, so wiring it is a swap of this file.
+ * Without ANTHROPIC_API_KEY (or AWS credentials when AGENT_PROVIDER=bedrock)
+ * the route returns 501 with the same typed body so the UI can say, honestly,
+ * that the agent is not configured rather than fabricate an answer.
  */
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
-export interface AgentToolCall {
-  name: string;
-  input: Record<string, unknown>;
-  /** Rendered in the transcript panel. Keep it short. */
-  summary?: string;
-  /** Row count, elapsed ms, or whatever the tool reports back. */
-  result?: Record<string, unknown>;
+export type { AgentResponse, AgentToolCall, AgentEvidenceRow } from "@/lib/agent/types";
+
+const NOT_CONFIGURED_HINT =
+  "Set ANTHROPIC_API_KEY (and optionally AGENT_MODEL, default claude-sonnet-4-5) in the server environment, or AGENT_PROVIDER=bedrock with AWS credentials, then redeploy. Every question the agent answers is also answerable on the Questions page, which runs the same SQL rules in the browser.";
+
+function notConfigured(message = NOT_CONFIGURED_MESSAGE): NextResponse<AgentResponse> {
+  return NextResponse.json(emptyResponse("not_implemented", message, NOT_CONFIGURED_HINT), {
+    status: 501,
+  });
 }
 
-export interface AgentEvidenceRow {
-  property_id: string;
-  source_system?: string | null;
-  source_url?: string | null;
-  fetched_at?: string | null;
-  [key: string]: unknown;
+function parseMessages(body: unknown): AgentChatMessage[] | null {
+  if (typeof body !== "object" || body === null) return null;
+  const raw = (body as { messages?: unknown; message?: unknown }).messages;
+  if (Array.isArray(raw)) {
+    const messages = raw
+      .filter(
+        (item): item is { role: string; content: string } =>
+          typeof item === "object" &&
+          item !== null &&
+          typeof (item as { role?: unknown }).role === "string" &&
+          typeof (item as { content?: unknown }).content === "string",
+      )
+      .filter((item) => item.role === "user" || item.role === "assistant")
+      .map((item) => ({ role: item.role as "user" | "assistant", content: item.content.slice(0, 8000) }));
+    return messages.length > 0 ? messages : null;
+  }
+  const single = (body as { message?: unknown }).message;
+  if (typeof single === "string" && single.trim()) return [{ role: "user", content: single.slice(0, 8000) }];
+  return null;
 }
 
-export interface AgentResponse {
-  status: "ok" | "not_implemented";
-  /** The assistant's prose answer. */
-  message: string;
-  /** Tool calls in order, for the transcript panel. */
-  toolCalls?: AgentToolCall[];
-  /** Rows the answer rests on, for the evidence panel. */
-  evidence?: AgentEvidenceRow[];
-  /** Anything the agent could not determine from the published data. */
-  assumptions?: string[];
-  hint?: string;
+export async function POST(request: Request): Promise<NextResponse<AgentResponse>> {
+  if (!isAgentConfigured()) return notConfigured();
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(emptyResponse("error", "Request body must be JSON with a messages array."), {
+      status: 400,
+    });
+  }
+  const messages = parseMessages(body);
+  if (!messages || messages[messages.length - 1]?.role !== "user") {
+    return NextResponse.json(
+      emptyResponse("error", "Send { messages: [{ role: 'user' | 'assistant', content }] } ending with a user message."),
+      { status: 400 },
+    );
+  }
+
+  try {
+    const response = await runAgent({ messages, abortSignal: request.signal });
+    return NextResponse.json(response);
+  } catch (error: unknown) {
+    if (error instanceof AgentNotConfiguredError) return notConfigured(error.message);
+    const message = error instanceof Error ? error.message : String(error);
+    logAgent("error", "agent turn failed", { error: message });
+    return NextResponse.json(
+      emptyResponse(
+        "error",
+        `The agent could not complete this turn: ${message}`,
+        "Nothing was generated. Check the server log for the failing tool or provider call.",
+      ),
+      { status: 500 },
+    );
+  }
 }
 
-const NOT_IMPLEMENTED: AgentResponse = {
-  status: "not_implemented",
-  message:
-    "The agent runtime is not wired to this deployment yet. Nothing is generated here, because an answer without a tool call behind it would not be evidence.",
-  hint: "Every question the agent is meant to answer is already answerable on the Questions page, which runs the same rules in DuckDB-WASM and shows the provenance for each row. The agent will call the same SQL through its run_sql tool.",
-  toolCalls: [],
-  evidence: [],
-  assumptions: [],
-};
-
-export async function POST(): Promise<NextResponse<AgentResponse>> {
-  return NextResponse.json(NOT_IMPLEMENTED, { status: 501 });
-}
-
-export async function GET(): Promise<NextResponse<AgentResponse>> {
-  return NextResponse.json(NOT_IMPLEMENTED, { status: 501 });
+/** Health / capability probe for the chat page and for curl. */
+export async function GET(): Promise<NextResponse> {
+  const configured = isAgentConfigured();
+  const payload = {
+    configured,
+    provider: readProvider(),
+    model: process.env.AGENT_MODEL?.trim() || null,
+    tools: ["get_schema", "run_sql", "preset_question", "get_property", "get_run_history"],
+    message: configured ? "agent configured" : NOT_CONFIGURED_MESSAGE,
+  };
+  return NextResponse.json(payload, { status: configured ? 200 : 501 });
 }
