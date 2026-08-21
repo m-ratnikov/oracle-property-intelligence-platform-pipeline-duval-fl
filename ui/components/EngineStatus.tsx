@@ -20,6 +20,17 @@ export function EngineStatus({ compact = false }: { compact?: boolean }) {
   const engine = useEngineBoot();
   const url = queryTableParquetUrl();
 
+  if (engine.stage === "error" && compact) {
+    return (
+      <span className="flex items-center gap-2 whitespace-nowrap text-[12px] text-bad" data-testid="engine-error">
+        <span className="badge badge-warn">engine failed</span>
+        <span className="truncate" title={engine.error ?? undefined}>
+          DuckDB-WASM could not load the query table
+        </span>
+      </span>
+    );
+  }
+
   if (engine.stage === "error") {
     return (
       <div className="rounded-md border border-bad/40 bg-bad-soft px-3 py-2 text-[12.5px] text-bad">
@@ -30,6 +41,27 @@ export function EngineStatus({ compact = false }: { compact?: boolean }) {
           permissive CORS headers is the usual cause.
         </div>
       </div>
+    );
+  }
+
+  /*
+   * Compact lives in a flex row beside the model picker, so it must be ONE inline line. The block
+   * card below is a flex item there: it shrinks to whatever space is left, wraps "Starting
+   * DuckDB-WASM in your browser" over four lines, and because its rows have fixed heights the text
+   * spills out and lands on top of the model label.
+   */
+  if (engine.stage !== "ready" && compact) {
+    return (
+      <span
+        className="flex items-center gap-2 whitespace-nowrap text-[12px] text-muted"
+        data-testid="engine-loading"
+      >
+        <span className="pulsing inline-block h-2 w-2 shrink-0 rounded-full bg-accent" />
+        {engine.message}
+        {engine.progress !== null ? (
+          <span className="mono text-faint">{Math.round(engine.progress * 100)}%</span>
+        ) : null}
+      </span>
     );
   }
 
