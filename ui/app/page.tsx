@@ -5,7 +5,7 @@ import { useMemo } from "react";
 import { config, ZERO_COST_LINE } from "@/lib/config";
 import { publicationLookup, parseArtifactsIndex } from "@/lib/artifacts";
 import { tableDeltaNoteLookup } from "@/lib/writers";
-import { useEngine, useJson } from "@/lib/hooks";
+import { useEngine, useJson, useSlowLoad } from "@/lib/hooks";
 import {
   latestConsolidationRun,
   latestIngestionRun,
@@ -21,7 +21,15 @@ import {
   formatTimestamp,
   relativeTime,
 } from "@/lib/format";
-import { PageHeader, Section, Stat, Callout, Spinner, ErrorBox } from "@/components/ui";
+import {
+  ArtifactPreload,
+  PageHeader,
+  Section,
+  Stat,
+  Callout,
+  Spinner,
+  ErrorBox,
+} from "@/components/ui";
 import { EngineStatus } from "@/components/EngineStatus";
 import { ArtifactCard } from "@/components/ArtifactCard";
 import { TableDelta } from "@/components/TableDelta";
@@ -80,8 +88,31 @@ export default function OverviewPage() {
 
   const county = catalog.data?.counties.find((entry) => entry.countyKey === config.countyKey) ?? null;
 
+  /*
+   * The first screen of the demo is four stat tiles, and three of them cannot be answered until the
+   * run history arrives from an IPFS gateway. A gateway that has not got the IPNS name warm takes
+   * many seconds to answer, and the tiles used to sit there as blank boxes with no caption: the
+   * page looked broken rather than busy. Nothing is invented to fill them, but every one of them
+   * says what it is waiting for, and says more once the wait stops being ordinary.
+   */
+  const historySlow = useSlowLoad(history.loading);
+  const engineSlow = useSlowLoad(engine.stage !== "ready" && engine.stage !== "error");
+  const historyHint = history.error
+    ? "run history unavailable, see below"
+    : historySlow
+      ? "still resolving the run history on the IPFS gateway"
+      : "reading the published run history";
+
   return (
     <div>
+      <ArtifactPreload
+        urls={[
+          config.runHistoryUrl,
+          config.coverageUrl,
+          config.catalogUrl,
+          config.artifactsIndexUrl,
+        ]}
+      />
       <PageHeader
         title={`${config.countyName} County, ${config.stateCode}`}
         lead={
@@ -91,17 +122,22 @@ export default function OverviewPage() {
           </>
         }
         right={
-          latest ? (
-            <div className="text-right">
-              <div className="text-[11px] uppercase tracking-wide text-muted">
-                Last ingestion run
-              </div>
-              <div className="text-[13px] font-semibold">{relativeTime(latest.started_at)}</div>
-              <div className="mono text-[11px] text-faint">
-                {formatTimestamp(latest.started_at)}
-              </div>
-            </div>
-          ) : null
+          <div className="text-right">
+            <div className="text-[11px] uppercase tracking-wide text-muted">Last ingestion run</div>
+            {latest ? (
+              <>
+                <div className="text-[13px] font-semibold">{relativeTime(latest.started_at)}</div>
+                <div className="mono text-[11px] text-faint">
+                  {formatTimestamp(latest.started_at)}
+                </div>
+              </>
+            ) : (
+              <>
+                <span className="skeleton mt-1 block h-[16px] w-24" role="status" aria-label="Last ingestion run, loading" />
+                <div className="mt-1 text-[11px] text-faint">{historyHint}</div>
+              </>
+            )}
+          </div>
         }
       />
 
@@ -117,14 +153,16 @@ export default function OverviewPage() {
           hint={
             engine.stage === "ready"
               ? `${engine.columns.length} published columns`
-              : engine.message
+              : engineSlow
+                ? `${engine.message} (DuckDB-WASM is a 33 MB module, downloaded once)`
+                : engine.message
           }
         />
         <Stat
           label="Rows checked, latest ingestion run"
           loading={totalRowsLatest === null}
           value={formatInt(totalRowsLatest)}
-          hint={latest ? `across ${latest.sources.length} sources` : undefined}
+          hint={latest ? `across ${latest.sources.length} sources` : historyHint}
         />
         <Stat
           label="New rows, latest ingestion run"
@@ -132,7 +170,7 @@ export default function OverviewPage() {
           value={formatInt(totalInsertedLatest)}
           hint={
             totalUpdatedLatest === null
-              ? undefined
+              ? historyHint
               : `${formatInt(totalUpdatedLatest)} existing rows changed`
           }
           tone={totalInsertedLatest && totalInsertedLatest > 0 ? "good" : "neutral"}
@@ -142,9 +180,11 @@ export default function OverviewPage() {
           loading={history.loading}
           value={formatInt(runs.length)}
           hint={
-            previous
-              ? `previous ingestion run ${relativeTime(previous.started_at)}`
-              : "incremental history published with the data"
+            history.loading
+              ? historyHint
+              : previous
+                ? `previous ingestion run ${relativeTime(previous.started_at)}`
+                : "incremental history published with the data"
           }
         />
       </div>
@@ -159,7 +199,9 @@ export default function OverviewPage() {
           description="Straight from the published run history, for the newest run that actually ingested sources. Table delta is how the target table's own total moved against the previous recorded run of that track, which is what makes this an incremental pipeline rather than a one shot load."
           right={<SampleBadge />}
         >
-          {history.loading ? <Spinner label="Loading run history" /> : null}
+          {history.loading ? (
+            <Spinner label="Reading the published run history from the IPFS gateway" />
+          ) : null}
           {history.error ? <ErrorBox title="Run history unavailable" message={history.error} /> : null}
           {latest ? (
             <div className="table-wrap" style={{ maxHeight: "none" }}>

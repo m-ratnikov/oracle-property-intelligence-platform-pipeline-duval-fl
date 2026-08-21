@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useEngineBoot } from "@/lib/hooks";
 import { runQuery } from "@/lib/duckdb";
 import { queryTableParquetUrl } from "@/lib/config";
@@ -16,6 +16,9 @@ import {
   formatMetres,
   formatTimestamp,
   formatUsd,
+  isDateOnlyColumn,
+  isTimestampColumn,
+  unpopulatedReason,
 } from "@/lib/format";
 import { lookupPropertyJson } from "@/lib/openData";
 import type { OpenDataLookup } from "@/lib/openData";
@@ -25,6 +28,20 @@ import { EngineStatus } from "@/components/EngineStatus";
 
 function Value({ column, value }: { column: string; value: unknown }) {
   if (value === null || value === undefined) {
+    /*
+     * Some columns are NULL because the source does not publish them at all, and saying only "not
+     * available" makes a documented absence look like a collection failure. owner_count is the
+     * one that matters most: the roll has no co-owner column, so the honest value is NULL and
+     * has_additional_owners is what a reader should look at instead.
+     */
+    const why = unpopulatedReason(column);
+    if (why !== null) {
+      return (
+        <span className="na" title={why} data-testid={`unpopulated-${column}`}>
+          not published by the source
+        </span>
+      );
+    }
     return <span className="na">{NOT_AVAILABLE}</span>;
   }
   if (CURRENCY_COLUMNS.has(column) && typeof value === "number") {
@@ -33,11 +50,13 @@ function Value({ column, value }: { column: string; value: unknown }) {
   if (METRE_COLUMNS.has(column) && typeof value === "number") {
     return <span className="mono">{formatMetres(value)}</span>;
   }
-  if (column === "fetched_at") {
-    return <span className="mono">{formatTimestamp(String(value))}</span>;
+  // fetched_at is a DuckDB TIMESTAMP and arrives as an epoch number over the Arrow bridge, so the
+  // raw value is handed to the formatter rather than a stringified integer.
+  if (isTimestampColumn(column)) {
+    return <span className="mono">{formatTimestamp(value)}</span>;
   }
-  if (column === "last_sale_date") {
-    return <span className="mono">{formatDateOnly(String(value))}</span>;
+  if (isDateOnlyColumn(column)) {
+    return <span className="mono">{formatDateOnly(value)}</span>;
   }
   if (column === "source_url" || (typeof value === "string" && /^https?:\/\//.test(value))) {
     return (
@@ -53,6 +72,68 @@ function Value({ column, value }: { column: string; value: unknown }) {
     return <span className={value ? "badge badge-good" : "badge badge-neutral"}>{value ? "yes" : "no"}</span>;
   }
   return <span>{displayCellForColumn(column, value)}</span>;
+}
+
+/**
+ * Where each group of values on this row actually came from.
+ *
+ * The published query table carries a `<family>_source` / `<family>_fetched_at` pair per column
+ * family, NULL on any row the family contributed nothing to, plus a `source_systems` list for the
+ * whole row. The canonical `source_system` column above describes only the appraisal roll spine, so
+ * without this a reviewer reading a transit distance or a water flag has no way to tell which
+ * system produced it, or that a blank one means the family never reached this parcel.
+ *
+ * Driven entirely by the pairs present in the row: the pipeline adds families without this page
+ * needing to know their names.
+ */
+function FamilyProvenance({ row }: { row: Record<string, unknown> }) {
+  const families = Object.keys(row)
+    .filter((column) => column.endsWith("_source") && `${column.slice(0, -7)}_fetched_at` in row)
+    .map((column) => column.slice(0, -"_source".length))
+    .sort();
+
+  if (families.length === 0) return null;
+
+  const contributing = families.filter((family) => row[`${family}_source`] !== null && row[`${family}_source`] !== undefined);
+  const systems = row.source_systems ? String(row.source_systems) : null;
+
+  return (
+    <div className="card card-pad mt-4">
+      <div className="text-[12.5px] font-semibold">Provenance per column family</div>
+      <p className="mt-1 text-[11.5px] text-muted">
+        {contributing.length} of {families.length} families contributed a value to this parcel. A
+        family with no source did not reach this row.
+      </p>
+      <dl className="kv mt-2 text-[12px]">
+        {families.map((family) => {
+          const source = row[`${family}_source`];
+          const fetched = row[`${family}_fetched_at`];
+          return (
+            <React.Fragment key={family}>
+              <dt className="mono">{family}</dt>
+              <dd>
+                {source === null || source === undefined ? (
+                  <span className="na" title="This family contributed no value to this parcel.">
+                    no value on this row
+                  </span>
+                ) : (
+                  <span className="inline-flex flex-wrap items-center gap-1.5">
+                    <span className="badge badge-neutral">{String(source)}</span>
+                    <span className="mono text-[11px] text-faint">{formatTimestamp(fetched)}</span>
+                  </span>
+                )}
+              </dd>
+            </React.Fragment>
+          );
+        })}
+      </dl>
+      {systems ? (
+        <p className="mt-2 text-[11.5px] text-faint">
+          <span className="mono">source_systems</span>: {systems}
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 function readArray(document: Record<string, unknown> | null, key: string): Record<string, unknown>[] {
@@ -127,19 +208,37 @@ export default function PropertyPage() {
 
   const extraColumns = useMemo(() => ungroupedColumns(columns), [columns]);
 
+  /*
+   * The fallback sale must come from last_sale_date_any, not last_sale_date.
+   *
+   * last_sale_date is the FDOR roll's own column and the roll carries only the two most recent
+   * transfers, so it is NULL on 352,233 of 404,023 parcels: falling back to it left the sales
+   * section empty on most properties even though the pipeline holds a recorded transfer for 99.5%
+   * of them. last_sale_date_any is the later of the roll sale and the City recorded sale, and
+   * tenure_basis names which one it was, so the row can say where the date came from instead of
+   * claiming a column that did not supply it.
+   */
   const sales = useMemo(() => {
     const fromJson = readArray(openData?.document ?? null, "sales");
     if (fromJson.length > 0) return fromJson;
-    if (row?.last_sale_date) {
-      return [
-        {
-          ownership_transfer_date: row.last_sale_date,
-          purchase_price_amount: row.last_sale_price ?? null,
-          source: "query table last_sale_date",
-        },
-      ];
-    }
-    return [];
+    const date = row?.last_sale_date_any ?? row?.last_sale_date ?? null;
+    if (date === null || date === undefined) return [];
+    const basis = row?.tenure_basis ? String(row.tenure_basis) : null;
+    const system = row?.tenure_source ? String(row.tenure_source) : null;
+    const label =
+      basis === null
+        ? "query table last_sale_date_any"
+        : system === null
+          ? `query table last_sale_date_any (${basis})`
+          : `query table last_sale_date_any (${basis} via ${system})`;
+    return [
+      {
+        ownership_transfer_date: date,
+        // The price is the roll's, so it only belongs on the row when the roll supplied the date.
+        purchase_price_amount: basis === "COJ_SALESL" ? null : (row?.last_sale_price ?? null),
+        source: label,
+      },
+    ];
   }, [openData, row]);
 
   const permits = useMemo(() => readArray(openData?.document ?? null, "permits"), [openData]);
@@ -254,7 +353,14 @@ export default function PropertyPage() {
                     <Value column="run_id" value={row.run_id} />
                   </dd>
                 </dl>
+                <p className="mt-2 text-[11.5px] text-faint">
+                  <span className="mono">source_system</span> names the appraisal roll spine this
+                  row is keyed on and nothing else. Every other group of values carries its own
+                  source below.
+                </p>
               </div>
+
+              <FamilyProvenance row={row} />
 
               <div className="card card-pad mt-4">
                 <div className="text-[12.5px] font-semibold">Per property IPFS JSON</div>

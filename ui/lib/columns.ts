@@ -14,7 +14,54 @@ export interface ColumnGroup {
   columns: string[];
 }
 
-export const PROVENANCE_COLUMNS = ["source_system", "source_url", "fetched_at", "run_id"] as const;
+/**
+ * The families the pipeline publishes a `<key>_source` / `<key>_fetched_at` pair for.
+ *
+ * Mirrors SOURCE_FAMILIES in pipeline/src/features/build.ts. Order matters only for display.
+ */
+export const SOURCE_FAMILIES = [
+  { key: "appraisal", label: "FDOR NAL tax roll (Duval property appraiser)" },
+  { key: "sales", label: "FDOR SDF sales data file and the roll's own sale columns" },
+  { key: "geometry", label: "FDOR PAR parcel shapefile" },
+  { key: "structure", label: "Duval Property Appraiser detail pages" },
+  { key: "permit", label: "City of Jacksonville JaxEPICS permits" },
+  { key: "business", label: "Florida Division of Corporations (Sunbiz)" },
+  { key: "contractor", label: "Florida DBPR CILB licensees" },
+  { key: "transit", label: "JTA GTFS static feed" },
+  { key: "places", label: "Overture Maps places" },
+  { key: "water", label: "COJ river polygons and USGS NHD hydrography" },
+  { key: "parcel_layer", label: "COJ parcel layer" },
+  { key: "address", label: "COJ address points (ERAT)" },
+] as const;
+
+export const FAMILY_PROVENANCE_COLUMNS = SOURCE_FAMILIES.flatMap((family) => [
+  `${family.key}_source`,
+  `${family.key}_fetched_at`,
+]);
+
+/**
+ * Provenance, at two levels.
+ *
+ * source_system / source_url / fetched_at are the canonical Elephant columns and they describe the
+ * APPRAISAL ROLL SPINE only. They are the same value on every row and they say nothing about where
+ * a transit distance or a water flag came from. The per family pairs are what answer that, and
+ * source_systems lists every system that put a value on the row.
+ *
+ * Both levels are listed here because both are provenance: the UI must not present the canonical
+ * three as if they covered the whole row, which is what it did before the pipeline published the
+ * family columns.
+ */
+export const PROVENANCE_COLUMNS = [
+  "source_system",
+  "source_url",
+  "fetched_at",
+  "run_id",
+  "source_systems",
+  ...FAMILY_PROVENANCE_COLUMNS,
+] as const;
+
+/** The three canonical columns every preset carries inline beside its evidence rows. */
+export const SPINE_PROVENANCE_COLUMNS = ["source_system", "source_url", "fetched_at"] as const;
 
 export const COLUMN_GROUPS: ColumnGroup[] = [
   {
@@ -49,8 +96,9 @@ export const COLUMN_GROUPS: ColumnGroup[] = [
   },
   {
     title: "Roof age",
-    description: "Derived. roof_age_basis names the evidence behind roof_year_est.",
-    columns: ["roof_year_est", "roof_age_basis"],
+    description:
+      "Derived. roof_age_basis names what stands behind roof_year_est, and for this county that is the appraiser's effective year built on every row: no re-roof permit feed was harvested, so nothing here is a permit derived roof date.",
+    columns: ["roof_year_est", "roof_age_basis", "roof_age_years"],
   },
   {
     title: "Land",
@@ -64,20 +112,37 @@ export const COLUMN_GROUPS: ColumnGroup[] = [
   },
   {
     title: "Ownership",
-    description: "Owner of record plus the derived region class used by the regional owner question.",
+    description:
+      "Owner of record, the mailing address the region class was computed from, and the class itself. owner_count is NULL on every row: the FDOR NAL roll publishes one 30 character owner name per parcel and no co-owner column, so has_additional_owners (the ET AL / ET UX marker) is the only multi owner signal the source has, and owners_text equals owner_name on every row.",
     columns: [
       "owner_name",
       "owners_text",
       "owner_count",
+      "has_additional_owners",
       "owner_occupied",
+      "owner_mailing_city",
+      "owner_mailing_state",
+      "owner_mailing_zip",
       "owner_region_class",
       "hoa_flag",
     ],
   },
   {
-    title: "Sales",
-    description: "Most recent recorded transfer, and how long ago that was.",
-    columns: ["last_sale_date", "last_sale_price", "years_since_last_sale"],
+    title: "Sales and tenure",
+    description:
+      "last_sale_date_any is the date tenure is measured from: the later of the FDOR roll sale and the COJ recorded sale, with tenure_basis naming which column it came from and tenure_source naming the system. has_sale_on_record is what separates no transfer on record from a long hold. last_sale_date is the roll's own column and is NULL on 87 percent of parcels, because the roll and SDF cover only the two most recent transfers.",
+    columns: [
+      "last_sale_date_any",
+      "tenure_basis",
+      "tenure_source",
+      "has_sale_on_record",
+      "years_since_last_sale",
+      "no_sale_10y_flag",
+      "last_sale_date",
+      "coj_last_sale_date",
+      "last_sale_price",
+      "sale_count",
+    ],
   },
   {
     title: "Permits and businesses",
@@ -101,7 +166,8 @@ export const COLUMN_GROUPS: ColumnGroup[] = [
   },
   {
     title: "Provenance",
-    description: "Where this row came from and when it was collected.",
+    description:
+      "source_system, source_url and fetched_at describe the appraisal roll spine only, not the enrichment columns. source_systems lists every system that contributed a value to this row, and each <family>_source / <family>_fetched_at pair says where one family of columns came from and when.",
     columns: [...PROVENANCE_COLUMNS],
   },
 ];
@@ -153,12 +219,28 @@ export const CANONICAL_COLUMNS = [
   "hoa_flag",
 ] as const;
 
-/** Columns the pipeline adds beyond the canonical contract. */
+/**
+ * Columns the pipeline adds beyond the canonical contract.
+ *
+ * This list is the UI's contract with the pipeline, not a description of it: the Data page reports
+ * anything here that the published parquet does not carry, and tests/presets.test.ts fails when one
+ * goes missing. Adding a column here is how the UI says it depends on it.
+ */
 export const EXTRA_COLUMNS = [
+  "last_sale_date_any",
+  "tenure_basis",
+  "tenure_source",
+  "has_sale_on_record",
+  "no_sale_10y_flag",
+  "coj_last_sale_date",
   "years_since_last_sale",
+  "has_additional_owners",
+  "owner_mailing_city",
+  "owner_mailing_state",
   "owner_region_class",
   "roof_year_est",
   "roof_age_basis",
+  "roof_age_years",
   "water_view_flag",
   "water_dist_m",
   "water_basis",
@@ -166,9 +248,7 @@ export const EXTRA_COLUMNS = [
   "nearest_transit_stop_name",
   "nearest_starbucks_m",
   "nearest_starbucks_name",
-  "source_url",
-  "fetched_at",
-  "run_id",
+  ...PROVENANCE_COLUMNS.filter((column) => column !== "source_system"),
 ] as const;
 
 export const ALL_EXPECTED_COLUMNS = [...CANONICAL_COLUMNS, ...EXTRA_COLUMNS];

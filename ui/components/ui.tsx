@@ -3,6 +3,28 @@
 import { useCopy } from "@/lib/hooks";
 import { NOT_AVAILABLE, shortenId } from "@/lib/format";
 
+/**
+ * Ask the document to start fetching the artifacts this page needs.
+ *
+ * React hoists these <link> elements into <head>, and every page here is prerendered to static
+ * HTML, so the browser opens the requests while it is still parsing the document rather than after
+ * the bundle has downloaded, parsed and hydrated. On the overview that is the difference between
+ * the run history request leaving at hydration time and leaving immediately.
+ *
+ * Declared per page rather than in the layout: the run history is 600 KB, and the workbench never
+ * reads it.
+ */
+export function ArtifactPreload({ urls }: { urls: (string | null | undefined)[] }) {
+  const wanted = [...new Set(urls.filter((url): url is string => !!url))];
+  return (
+    <>
+      {wanted.map((url) => (
+        <link key={url} rel="preload" as="fetch" href={url} crossOrigin="anonymous" />
+      ))}
+    </>
+  );
+}
+
 export function PageHeader({
   title,
   lead,

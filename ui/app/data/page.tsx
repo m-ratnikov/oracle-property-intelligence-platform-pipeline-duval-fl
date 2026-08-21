@@ -15,7 +15,22 @@ import {
 } from "@/lib/sql";
 import { ALL_EXPECTED_COLUMNS, CANONICAL_COLUMNS, EXTRA_COLUMNS } from "@/lib/columns";
 import { formatInt, formatTimestamp, NOT_AVAILABLE } from "@/lib/format";
-import { PageHeader, Section, Callout, Spinner, ErrorBox, Stat } from "@/components/ui";
+import {
+  blockedReasons,
+  parseCoverageStatuses,
+  STATE_BADGE,
+  STATE_LABEL,
+  unavailableSources,
+} from "@/lib/coverageStatus";
+import {
+  ArtifactPreload,
+  PageHeader,
+  Section,
+  Callout,
+  Spinner,
+  ErrorBox,
+  Stat,
+} from "@/components/ui";
 import { CoverageBar, NonNullBar } from "@/components/Charts";
 import { EngineStatus } from "@/components/EngineStatus";
 import { SampleBadge } from "@/components/SampleBanner";
@@ -124,8 +139,20 @@ export default function DataPage() {
     0,
   );
 
+  /*
+   * The published snapshot carries more than counts. Each source also records whether it is
+   * implemented, whether the source itself blocks collection, why the last run skipped it and the
+   * limitations the pipeline documented. The shared coverage parser models only the counts, so the
+   * flags are read from the same response's raw JSON. Without them a blocked source and a complete
+   * one are the same arithmetic, which is how a WAF that 403s every request rendered as a full bar.
+   */
+  const statuses = useMemo(() => parseCoverageStatuses(coverage.raw), [coverage.raw]);
+  const unavailable = useMemo(() => unavailableSources(statuses), [statuses]);
+  const ingestedSources = coverageDatasets.length - unavailable.length;
+
   return (
     <div>
+      <ArtifactPreload urls={[config.coverageUrl]} />
       <PageHeader
         title="Data and coverage"
         lead="What is actually loaded, how much of each source that represents, and which published columns are empty. The numbers on this page are computed live, not written down."
@@ -135,24 +162,40 @@ export default function DataPage() {
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat
           label="Parcels in query table"
-          value={engine.stage === "ready" ? formatInt(engine.rowCount) : "..."}
-          hint="one row per folio, the query table contract"
+          loading={engine.stage !== "ready"}
+          value={formatInt(engine.rowCount)}
+          hint={
+            engine.stage === "ready"
+              ? "one row per folio, the query table contract"
+              : engine.message
+          }
         />
         <Stat
           label="Rows across all sources"
-          value={coverage.loading ? "..." : formatInt(totalIngested)}
-          hint={`${coverageDatasets.length} datasets in the coverage snapshot`}
+          loading={coverage.loading}
+          value={formatInt(totalIngested)}
+          hint={
+            coverage.loading
+              ? "reading the published coverage snapshot"
+              : `${ingestedSources} of ${coverageDatasets.length} registered sources carry rows`
+          }
         />
         <Stat
           label="Published columns"
-          value={engine.stage === "ready" ? formatInt(engine.columns.length) : "..."}
+          loading={engine.stage !== "ready"}
+          value={formatInt(engine.columns.length)}
           hint={`${CANONICAL_COLUMNS.length} canonical plus pipeline extras`}
         />
         <Stat
           label="Columns with no data"
-          value={columnCoverage ? formatInt(emptyColumns.length) : "..."}
+          loading={columnCoverage === null}
+          value={formatInt(emptyColumns.length)}
           tone={emptyColumns.length > 0 ? "warn" : "good"}
-          hint="published but entirely null, listed below"
+          hint={
+            columnCoverage === null
+              ? "counting non null values across every column"
+              : "published but entirely null, listed below"
+          }
         />
       </div>
 
@@ -169,12 +212,43 @@ export default function DataPage() {
       <div className="mt-7">
         <Section
           title="Coverage per source"
-          description="From the published dataset-coverage snapshot. Expected counts come from the source itself where the source publishes one. Where it does not, this page says so instead of inventing a denominator."
+          description="From the published dataset-coverage snapshot. Expected counts come from the source itself where the source publishes one. Where it does not, this page says so instead of inventing a denominator, and a source that could not be collected at all is reported as blocked rather than as complete."
         >
           {coverage.loading ? <Spinner label="Loading coverage snapshot" /> : null}
           {coverage.error ? (
             <ErrorBox title="Coverage snapshot unavailable" message={coverage.error} />
           ) : null}
+
+          {unavailable.length > 0 ? (
+            <div className="mb-3" data-testid="unavailable-sources">
+              <Callout
+                tone="warn"
+                title={`${unavailable.length} of ${coverageDatasets.length} registered sources carry no rows`}
+              >
+                <p>
+                  {ingestedSources} sources were ingested. The rest are listed here with the reason
+                  the pipeline recorded, taken verbatim from the published snapshot. None of them is
+                  counted as coverage anywhere on this page.
+                </p>
+                <ul className="mt-1.5 space-y-1.5">
+                  {unavailable.map((status) => (
+                    <li key={status.source}>
+                      <span className="mono font-semibold">{status.source}</span>{" "}
+                      <span className={STATE_BADGE[status.state]}>{STATE_LABEL[status.state]}</span>
+                      <ul className="mt-0.5 list-disc pl-5">
+                        {blockedReasons(status).map((reason) => (
+                          <li key={reason} className="text-[12px]" style={{ whiteSpace: "normal" }}>
+                            {reason}
+                          </li>
+                        ))}
+                      </ul>
+                    </li>
+                  ))}
+                </ul>
+              </Callout>
+            </div>
+          ) : null}
+
           {coverageDatasets.length > 0 ? (
             <div className="table-wrap" style={{ maxHeight: "none" }}>
               <table className="grid">
@@ -183,47 +257,74 @@ export default function DataPage() {
                     <th>source</th>
                     <th className="num">ingested</th>
                     <th className="num">expected</th>
-                    <th style={{ minWidth: 210 }}>coverage</th>
+                    <th style={{ minWidth: 240 }}>coverage</th>
                     <th>first loaded</th>
                     <th>last loaded</th>
                     <th>ipns label</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {coverageDatasets.map((dataset) => (
-                    <tr key={dataset.source}>
-                      <td className="mono font-semibold">{dataset.source}</td>
-                      <td className="num">{formatInt(dataset.ingested_count)}</td>
-                      <td className="num">
-                        {dataset.expected_count === null ? (
-                          <span className="na">{NOT_AVAILABLE}</span>
-                        ) : (
-                          formatInt(dataset.expected_count)
-                        )}
-                      </td>
-                      <td>
-                        <CoverageBar
-                          ingested={dataset.ingested_count}
-                          expected={dataset.expected_count}
-                          rowsFromOtherTracks={dataset.rows_from_other_tracks}
-                          additionalRowsBySource={dataset.additional_rows_by_source}
-                        />
-                      </td>
-                      <td className="mono text-[11.5px]">
-                        {formatTimestamp(dataset.first_loaded_at)}
-                      </td>
-                      <td className="mono text-[11.5px]">
-                        {formatTimestamp(dataset.last_loaded_at)}
-                      </td>
-                      <td className="mono text-[11.5px]">
-                        {dataset.ipns_label ?? <span className="na">{NOT_AVAILABLE}</span>}
-                      </td>
-                    </tr>
-                  ))}
+                  {coverageDatasets.map((dataset) => {
+                    const status = statuses.get(dataset.source);
+                    /*
+                     * A source that ingested nothing has no denominator, whatever integer the
+                     * snapshot happens to carry. `expected_count` is what the last completed run
+                     * staged, so a blocked source reports 0 there; printing that 0 beside a 0
+                     * ingested count is what produced "0 / 0 = 100.0%".
+                     */
+                    const expectedIsMeasured =
+                      dataset.expected_count !== null &&
+                      dataset.expected_count !== 0 &&
+                      (dataset.ingested_count ?? 0) > 0;
+                    return (
+                      <tr key={dataset.source} data-testid={`coverage-row-${dataset.source}`}>
+                        <td className="mono font-semibold">{dataset.source}</td>
+                        <td className="num">{formatInt(dataset.ingested_count)}</td>
+                        <td className="num">
+                          {expectedIsMeasured ? (
+                            formatInt(dataset.expected_count)
+                          ) : (
+                            <span
+                              className="na"
+                              title="No completed run staged rows from this source, so there is no expected total to compare against."
+                            >
+                              {NOT_AVAILABLE}
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          <CoverageBar
+                            ingested={dataset.ingested_count}
+                            expected={expectedIsMeasured ? dataset.expected_count : null}
+                            rowsFromOtherTracks={dataset.rows_from_other_tracks}
+                            additionalRowsBySource={dataset.additional_rows_by_source}
+                            status={status}
+                          />
+                        </td>
+                        <td className="mono text-[11.5px]">
+                          {formatTimestamp(dataset.first_loaded_at)}
+                        </td>
+                        <td className="mono text-[11.5px]">
+                          {formatTimestamp(dataset.last_loaded_at)}
+                        </td>
+                        <td className="mono text-[11.5px]">
+                          {dataset.ipns_label ?? <span className="na">{NOT_AVAILABLE}</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           ) : null}
+
+          <p className="mt-2 max-w-3xl text-[12.5px] text-muted">
+            Where <span className="mono">expected</span> equals{" "}
+            <span className="mono">ingested</span>, the expected total is what the last completed run
+            staged from the source rather than a figure the source publishes separately, so the
+            meter reads &quot;everything the source offered was stored&quot; and not &quot;this is
+            all the data that exists&quot;.
+          </p>
         </Section>
 
         <Section
@@ -250,10 +351,10 @@ export default function DataPage() {
                           <td className="mono">{String(row.source_system)}</td>
                           <td className="num">{formatInt(Number(row.rows))}</td>
                           <td className="mono text-[11.5px]">
-                            {formatTimestamp(String(row.first_fetched_at ?? ""))}
+                            {formatTimestamp(row.first_fetched_at)}
                           </td>
                           <td className="mono text-[11.5px]">
-                            {formatTimestamp(String(row.last_fetched_at ?? ""))}
+                            {formatTimestamp(row.last_fetched_at)}
                           </td>
                         </tr>
                       ))}
@@ -285,7 +386,7 @@ export default function DataPage() {
                           <td className="mono">{String(row.run_id)}</td>
                           <td className="num">{formatInt(Number(row.parcels_touched))}</td>
                           <td className="mono text-[11.5px]">
-                            {formatTimestamp(String(row.last_fetched_at ?? ""))}
+                            {formatTimestamp(row.last_fetched_at)}
                           </td>
                         </tr>
                       ))}

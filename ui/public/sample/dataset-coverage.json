@@ -10,8 +10,8 @@
       "ingested_count": 436720,
       "expected_count": 421000,
       "first_loaded_at": "2026-08-19T06:00:00.000Z",
-      "last_loaded_at": "2026-08-21T06:20:00.000Z",
-      "cid": "bafybeisampleq6pfjnhvevro2lnh22ofl5zlotksnfalebqreuaq2k6dhb",
+      "last_loaded_at": "2026-08-21T06:28:00.000Z",
+      "cid": "bafybeisamplejcekahme5h5s4tqzdintkk6wgfvzpcjs7b6nhgv6w3giy6",
       "ipns_label": "oracle-appraisal-duval"
     },
     {
@@ -20,8 +20,8 @@
       "ingested_count": 101760,
       "expected_count": 104000,
       "first_loaded_at": "2026-08-19T06:00:00.000Z",
-      "last_loaded_at": "2026-08-21T06:20:00.000Z",
-      "cid": "bafybeisample3ncliseeybwitzgtof7hhu5ig5fo6xd5elnbzk44arj6th",
+      "last_loaded_at": "2026-08-21T06:28:00.000Z",
+      "cid": "bafybeisampleo2gasetysinmyelufv5itr5nna4qodxlq2ucjlqgfdfwws",
       "ipns_label": "oracle-sales-duval"
     },
     {
@@ -30,8 +30,8 @@
       "ingested_count": 61480,
       "expected_count": 62000,
       "first_loaded_at": "2026-08-19T06:00:00.000Z",
-      "last_loaded_at": "2026-08-21T06:20:00.000Z",
-      "cid": "bafybeisamplem2u6bspbxpgpnksj6x7hxskpm4ds5a7chofjcocuoz7gnl",
+      "last_loaded_at": "2026-08-21T06:28:00.000Z",
+      "cid": "bafybeisamplevtopxk6jbx2jzhrldu56chi4rbappyz5vasixgrn3fvtdj",
       "ipns_label": "oracle-addresses-duval"
     },
     {
@@ -40,8 +40,8 @@
       "ingested_count": 22260,
       "expected_count": 48000,
       "first_loaded_at": "2026-08-19T06:00:00.000Z",
-      "last_loaded_at": "2026-08-21T06:20:00.000Z",
-      "cid": "bafybeisampleucrhzfu4emoyid563i6i7fwq2hkehkns6jqtjqjxv5gzaq",
+      "last_loaded_at": "2026-08-21T06:28:00.000Z",
+      "cid": "bafybeisample6nbwiokxkoclie5xao2fbhx5kboeqbrgnzy7kdxnggbnee",
       "ipns_label": "oracle-permits-duval"
     },
     {
@@ -50,8 +50,8 @@
       "ingested_count": 9540,
       "expected_count": 14000,
       "first_loaded_at": "2026-08-19T06:00:00.000Z",
-      "last_loaded_at": "2026-08-21T06:20:00.000Z",
-      "cid": "bafybeisample2b5zga5ybl3o4zl2fco62kdecm6ne4utjxsqn6tejs5fsp",
+      "last_loaded_at": "2026-08-21T06:28:00.000Z",
+      "cid": "bafybeisamplevjuzrttz6znugri3s5yio2vvgycucmb7ypxfup3w4pmjoq",
       "ipns_label": "oracle-contractors-duval"
     },
     {
@@ -60,8 +60,8 @@
       "ingested_count": 14840,
       "expected_count": 18500,
       "first_loaded_at": "2026-08-19T06:00:00.000Z",
-      "last_loaded_at": "2026-08-21T06:20:00.000Z",
-      "cid": "bafybeisamplew6ynp3uvl5z7yyll5cfsi7issi3coxthrfcmv3eewcp265",
+      "last_loaded_at": "2026-08-21T06:28:00.000Z",
+      "cid": "bafybeisampleuozk2lbzybtpbbk5fo3wekvsqdafdgnwlf5zgo7236yvbt",
       "ipns_label": "oracle-sunbiz-duval"
     },
     {
@@ -70,8 +70,8 @@
       "ingested_count": 6360,
       "expected_count": 7100,
       "first_loaded_at": "2026-08-19T06:00:00.000Z",
-      "last_loaded_at": "2026-08-21T06:20:00.000Z",
-      "cid": "bafybeisample7l55xnczks65ivxifko7cwn3cqox646yd5j4ragb4lvcq7",
+      "last_loaded_at": "2026-08-21T06:28:00.000Z",
+      "cid": "bafybeisampletkdrbsv2sjzybuwvqjmpfzkyi4weolcprg4y44muewvaay",
       "ipns_label": "oracle-places-duval"
     },
     {
@@ -80,8 +80,8 @@
       "ingested_count": 3180,
       "expected_count": 3200,
       "first_loaded_at": "2026-08-19T06:00:00.000Z",
-      "last_loaded_at": "2026-08-21T06:20:00.000Z",
-      "cid": "bafybeisample3t3gsqd5db3zpmmco3veomalxhhro6lr6n5qygccglfbca",
+      "last_loaded_at": "2026-08-21T06:28:00.000Z",
+      "cid": "bafybeisamplehrcy5cwvlggytwdvjiutcgs73givf4vvzfdoaipfpn63k3",
       "ipns_label": "oracle-transit-duval"
     },
     {
@@ -90,8 +90,8 @@
       "ingested_count": 2120,
       "expected_count": 2100,
       "first_loaded_at": "2026-08-19T06:00:00.000Z",
-      "last_loaded_at": "2026-08-21T06:20:00.000Z",
-      "cid": "bafybeisample5fexymrs4xt3ptks3sx3vnei5t62wnd7uv5indjlsbjqse",
+      "last_loaded_at": "2026-08-21T06:28:00.000Z",
+      "cid": "bafybeisamplesq3l3b5vkso24ovja3damzy7cf74hcoqv7ctysfkndq4ub",
       "ipns_label": "oracle-hydrography-duval"
     }
   ]

@@ -3,7 +3,7 @@ import "./globals.css";
 import { Nav } from "@/components/Nav";
 import { ResizableColumns } from "@/components/ResizableColumns";
 import { SampleBanner } from "@/components/SampleBanner";
-import { config } from "@/lib/config";
+import { artifactOrigins, config } from "@/lib/config";
 
 export const metadata: Metadata = {
   title: {
@@ -15,8 +15,23 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  /*
+   * Every page reads its data from an IPFS gateway, and nothing can be fetched until DNS, TLS and
+   * the connection are up. Opening them while the document is still parsing moves that setup off
+   * the critical path of the first screen, which is a run summary with four stat tiles that stay
+   * empty until the first artifact lands. React hoists these into <head>.
+   */
+  const origins = artifactOrigins();
   return (
     <html lang="en">
+      <head>
+        {origins.map((origin) => (
+          <link key={`pre-${origin}`} rel="preconnect" href={origin} crossOrigin="anonymous" />
+        ))}
+        {origins.map((origin) => (
+          <link key={`dns-${origin}`} rel="dns-prefetch" href={origin} />
+        ))}
+      </head>
       <body>
         <SampleBanner />
         <Nav />

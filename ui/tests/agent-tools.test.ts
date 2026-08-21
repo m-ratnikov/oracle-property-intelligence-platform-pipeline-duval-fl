@@ -69,13 +69,26 @@ describe("db helpers", () => {
 describe("get_schema", () => {
   it("lists every expected column with a meaning and the eight rules", async () => {
     const { tools: t, trace } = tools();
-    const output = await exec<{ columns: { name: string; meaning: string }[]; rules: unknown[]; is_sample: boolean }>(
-      t.get_schema,
-      {},
-    );
-    const names = output.columns.map((column) => column.name);
-    for (const column of ALL_EXPECTED_COLUMNS) expect(names).toContain(column);
+    const output = await exec<{
+      columns: { name: string; meaning: string }[];
+      provenance_families: { family: string; source: string; fetched_at: string }[];
+      column_count: number;
+      rules: unknown[];
+      is_sample: boolean;
+    }>(t.get_schema, {});
+    // The per family provenance pairs follow one pattern, so they are described once in
+    // provenance_families rather than repeating the same sentence twenty four times in a result
+    // that is re-sent on every step of the loop. Between the two, every expected column is covered.
+    const names = new Set(output.columns.map((column) => column.name));
+    for (const family of output.provenance_families) {
+      names.add(family.source);
+      names.add(family.fetched_at);
+    }
+    for (const column of ALL_EXPECTED_COLUMNS) expect([...names]).toContain(column);
     for (const column of output.columns) expect(column.meaning.length).toBeGreaterThanOrEqual(8);
+    expect(output.provenance_families.length).toBeGreaterThan(0);
+    // column_count still reports the real width of the view, not the trimmed catalogue.
+    expect(output.column_count).toBeGreaterThan(output.columns.length);
     expect(output.rules).toHaveLength(8);
     expect(output.is_sample).toBe(true);
     expect(trace.calls).toHaveLength(1);

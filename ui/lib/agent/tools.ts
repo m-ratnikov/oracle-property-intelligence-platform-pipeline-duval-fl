@@ -18,12 +18,16 @@ import { loadPropertyJson, loadRunHistory } from "./artifacts";
 import {
   PRESET_NAME_LIST,
   PROVENANCE,
+  SPINE_PROVENANCE,
   describeColumn,
+  evidenceGuideCompact,
   presetFor,
-  ruleDescriptions,
+  provenanceFamilies,
+  ruleCatalogue,
   THRESHOLDS,
   type PresetName,
 } from "./schema";
+import { FAMILY_PROVENANCE_COLUMNS } from "@/lib/columns";
 import type { AgentDataFreshness, AgentEvidenceRow, AgentToolCall } from "./types";
 import { logAgent } from "./log";
 
@@ -153,7 +157,7 @@ function noteDataCaveats(trace: ToolTrace, rows: Row[]) {
   if (proxy > 0) {
     addAssumption(
       trace,
-      `${proxy} of ${rows.length} returned rows have roof_age_basis = year built proxy (EFF_YR_BLT_PROXY): the county publishes no roof date for them, so built_year stands in for the roof year. Re-roofs without a permit on file are over counted.`,
+      `${proxy} of ${rows.length} returned rows have a PROXY roof_age_basis (EFF_YR_BLT_PROXY / ACT_YR_BLT_PROXY): no county roof date exists for them, so the appraiser's year built stands in and the row is NOT a permit derived roof date. Only roof_age_basis = PERMIT is a roof date, and the permit source is enumerated in bounded windows, so a parcel whose re-roof permit has not been reached yet is indistinguishable here from one never re-roofed. Both over state roof age.`,
     );
   }
   const nullTransit = rows.filter(
@@ -180,7 +184,38 @@ function noteDataCaveats(trace: ToolTrace, rows: Row[]) {
   if (nullSale > 0) {
     addAssumption(
       trace,
-      `${nullSale} of ${rows.length} returned rows have no recorded sale (years_since_last_sale NULL). A missing sale is not evidence of a long hold.`,
+      `${nullSale} of ${rows.length} returned rows have years_since_last_sale NULL, which happens only when has_sale_on_record is false and tenure_basis reads NO_SALE_ON_RECORD: no source records any transfer for the parcel. The long hold rule EXCLUDES them. No transfer on record is a gap in the record, NOT evidence of a long hold, and the two must be reported as different findings.`,
+    );
+  }
+  // The 87 percent null column. If the model selected it anyway, the answer is about to show a
+  // table of "not available" beside a correct count, which reads as a fabricated answer.
+  const nullRollSale = rows.filter(
+    (row) => "last_sale_date" in row && row.last_sale_date === null,
+  ).length;
+  if (nullRollSale > 0) {
+    addAssumption(
+      trace,
+      `${nullRollSale} of ${rows.length} returned rows have last_sale_date NULL. That column comes from the FDOR roll and SDF only, which cover the two most recent transfers, so it is null on 87 percent of Duval parcels. It is NOT what years_since_last_sale is measured from. Cite last_sale_date_any, tenure_basis and tenure_source instead.`,
+    );
+  }
+  const noSaleOnRecord = rows.filter(
+    (row) => row.has_sale_on_record === false || row.tenure_basis === "NO_SALE_ON_RECORD",
+  ).length;
+  if (noSaleOnRecord > 0) {
+    addAssumption(
+      trace,
+      `${noSaleOnRecord} of ${rows.length} returned rows have has_sale_on_record = false (tenure_basis NO_SALE_ON_RECORD). No source records any transfer for those parcels, so their tenure columns are NULL for that reason and not because the property was held a long time.`,
+    );
+  }
+  const placeholderTenure = rows.filter(
+    (row) =>
+      typeof row.years_since_last_sale === "number" &&
+      row.years_since_last_sale > THRESHOLDS.tenure_plausible_max_years,
+  ).length;
+  if (placeholderTenure > 0) {
+    addAssumption(
+      trace,
+      `${placeholderTenure} of ${rows.length} returned rows report a tenure longer than ${THRESHOLDS.tenure_plausible_max_years} years. Those are placeholder dates in the City recorded sales file (1899 and 1800 arrive as 127 and 226), not century long holds. They satisfy the rule and stay in the count, but do not present one as an example.`,
     );
   }
 }
@@ -239,40 +274,56 @@ export function createAgentTools(context: ToolContext, trace: ToolTrace) {
 
   const get_schema = tool({
     description:
-      "Describe the `properties` view: every column with its DuckDB type and a one line meaning, plus the six standard question rules in plain English (thresholds, evidence columns, known caveats). Call once before writing SQL.",
+      "Describe the `properties` view: every column with its DuckDB type and a one line meaning, the six standard question rules in plain English (thresholds, evidence columns, known caveats), and `evidence_guide`, which names the column to cite for each question and the lookalike column to avoid. Call once before writing SQL. Read evidence_guide before choosing columns: for ownership tenure the answer is in last_sale_date_any and tenure_basis, not in last_sale_date, which is null on about 87 percent of parcels.",
     inputSchema: z.object({}),
     execute: async () => {
       const started = Date.now();
       try {
         const described = await db.query(`DESCRIBE ${VIEW_NAME}`);
-        const columns = described.rows.map((row) => ({
-          name: String(row.column_name),
-          type: String(row.column_type),
-          meaning: describeColumn(String(row.column_name)),
-        }));
+        // The per family provenance pairs follow one pattern and are described once, below, rather
+        // than repeating the same sentence twenty four times in a result that is re-sent on every
+        // step of the loop.
+        const familyColumns = new Set(FAMILY_PROVENANCE_COLUMNS);
+        const allNames = described.rows.map((row) => String(row.column_name));
+        const columns = described.rows
+          .filter((row) => !familyColumns.has(String(row.column_name)))
+          .map((row) => ({
+            name: String(row.column_name),
+            type: String(row.column_type),
+            meaning: describeColumn(String(row.column_name)),
+          }));
         const output = {
           view: VIEW_NAME,
           source: db.source,
           is_sample: db.isSample,
-          column_count: columns.length,
+          column_count: allNames.length,
           columns,
-          provenance_columns: PROVENANCE,
+          spine_provenance_columns: SPINE_PROVENANCE,
+          provenance_families: provenanceFamilies().filter((family) =>
+            allNames.includes(family.source),
+          ),
           thresholds: THRESHOLDS,
-          rules: ruleDescriptions(),
+          rules: ruleCatalogue(),
+          evidence_guide: evidenceGuideCompact(),
           notes: [
             "One row per folio (property_id). Extra derived columns sit next to the 37 canonical Elephant columns.",
             "DuckDB SQL dialect. Use EXTRACT(YEAR FROM CURRENT_DATE) for the current year.",
             "run_sql accepts a single SELECT or WITH statement; results are capped at 200 rows.",
+            "Ownership tenure comes from last_sale_date_any (401,832 of 404,023 rows) with tenure_basis and tenure_source naming where it came from, never from last_sale_date (NULL on 352,233 rows). years_since_last_sale is NULL exactly when has_sale_on_record is false, and such a parcel is EXCLUDED from the long hold rule, never counted as a long hold. tenure_basis is never NULL: it reads NO_SALE_ON_RECORD instead, so do not test it with IS NULL.",
+            "owner_count is NULL on every row. The FDOR roll has no co-owner column, so has_additional_owners (the ET AL / ET UX marker) is the only multi owner signal; never present owner_count as a number.",
+            "roof_year_est is a roof date only where roof_age_basis says PERMIT. EFF_YR_BLT_PROXY and ACT_YR_BLT_PROXY mean the year built is standing in, which over states roof age.",
+            "source_system, source_url and fetched_at describe the appraisal roll spine only and are identical on every row. Per family provenance is in <family>_source / <family>_fetched_at, and source_systems lists every system that contributed to a row.",
+            "This session can read only the published `properties` view. The engine is opened with external file system and network access disabled and its configuration locked, so file and URL readers (read_text, read_blob, read_csv_auto, glob, a read_parquet of any other path) will fail. That is by design; do not try to work around it.",
           ],
         };
         record(trace, {
           name: "get_schema",
           input: {},
-          summary: `${columns.length} columns, ${output.rules.length} rules`,
-          output_summary: `${columns.length} columns, ${output.rules.length} rules`,
+          summary: `${allNames.length} columns, ${output.rules.length} rules`,
+          output_summary: `${allNames.length} columns, ${output.rules.length} rules`,
           elapsed_ms: Date.now() - started,
-          row_count: columns.length,
-          result: { column_count: columns.length, is_sample: db.isSample },
+          row_count: allNames.length,
+          result: { column_count: allNames.length, is_sample: db.isSample },
         });
         return output;
       } catch (error) {
@@ -293,9 +344,14 @@ export function createAgentTools(context: ToolContext, trace: ToolTrace) {
 
   const run_sql = tool({
     description:
-      "Run ONE read only SELECT or WITH statement against the `properties` view in DuckDB and return the rows. Mutations, multiple statements, ATTACH/COPY/INSTALL are rejected. The result is capped at `limit` rows (default 50, max 200); `total_matched` reports the full match when the cap cut rows off. Use for combinations, rankings and aggregates the presets do not cover.",
+      "Run ONE read only SELECT or WITH statement against the `properties` view in DuckDB and return the rows. Use for combinations, rankings and aggregates the presets do not cover. `properties` is the ONLY readable object: mutations, multiple statements, ATTACH/COPY/INSTALL, and every file or URL reader (read_text, read_blob, read_csv_auto, read_json_auto, glob, read_parquet of any other path) are rejected, and the engine itself refuses them too. The result is capped at `limit` rows (default 50, max 200); `total_matched` reports the full match when the cap cut rows off. Select the evidence columns from get_schema's evidence_guide: for ownership tenure that is last_sale_date_any, tenure_basis, tenure_source and years_since_last_sale, plus has_sale_on_record to separate no transfer on record from a long hold, and NOT last_sale_date, which is NULL on 352,233 of 404,023 parcels; for roof age it is roof_year_est with roof_age_basis beside it, and roof_covering_material is null on most or all rows. owner_count is NULL on every row: use has_additional_owners.",
     inputSchema: z.object({
-      sql: z.string().min(1).describe("A single SELECT or WITH statement over `properties`."),
+      sql: z
+        .string()
+        .min(1)
+        .describe(
+          "A single SELECT or WITH statement over `properties`. No other table, file or URL can be read.",
+        ),
       limit: z
         .number()
         .int()
@@ -376,7 +432,7 @@ export function createAgentTools(context: ToolContext, trace: ToolTrace) {
 
   const preset_question = tool({
     description:
-      "Run one of the eight standard question presets (the exact SQL the UI's Questions page runs) and return matching rows with their evidence and provenance columns, the rule in plain English, the total match count and the preset's known caveats. Prefer this over run_sql for the six standard questions and the two standard combinations.",
+      "Run one of the eight standard question presets (the exact SQL the UI's Questions page runs) and return matching rows with their evidence and provenance columns, the rule in plain English, the total match count and the preset's known caveats. Prefer this over run_sql for the six standard questions and the two standard combinations. The `rule` and `assumptions` it returns are the same text the Questions page card shows, so describe the rule the way this tool states it and do not paraphrase it into a different rule.",
     inputSchema: z.object({
       name: z.enum(PRESET_NAME_LIST as [PresetName, ...PresetName[]]).describe(
         "roof_over_15 | water_view | no_sale_10y | regional_owner | near_transit | near_starbucks | roof15_and_no_sale10y | transit_and_regional",
@@ -431,7 +487,7 @@ export function createAgentTools(context: ToolContext, trace: ToolTrace) {
           question: preset.question,
           rule: preset.rule,
           evidence_columns: preset.evidence,
-          provenance_columns: PROVENANCE,
+          provenance_columns: SPINE_PROVENANCE,
           assumptions: preset.assumptions,
           sql,
           rows: result.rows,

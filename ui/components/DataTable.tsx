@@ -5,9 +5,13 @@ import { useMemo } from "react";
 import {
   NOT_AVAILABLE,
   displayCellForColumn,
+  formatDateOnly,
   formatMetres,
   formatTimestamp,
+  formatTimestampShort,
   formatUsd,
+  isDateOnlyColumn,
+  isTimestampColumn,
   toCsv,
 } from "@/lib/format";
 import { CURRENCY_COLUMNS, METRE_COLUMNS, PROVENANCE_COLUMNS } from "@/lib/columns";
@@ -63,7 +67,10 @@ function renderValue(column: string, value: unknown): React.ReactNode {
 
   if (CURRENCY_COLUMNS.has(column) && typeof value === "number") return formatUsd(value);
   if (METRE_COLUMNS.has(column) && typeof value === "number") return formatMetres(value);
-  if (column === "fetched_at") return formatTimestamp(String(value));
+  // A TIMESTAMP column crosses the Arrow bridge as an epoch number, so it is formatted from the
+  // raw value rather than from String(value), which would only produce a longer integer.
+  if (isTimestampColumn(column)) return formatTimestamp(value);
+  if (isDateOnlyColumn(column)) return formatDateOnly(value);
 
   if (LINK_COLUMNS.has(column)) {
     return (
@@ -97,9 +104,17 @@ function renderValue(column: string, value: unknown): React.ReactNode {
 function ProvenanceCell({ row }: { row: Record<string, unknown> }) {
   const system = row.source_system ? String(row.source_system) : null;
   const url = row.source_url ? String(row.source_url) : null;
-  const fetched = row.fetched_at ? String(row.fetched_at) : null;
+  /*
+   * `fetched_at` is a DuckDB TIMESTAMP, which duckdb-wasm hands over as an epoch number. This cell
+   * used to stringify it, so every provenance cell in the app read "DUVAL_APPRAISER source
+   * 1787320736294". It is formatted from the raw value, and the title carries the full instant to
+   * the second while the cell shows minutes.
+   */
+  const fetched = row.fetched_at ?? null;
+  const fetchedText = fetched === null ? null : formatTimestampShort(fetched);
+  const fetchedTitle = fetched === null ? undefined : `fetched_at ${formatTimestamp(fetched)}`;
 
-  if (!system && !url && !fetched) {
+  if (!system && !url && fetched === null) {
     return <span className="na">{NOT_AVAILABLE}</span>;
   }
 
@@ -113,8 +128,8 @@ function ProvenanceCell({ row }: { row: Record<string, unknown> }) {
       ) : (
         <span className="na text-[11px]">no url</span>
       )}
-      <span className="mono text-[11px] text-faint" title={fetched ?? undefined}>
-        {fetched ? formatTimestamp(fetched).slice(0, 16) : NOT_AVAILABLE}
+      <span className="mono text-[11px] text-faint" title={fetchedTitle}>
+        {fetchedText ?? NOT_AVAILABLE}
       </span>
     </span>
   );
@@ -215,7 +230,8 @@ export function DataTable({
       {hasProvenance ? (
         <p className="mt-1.5 text-[11.5px] text-faint">
           The provenance column collapses {PROVENANCE_COLUMNS.slice(0, 3).join(", ")}. The CSV export
-          keeps them as separate columns.
+          keeps them as separate columns and writes{" "}
+          <span className="mono">fetched_at</span> as an ISO 8601 UTC instant.
         </p>
       ) : null}
     </div>

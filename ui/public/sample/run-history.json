@@ -6,7 +6,7 @@
     {
       "run_id": "20260819T060112Z",
       "started_at": "2026-08-19T06:00:00.000Z",
-      "finished_at": "2026-08-19T06:19:00.000Z",
+      "finished_at": "2026-08-19T06:27:00.000Z",
       "trigger": "schedule",
       "git_sha": "471855760dabd729c172126f9dd6a2efa4b73b3f",
       "sources": [
@@ -126,35 +126,35 @@
       "artifacts": [
         {
           "name": "query-table.parquet",
-          "cid": "bafybeisamplesi5q7rnaekmglqcm7dgf3mubkt7gbjziofdzr6nx46ypyr",
+          "cid": "bafybeisamplemcrrsdfsnvyfxqhisrifuawna7kiguzaovzh7okptdwco3",
           "ipns_label": "oracle-query-table-duval",
           "ipns_name": "k51qzi5uqu5dyfgg7ddlhig72dlqbr5wllc5p4ycmls6tlkyddpd5gdykqmhuk",
           "gateway_url": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dyfgg7ddlhig72dlqbr5wllc5p4ycmls6tlkyddpd5gdykqmhuk/query-table.parquet"
         },
         {
           "name": "dataset-coverage.json",
-          "cid": "bafybeisamplebmwusirmfoi5nyu7uk4pdy5etm6s45lc2cxalyoqbdi5dq",
+          "cid": "bafybeisampley4toro3y4dn3z57iiokr3rituvonebqqjok6igflp4ia2n",
           "ipns_label": "oracle-dataset-coverage-duval",
           "ipns_name": "k51qzi5uqu5dyvj72znqc3l5bz3uapwfcmqfsex36lylyxorfn5ifponzoy2bi",
           "gateway_url": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dyvj72znqc3l5bz3uapwfcmqfsex36lylyxorfn5ifponzoy2bi/dataset-coverage.json"
         },
         {
           "name": "open-data/index.json",
-          "cid": "bafybeisamplecg3plaidrybx6silgzxeye54mjxuxzaloxsm3fiqjdixgk",
+          "cid": "bafybeisampledyt6ohbunvkqxx3t3zfymz7vc5is77tmcdszgjgc6w3wlq",
           "ipns_label": "oracle-open-data-duval",
           "ipns_name": "k51qzi5uqu5dn6y64sam6b36u55reecu5aaivnsqt25dbm2ucvn2n7het5xes5",
           "gateway_url": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dn6y64sam6b36u55reecu5aaivnsqt25dbm2ucvn2n7het5xes5/open-data/index.json"
         },
         {
           "name": "run-history.json",
-          "cid": "bafybeisampledd6hixbxl6jckqyq723mnagdjkz4bhbxujpiz5m3ae27mh",
+          "cid": "bafybeisampleq3ansajfpr2c4uyin7zy2uo6qinjw3yddabynhruz3xt6l",
           "ipns_label": "oracle-run-history-duval",
           "ipns_name": "k51qzi5uqu5dgnd5goiqhxib4t37xoz6wofz2ksddp2rndfoerhhe4wqegwlg7",
           "gateway_url": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dgnd5goiqhxib4t37xoz6wofz2ksddp2rndfoerhhe4wqegwlg7/run-history.json"
         },
         {
           "name": "catalog.json",
-          "cid": "bafybeisampleg6zdayp4esgssj2ls2dut3zmei75h5ojiubpqqekumozrv",
+          "cid": "bafybeisample5eb4kobed7avzhwt2gutfxih4qz7ptmcgmpcbrq6pfjnhv",
           "ipns_label": "oracle-published-counties",
           "ipns_name": "k51qzi5uqu5dv5sa5zqwmmqgtgtgfsbmbjwne2wabnj5vkpqeiew2wdmhgjabc",
           "gateway_url": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dv5sa5zqwmmqgtgtgfsbmbjwne2wabnj5vkpqeiew2wdmhgjabc/catalog.json"
@@ -165,17 +165,17 @@
     {
       "run_id": "20260820T060207Z",
       "started_at": "2026-08-20T06:00:00.000Z",
-      "finished_at": "2026-08-20T06:12:00.000Z",
+      "finished_at": "2026-08-20T06:16:00.000Z",
       "trigger": "schedule",
       "git_sha": "33cd97efa7ca53e1a31e392acd14dc12e9b7023a",
       "sources": [
         {
           "source": "appraisal",
           "rows_fetched": 420240,
-          "inserted": 7202,
-          "updated": 8937,
-          "unchanged": 404101,
-          "delta_vs_previous": 7202,
+          "inserted": 3143,
+          "updated": 6256,
+          "unchanged": 410841,
+          "delta_vs_previous": 3143,
           "artifact_sha256": "339d5ce908063027f5b555e0362e347b5d63a5f796acd9ada870c6fc978caa2f",
           "source_url": "https://floridarevenue.com/property/Pages/DataPortal_RequestAssessmentRollGISData.aspx",
           "limitations": []
@@ -183,10 +183,10 @@
         {
           "source": "sales",
           "rows_fetched": 97920,
-          "inserted": 3103,
-          "updated": 1838,
-          "unchanged": 92979,
-          "delta_vs_previous": 3103,
+          "inserted": 2180,
+          "updated": 1002,
+          "unchanged": 94738,
+          "delta_vs_previous": 2180,
           "artifact_sha256": "d2b8a3cc20fa817b90ff172bf301f70fe85ef8c4fbff2426c875345d61251a0b",
           "source_url": "https://floridarevenue.com/property/Pages/DataPortal.aspx",
           "limitations": [
@@ -196,10 +196,10 @@
         {
           "source": "addresses",
           "rows_fetched": 59160,
-          "inserted": 1510,
-          "updated": 70,
-          "unchanged": 57580,
-          "delta_vs_previous": 1510,
+          "inserted": 1951,
+          "updated": 484,
+          "unchanged": 56725,
+          "delta_vs_previous": 1951,
           "artifact_sha256": "7a198b698d3418bc6959a81c5bc5bd7343ce91bf086237d3ca391e5c3fd0cb7f",
           "source_url": "https://opendata.coj.net/datasets/address-points",
           "limitations": []
@@ -207,10 +207,10 @@
         {
           "source": "permits",
           "rows_fetched": 21420,
-          "inserted": 355,
-          "updated": 156,
-          "unchanged": 20909,
-          "delta_vs_previous": 355,
+          "inserted": 393,
+          "updated": 119,
+          "unchanged": 20908,
+          "delta_vs_previous": 393,
           "artifact_sha256": "8043dc7b233d5ca83d918f6f0c590e1453c7284a5b3e3e5bcc96b6a7bd7e5975",
           "source_url": "https://buildingpermits.coj.net/",
           "limitations": [
@@ -221,10 +221,10 @@
         {
           "source": "contractors",
           "rows_fetched": 9180,
-          "inserted": 185,
-          "updated": 138,
-          "unchanged": 8857,
-          "delta_vs_previous": 185,
+          "inserted": 307,
+          "updated": 163,
+          "unchanged": 8710,
+          "delta_vs_previous": 307,
           "artifact_sha256": "2a18b464a76513f01d895224b01df99ad57baa5f4cc0a1016e6a208db8961c0c",
           "source_url": "https://www.myfloridalicense.com/DBPR/",
           "limitations": [
@@ -234,10 +234,10 @@
         {
           "source": "sunbiz",
           "rows_fetched": 14280,
-          "inserted": 328,
-          "updated": 153,
-          "unchanged": 13799,
-          "delta_vs_previous": 328,
+          "inserted": 283,
+          "updated": 62,
+          "unchanged": 13935,
+          "delta_vs_previous": 283,
           "artifact_sha256": "73474f6afe92e78cb43a733543245a90139acf87df83597b8f1afcd8e21cf3c8",
           "source_url": "https://sftp.floridados.gov/",
           "limitations": [
@@ -247,10 +247,10 @@
         {
           "source": "places",
           "rows_fetched": 6120,
-          "inserted": 190,
-          "updated": 16,
-          "unchanged": 5914,
-          "delta_vs_previous": 190,
+          "inserted": 100,
+          "updated": 123,
+          "unchanged": 5897,
+          "delta_vs_previous": 100,
           "artifact_sha256": "3137fc01799e186bd65b9681d5afb0c9937e8eda765a10e8817014a670528fea",
           "source_url": "https://overturemaps.org/",
           "limitations": []
@@ -258,10 +258,10 @@
         {
           "source": "transit",
           "rows_fetched": 3060,
-          "inserted": 80,
-          "updated": 7,
-          "unchanged": 2973,
-          "delta_vs_previous": 80,
+          "inserted": 98,
+          "updated": 26,
+          "unchanged": 2936,
+          "delta_vs_previous": 98,
           "artifact_sha256": "426c8ad127b737cbbb80d79dbe6115556cf1f738d8b3f8409f6ab6b4b66d7871",
           "source_url": "https://www.jtafla.com/developer-resources/",
           "limitations": [
@@ -271,10 +271,10 @@
         {
           "source": "hydrography",
           "rows_fetched": 2040,
-          "inserted": 53,
-          "updated": 4,
-          "unchanged": 1983,
-          "delta_vs_previous": 53,
+          "inserted": 39,
+          "updated": 27,
+          "unchanged": 1974,
+          "delta_vs_previous": 39,
           "artifact_sha256": "6ea48788a3af66f12cf401234ceb3d182ce0979e1286daa299e4080b5a6e74ca",
           "source_url": "https://www.usgs.gov/national-hydrography",
           "limitations": [
@@ -285,35 +285,35 @@
       "artifacts": [
         {
           "name": "query-table.parquet",
-          "cid": "bafybeisamplej55gl6cjerjl3uliobjdflzaegdaxjrbshvjctbq67hhvt",
+          "cid": "bafybeisamplesnfalebqreuaq2k6dhb3ncliseeybwitzgtof7hhu5ig5f",
           "ipns_label": "oracle-query-table-duval",
           "ipns_name": "k51qzi5uqu5dyfgg7ddlhig72dlqbr5wllc5p4ycmls6tlkyddpd5gdykqmhuk",
           "gateway_url": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dyfgg7ddlhig72dlqbr5wllc5p4ycmls6tlkyddpd5gdykqmhuk/query-table.parquet"
         },
         {
           "name": "dataset-coverage.json",
-          "cid": "bafybeisampleeqtc6reo4ihzkalprhlh5h4sje5o63qrxjcfkcxfejpmnj",
+          "cid": "bafybeisampleo6xd5elnbzk44arj6thm2u6bspbxpgpnksj6x7hxskpm4d",
           "ipns_label": "oracle-dataset-coverage-duval",
           "ipns_name": "k51qzi5uqu5dyvj72znqc3l5bz3uapwfcmqfsex36lylyxorfn5ifponzoy2bi",
           "gateway_url": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dyvj72znqc3l5bz3uapwfcmqfsex36lylyxorfn5ifponzoy2bi/dataset-coverage.json"
         },
         {
           "name": "open-data/index.json",
-          "cid": "bafybeisample6fhxbljsjisv2yeqonacnpmwi7menwyltrop3wqltbascw",
+          "cid": "bafybeisamples5a7chofjcocuoz7gnlucrhzfu4emoyid563i6i7fwq2hk",
           "ipns_label": "oracle-open-data-duval",
           "ipns_name": "k51qzi5uqu5dn6y64sam6b36u55reecu5aaivnsqt25dbm2ucvn2n7het5xes5",
           "gateway_url": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dn6y64sam6b36u55reecu5aaivnsqt25dbm2ucvn2n7het5xes5/open-data/index.json"
         },
         {
           "name": "run-history.json",
-          "cid": "bafybeisamplebjuuwhl2akbbuv5ckzz6iueczkmzc5yqc5my45auaqriyu",
+          "cid": "bafybeisampleehkns6jqtjqjxv5gzaq2b5zga5ybl3o4zl2fco62kdecm6",
           "ipns_label": "oracle-run-history-duval",
           "ipns_name": "k51qzi5uqu5dgnd5goiqhxib4t37xoz6wofz2ksddp2rndfoerhhe4wqegwlg7",
           "gateway_url": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dgnd5goiqhxib4t37xoz6wofz2ksddp2rndfoerhhe4wqegwlg7/run-history.json"
         },
         {
           "name": "catalog.json",
-          "cid": "bafybeisamplewpkqi4f72xz4syjh54rbbbqfhfb2skbks2qla4rfej4tvy",
+          "cid": "bafybeisamplene4utjxsqn6tejs5fspw6ynp3uvl5z7yyll5cfsi7issi3",
           "ipns_label": "oracle-published-counties",
           "ipns_name": "k51qzi5uqu5dv5sa5zqwmmqgtgtgfsbmbjwne2wabnj5vkpqeiew2wdmhgjabc",
           "gateway_url": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dv5sa5zqwmmqgtgtgfsbmbjwne2wabnj5vkpqeiew2wdmhgjabc/catalog.json"
@@ -324,17 +324,17 @@
     {
       "run_id": "20260820T181534Z",
       "started_at": "2026-08-20T18:00:00.000Z",
-      "finished_at": "2026-08-20T18:23:00.000Z",
+      "finished_at": "2026-08-20T18:33:00.000Z",
       "trigger": "workflow_dispatch",
       "git_sha": "3b7b273e94dbbd9945e8fadc7f1d14584409ee61",
       "sources": [
         {
           "source": "appraisal",
           "rows_fetched": 428480,
-          "inserted": 13753,
-          "updated": 842,
-          "unchanged": 413885,
-          "delta_vs_previous": 13753,
+          "inserted": 2557,
+          "updated": 4456,
+          "unchanged": 421467,
+          "delta_vs_previous": 2557,
           "artifact_sha256": "a6b76e0ba3048ea32a5eac6cf2e7bb8196aaa0a6883accb84d4c12f198c0e195",
           "source_url": "https://floridarevenue.com/property/Pages/DataPortal_RequestAssessmentRollGISData.aspx",
           "limitations": []
@@ -342,10 +342,10 @@
         {
           "source": "sales",
           "rows_fetched": 99840,
-          "inserted": 3168,
-          "updated": 1879,
-          "unchanged": 94793,
-          "delta_vs_previous": 3168,
+          "inserted": 2905,
+          "updated": 1295,
+          "unchanged": 95640,
+          "delta_vs_previous": 2905,
           "artifact_sha256": "7a95e19301d841be73d09dce6aff47f3a458017c670068df6f6adfdc8466b1a5",
           "source_url": "https://floridarevenue.com/property/Pages/DataPortal.aspx",
           "limitations": [
@@ -355,10 +355,10 @@
         {
           "source": "addresses",
           "rows_fetched": 60320,
-          "inserted": 1865,
-          "updated": 1197,
-          "unchanged": 57258,
-          "delta_vs_previous": 1865,
+          "inserted": 699,
+          "updated": 711,
+          "unchanged": 58910,
+          "delta_vs_previous": 699,
           "artifact_sha256": "707f1219bcf86ca8f9e0e55d384da731e4304a4d0e87fb20a05a4b815eab9c26",
           "source_url": "https://opendata.coj.net/datasets/address-points",
           "limitations": []
@@ -366,10 +366,10 @@
         {
           "source": "permits",
           "rows_fetched": 21840,
-          "inserted": 359,
-          "updated": 196,
-          "unchanged": 21285,
-          "delta_vs_previous": 359,
+          "inserted": 203,
+          "updated": 54,
+          "unchanged": 21583,
+          "delta_vs_previous": 203,
           "artifact_sha256": "14cf79939c3eadce244a4cd637c08e98bb8cf1ae8443e023c13ddbd810c8db93",
           "source_url": "https://buildingpermits.coj.net/",
           "limitations": [
@@ -380,10 +380,10 @@
         {
           "source": "contractors",
           "rows_fetched": 9360,
-          "inserted": 258,
-          "updated": 173,
-          "unchanged": 8929,
-          "delta_vs_previous": 258,
+          "inserted": 162,
+          "updated": 137,
+          "unchanged": 9061,
+          "delta_vs_previous": 162,
           "artifact_sha256": "c715ef3e840dda6daa372815f1847c7bd8e2059f9e3095671df99fb4494fb5d0",
           "source_url": "https://www.myfloridalicense.com/DBPR/",
           "limitations": [
@@ -393,10 +393,10 @@
         {
           "source": "sunbiz",
           "rows_fetched": 14560,
-          "inserted": 501,
-          "updated": 241,
-          "unchanged": 13818,
-          "delta_vs_previous": 501,
+          "inserted": 492,
+          "updated": 54,
+          "unchanged": 14014,
+          "delta_vs_previous": 492,
           "artifact_sha256": "9f5c5dc3a8c50059f9bb17e2d3daa51b264b16f86fd6fbd3993cfed25f32e195",
           "source_url": "https://sftp.floridados.gov/",
           "limitations": [
@@ -406,10 +406,10 @@
         {
           "source": "places",
           "rows_fetched": 6240,
-          "inserted": 202,
-          "updated": 7,
-          "unchanged": 6031,
-          "delta_vs_previous": 202,
+          "inserted": 48,
+          "updated": 94,
+          "unchanged": 6098,
+          "delta_vs_previous": 48,
           "artifact_sha256": "1a59d19be8d301dcf7356233e8ca843a58725efca3bcaab19a64494f370e132f",
           "source_url": "https://overturemaps.org/",
           "limitations": []
@@ -417,10 +417,10 @@
         {
           "source": "transit",
           "rows_fetched": 3120,
-          "inserted": 77,
-          "updated": 47,
-          "unchanged": 2996,
-          "delta_vs_previous": 77,
+          "inserted": 18,
+          "updated": 34,
+          "unchanged": 3068,
+          "delta_vs_previous": 18,
           "artifact_sha256": "13a090c6091266c64b2e296e887af52addbf20e03c1ba2ff55d3885aaf216040",
           "source_url": "https://www.jtafla.com/developer-resources/",
           "limitations": [
@@ -430,10 +430,10 @@
         {
           "source": "hydrography",
           "rows_fetched": 2080,
-          "inserted": 8,
-          "updated": 13,
-          "unchanged": 2059,
-          "delta_vs_previous": 8,
+          "inserted": 67,
+          "updated": 43,
+          "unchanged": 1970,
+          "delta_vs_previous": 67,
           "artifact_sha256": "fadc294aa2f665f58b58c618e334f6c8b71c562da27d69f834e81e770551b9f8",
           "source_url": "https://www.usgs.gov/national-hydrography",
           "limitations": [
@@ -444,35 +444,35 @@
       "artifacts": [
         {
           "name": "query-table.parquet",
-          "cid": "bafybeisampleikjti6v2li7cn3tfir46yppl57ecukrw4q2ohwrdekcgv5",
+          "cid": "bafybeisample7l55xnczks65ivxifko7cwn3cqox646yd5j4ragb4lvcq7",
           "ipns_label": "oracle-query-table-duval",
           "ipns_name": "k51qzi5uqu5dyfgg7ddlhig72dlqbr5wllc5p4ycmls6tlkyddpd5gdykqmhuk",
           "gateway_url": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dyfgg7ddlhig72dlqbr5wllc5p4ycmls6tlkyddpd5gdykqmhuk/query-table.parquet"
         },
         {
           "name": "dataset-coverage.json",
-          "cid": "bafybeisampleiumxfinqkplsc5nrs4t5yzaxeffvfaejuerx6e35vsmmgb",
+          "cid": "bafybeisample3t3gsqd5db3zpmmco3veomalxhhro6lr6n5qygccglfbca",
           "ipns_label": "oracle-dataset-coverage-duval",
           "ipns_name": "k51qzi5uqu5dyvj72znqc3l5bz3uapwfcmqfsex36lylyxorfn5ifponzoy2bi",
           "gateway_url": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dyvj72znqc3l5bz3uapwfcmqfsex36lylyxorfn5ifponzoy2bi/dataset-coverage.json"
         },
         {
           "name": "open-data/index.json",
-          "cid": "bafybeisamplebxlo2rzsjftffh3fys3j4lmngghk2slivm4ftk7p3frfnt",
+          "cid": "bafybeisample5fexymrs4xt3ptks3sx3vnei5t62wnd7uv5indjlsbjqse",
           "ipns_label": "oracle-open-data-duval",
           "ipns_name": "k51qzi5uqu5dn6y64sam6b36u55reecu5aaivnsqt25dbm2ucvn2n7het5xes5",
           "gateway_url": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dn6y64sam6b36u55reecu5aaivnsqt25dbm2ucvn2n7het5xes5/open-data/index.json"
         },
         {
           "name": "run-history.json",
-          "cid": "bafybeisampleviasypireoiocigqywu2ui4vwctdxunuov2kzpbug5y2mz",
+          "cid": "bafybeisampler5lwymjcslj43m2vilzjf5j7yexdxwvv7fetvroqnp6fyx",
           "ipns_label": "oracle-run-history-duval",
           "ipns_name": "k51qzi5uqu5dgnd5goiqhxib4t37xoz6wofz2ksddp2rndfoerhhe4wqegwlg7",
           "gateway_url": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dgnd5goiqhxib4t37xoz6wofz2ksddp2rndfoerhhe4wqegwlg7/run-history.json"
         },
         {
           "name": "catalog.json",
-          "cid": "bafybeisample2ttifucfluqscemftwjm47ohsfs26o46lwwwtcwb4rakvs",
+          "cid": "bafybeisamplehybt6k5gbig3w6vbwuxpxhc5eou56y3ocpzu3jsb4p7qzx",
           "ipns_label": "oracle-published-counties",
           "ipns_name": "k51qzi5uqu5dv5sa5zqwmmqgtgtgfsbmbjwne2wabnj5vkpqeiew2wdmhgjabc",
           "gateway_url": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dv5sa5zqwmmqgtgtgfsbmbjwne2wabnj5vkpqeiew2wdmhgjabc/catalog.json"
@@ -483,17 +483,17 @@
     {
       "run_id": "20260821T060041Z",
       "started_at": "2026-08-21T06:00:00.000Z",
-      "finished_at": "2026-08-21T06:20:00.000Z",
+      "finished_at": "2026-08-21T06:28:00.000Z",
       "trigger": "schedule",
       "git_sha": "ea5c671de677cc5d6ab6aeb35dce0153b0568244",
       "sources": [
         {
           "source": "appraisal",
           "rows_fetched": 436720,
-          "inserted": 9719,
-          "updated": 2935,
-          "unchanged": 424066,
-          "delta_vs_previous": 9719,
+          "inserted": 2195,
+          "updated": 4719,
+          "unchanged": 429806,
+          "delta_vs_previous": 2195,
           "artifact_sha256": "c5a2d7358397d1d2f1d424ace03491ffb8511b46b2eec6b2b006e17b7561a8af",
           "source_url": "https://floridarevenue.com/property/Pages/DataPortal_RequestAssessmentRollGISData.aspx",
           "limitations": []
@@ -501,10 +501,10 @@
         {
           "source": "sales",
           "rows_fetched": 101760,
-          "inserted": 3782,
-          "updated": 1600,
-          "unchanged": 96378,
-          "delta_vs_previous": 3782,
+          "inserted": 3555,
+          "updated": 1777,
+          "unchanged": 96428,
+          "delta_vs_previous": 3555,
           "artifact_sha256": "a1ff97be29c4387def719d32f0c0e7b44214eee36e8dcb3e859b9ad26563ead2",
           "source_url": "https://floridarevenue.com/property/Pages/DataPortal.aspx",
           "limitations": [
@@ -514,10 +514,10 @@
         {
           "source": "addresses",
           "rows_fetched": 61480,
-          "inserted": 992,
-          "updated": 1045,
-          "unchanged": 59443,
-          "delta_vs_previous": 992,
+          "inserted": 218,
+          "updated": 363,
+          "unchanged": 60899,
+          "delta_vs_previous": 218,
           "artifact_sha256": "b063c7a22216027dc9dcc79434450f46aee53c6bc59b8dad86424e968febaabf",
           "source_url": "https://opendata.coj.net/datasets/address-points",
           "limitations": []
@@ -525,10 +525,10 @@
         {
           "source": "permits",
           "rows_fetched": 22260,
-          "inserted": 165,
-          "updated": 98,
-          "unchanged": 21997,
-          "delta_vs_previous": 165,
+          "inserted": 804,
+          "updated": 424,
+          "unchanged": 21032,
+          "delta_vs_previous": 804,
           "artifact_sha256": "e4496502419a1f684a43c861909f4a693e0b4ab1cccfc1e24fce47d18b97e689",
           "source_url": "https://buildingpermits.coj.net/",
           "limitations": [
@@ -539,10 +539,10 @@
         {
           "source": "contractors",
           "rows_fetched": 9540,
-          "inserted": 176,
-          "updated": 176,
-          "unchanged": 9188,
-          "delta_vs_previous": 176,
+          "inserted": 58,
+          "updated": 161,
+          "unchanged": 9321,
+          "delta_vs_previous": 58,
           "artifact_sha256": "6fc4f5faf66bfa8286bd1f52f3432a4feefb14c8c11b1907c35e5650d0699f42",
           "source_url": "https://www.myfloridalicense.com/DBPR/",
           "limitations": [
@@ -552,10 +552,10 @@
         {
           "source": "sunbiz",
           "rows_fetched": 14840,
-          "inserted": 80,
-          "updated": 107,
-          "unchanged": 14653,
-          "delta_vs_previous": 80,
+          "inserted": 262,
+          "updated": 259,
+          "unchanged": 14319,
+          "delta_vs_previous": 262,
           "artifact_sha256": "b980630ed2921839a865635e12c7807f43de0731418dd647b69c82a5c526508e",
           "source_url": "https://sftp.floridados.gov/",
           "limitations": [
@@ -565,10 +565,10 @@
         {
           "source": "places",
           "rows_fetched": 6360,
-          "inserted": 57,
-          "updated": 73,
-          "unchanged": 6230,
-          "delta_vs_previous": 57,
+          "inserted": 63,
+          "updated": 92,
+          "unchanged": 6205,
+          "delta_vs_previous": 63,
           "artifact_sha256": "6e1914b70e1fa20275803e7a1aea22e83154bb5611fafe2161021f3d6f2c04a1",
           "source_url": "https://overturemaps.org/",
           "limitations": []
@@ -576,10 +576,10 @@
         {
           "source": "transit",
           "rows_fetched": 3180,
-          "inserted": 118,
-          "updated": 6,
-          "unchanged": 3056,
-          "delta_vs_previous": 118,
+          "inserted": 72,
+          "updated": 11,
+          "unchanged": 3097,
+          "delta_vs_previous": 72,
           "artifact_sha256": "7f9524350677a45c53aa77919b637344e7efab6790d2a055171cbbbff18b3d54",
           "source_url": "https://www.jtafla.com/developer-resources/",
           "limitations": [
@@ -589,10 +589,10 @@
         {
           "source": "hydrography",
           "rows_fetched": 2120,
-          "inserted": 7,
-          "updated": 19,
-          "unchanged": 2094,
-          "delta_vs_previous": 7,
+          "inserted": 43,
+          "updated": 13,
+          "unchanged": 2064,
+          "delta_vs_previous": 43,
           "artifact_sha256": "d1faede5dd98ae01d2629f7d2515b07860c1117cb8c743b426f9319faf342672",
           "source_url": "https://www.usgs.gov/national-hydrography",
           "limitations": [
@@ -603,35 +603,35 @@
       "artifacts": [
         {
           "name": "query-table.parquet",
-          "cid": "bafybeisamplekmrsrylxmcrrsdfsnvyfxqhisrifuawna7kiguzaovzh7o",
+          "cid": "bafybeisampledsyxs5e3tympzxemoklknpg6cuugdxvpfa7dex4g7dabbr",
           "ipns_label": "oracle-query-table-duval",
           "ipns_name": "k51qzi5uqu5dyfgg7ddlhig72dlqbr5wllc5p4ycmls6tlkyddpd5gdykqmhuk",
           "gateway_url": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dyfgg7ddlhig72dlqbr5wllc5p4ycmls6tlkyddpd5gdykqmhuk/query-table.parquet"
         },
         {
           "name": "dataset-coverage.json",
-          "cid": "bafybeisamplekptdwco3y4toro3y4dn3z57iiokr3rituvonebqqjok6ig",
+          "cid": "bafybeisampleud7mttdwmvqxpiq2o25urtqlm73mnkgmhuielm5hwkklw2",
           "ipns_label": "oracle-dataset-coverage-duval",
           "ipns_name": "k51qzi5uqu5dyvj72znqc3l5bz3uapwfcmqfsex36lylyxorfn5ifponzoy2bi",
           "gateway_url": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dyvj72znqc3l5bz3uapwfcmqfsex36lylyxorfn5ifponzoy2bi/dataset-coverage.json"
         },
         {
           "name": "open-data/index.json",
-          "cid": "bafybeisampleflp4ia2ndyt6ohbunvkqxx3t3zfymz7vc5is77tmcdszgj",
+          "cid": "bafybeisamplenl44vbja32qso64m5yk3tn5kufuco6ayrruy4mwg5scdbl",
           "ipns_label": "oracle-open-data-duval",
           "ipns_name": "k51qzi5uqu5dn6y64sam6b36u55reecu5aaivnsqt25dbm2ucvn2n7het5xes5",
           "gateway_url": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dn6y64sam6b36u55reecu5aaivnsqt25dbm2ucvn2n7het5xes5/open-data/index.json"
         },
         {
           "name": "run-history.json",
-          "cid": "bafybeisamplegc6w3wlqq3ansajfpr2c4uyin7zy2uo6qinjw3yddabynh",
+          "cid": "bafybeisample3joatc5uh5a7xgpf52qanlal7flynpgceqkkstfgw2kq2d",
           "ipns_label": "oracle-run-history-duval",
           "ipns_name": "k51qzi5uqu5dgnd5goiqhxib4t37xoz6wofz2ksddp2rndfoerhhe4wqegwlg7",
           "gateway_url": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dgnd5goiqhxib4t37xoz6wofz2ksddp2rndfoerhhe4wqegwlg7/run-history.json"
         },
         {
           "name": "catalog.json",
-          "cid": "bafybeisampleruz3xt6l5eb4kobed7avzhwt2gutfxih4qz7ptmcgmpcbr",
+          "cid": "bafybeisamplejhzjjm42ayqsxli5zqcj4ap4ikprcpni4r2wjucathpjly",
           "ipns_label": "oracle-published-counties",
           "ipns_name": "k51qzi5uqu5dv5sa5zqwmmqgtgtgfsbmbjwne2wabnj5vkpqeiew2wdmhgjabc",
           "gateway_url": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dv5sa5zqwmmqgtgtgfsbmbjwne2wabnj5vkpqeiew2wdmhgjabc/catalog.json"

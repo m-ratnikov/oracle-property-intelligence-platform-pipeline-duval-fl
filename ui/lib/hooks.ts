@@ -23,29 +23,73 @@ export function useEngineBoot(): EngineState {
 
 export interface AsyncState<T> {
   data: T | null;
+  /**
+   * The JSON exactly as published, before the shared parser narrowed it. The coverage snapshot
+   * carries per source flags (`constrained`, `implemented`, `limitations`) that the shared parse
+   * does not model, and the Data page has to read them to tell a blocked source from a complete
+   * one. Reading them from here costs no second request.
+   */
+  raw: unknown;
   error: string | null;
   loading: boolean;
+  /** A previous payload is on screen and a fresh one is in flight. */
+  revalidating: boolean;
 }
+
+/**
+ * Last good payload per artifact URL, for the lifetime of the tab.
+ *
+ * Every page fetches its artifacts from an IPFS gateway on mount, and an IPNS name that is not yet
+ * warm in the gateway can take many seconds to resolve. Without this, walking Overview -> Runs ->
+ * Overview pays that latency three times and shows empty stat tiles each time, which is what a
+ * reviewer sees during a demo. The cache is only a head start: a revalidating request always goes
+ * out, and the newer payload replaces what is on screen when it lands, so the page stays as live
+ * as the artifact it is reading.
+ */
+const PAYLOAD_CACHE = new Map<string, unknown>();
 
 /** Fetch and parse a published JSON artifact on the client. */
 export function useJson<T>(url: string | null, parse: (input: unknown) => T): AsyncState<T> {
-  const [state, setState] = useState<AsyncState<T>>({
-    data: null,
-    error: null,
-    loading: url !== null,
-  });
   const parseRef = useRef(parse);
   parseRef.current = parse;
 
+  const [state, setState] = useState<AsyncState<T>>(() => {
+    const cached = url === null ? undefined : PAYLOAD_CACHE.get(url);
+    if (cached === undefined) {
+      return { data: null, raw: null, error: null, loading: url !== null, revalidating: false };
+    }
+    return { data: parse(cached), raw: cached, error: null, loading: false, revalidating: true };
+  });
+
   useEffect(() => {
     if (!url) {
-      setState({ data: null, error: null, loading: false });
+      setState({ data: null, raw: null, error: null, loading: false, revalidating: false });
       return;
     }
     let cancelled = false;
-    setState({ data: null, error: null, loading: true });
+    const cached = PAYLOAD_CACHE.get(url);
+    setState(
+      cached === undefined
+        ? { data: null, raw: null, error: null, loading: true, revalidating: false }
+        : {
+            data: parseRef.current(cached),
+            raw: cached,
+            error: null,
+            loading: false,
+            revalidating: true,
+          },
+    );
 
-    fetch(url, { cache: "no-store" })
+    /*
+     * `cache: "default"`, not "no-store".
+     *
+     * The gateway answers these artifacts with `cache-control: public, max-age=300`, which is the
+     * same 300 s window it caches an IPNS resolution for; the pipeline publishes on a six hour
+     * cadence, so honouring that header costs no freshness a "no-store" request would have gained.
+     * What "no-store" did cost was real: it bypassed the document's own <link rel="preload">, so
+     * the head start the page asked for was thrown away and the request was made twice.
+     */
+    fetch(url, { cache: "default" })
       .then(async (response) => {
         if (!response.ok) {
           throw new Error(`${response.status} ${response.statusText} for ${url}`);
@@ -53,13 +97,26 @@ export function useJson<T>(url: string | null, parse: (input: unknown) => T): As
         return response.json();
       })
       .then((json: unknown) => {
+        PAYLOAD_CACHE.set(url, json);
         if (cancelled) return;
-        setState({ data: parseRef.current(json), error: null, loading: false });
+        setState({
+          data: parseRef.current(json),
+          raw: json,
+          error: null,
+          loading: false,
+          revalidating: false,
+        });
       })
       .catch((error: unknown) => {
         if (cancelled) return;
         const message = error instanceof Error ? error.message : String(error);
-        setState({ data: null, error: message, loading: false });
+        // A failed revalidation must not blank out a payload that is already on screen and
+        // correct. It is reported as an error only when there is nothing to fall back to.
+        setState((current) =>
+          current.data === null
+            ? { data: null, raw: null, error: message, loading: false, revalidating: false }
+            : { ...current, error: message, loading: false, revalidating: false },
+        );
       });
 
     return () => {
@@ -68,6 +125,25 @@ export function useJson<T>(url: string | null, parse: (input: unknown) => T): As
   }, [url]);
 
   return state;
+}
+
+/**
+ * True once `active` has been true for `afterMs` without resolving.
+ *
+ * A wait that is going to be short should say nothing beyond its skeleton; a wait that is going
+ * long has to explain itself, because a stat tile that is merely blank reads as broken.
+ */
+export function useSlowLoad(active: boolean, afterMs = 2500): boolean {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (!active) {
+      setSlow(false);
+      return;
+    }
+    const timer = setTimeout(() => setSlow(true), afterMs);
+    return () => clearTimeout(timer);
+  }, [active, afterMs]);
+  return slow;
 }
 
 export interface SqlState {

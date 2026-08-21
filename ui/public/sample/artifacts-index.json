@@ -11,9 +11,9 @@
       "contentType": "application/vnd.apache.parquet",
       "bytes": null,
       "sha256": null,
-      "cid": "bafybeisamplekmrsrylxmcrrsdfsnvyfxqhisrifuawna7kiguzaovzh7o",
-      "cidV1": "bafybeisamplekmrsrylxmcrrsdfsnvyfxqhisrifuawna7kiguzaovzh7o",
-      "url": "https://ipfs.filebase.io/ipfs/bafybeisamplekmrsrylxmcrrsdfsnvyfxqhisrifuawna7kiguzaovzh7o",
+      "cid": "bafybeisampledsyxs5e3tympzxemoklknpg6cuugdxvpfa7dex4g7dabbr",
+      "cidV1": "bafybeisampledsyxs5e3tympzxemoklknpg6cuugdxvpfa7dex4g7dabbr",
+      "url": "https://ipfs.filebase.io/ipfs/bafybeisampledsyxs5e3tympzxemoklknpg6cuugdxvpfa7dex4g7dabbr",
       "ipnsLabel": "oracle-query-table-duval",
       "ipnsName": "k51qzi5uqu5dyfgg7ddlhig72dlqbr5wllc5p4ycmls6tlkyddpd5gdykqmhuk",
       "ipnsUrl": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dyfgg7ddlhig72dlqbr5wllc5p4ycmls6tlkyddpd5gdykqmhuk"
@@ -24,9 +24,9 @@
       "contentType": "application/json",
       "bytes": null,
       "sha256": null,
-      "cid": "bafybeisamplekptdwco3y4toro3y4dn3z57iiokr3rituvonebqqjok6ig",
-      "cidV1": "bafybeisamplekptdwco3y4toro3y4dn3z57iiokr3rituvonebqqjok6ig",
-      "url": "https://ipfs.filebase.io/ipfs/bafybeisamplekptdwco3y4toro3y4dn3z57iiokr3rituvonebqqjok6ig",
+      "cid": "bafybeisampleud7mttdwmvqxpiq2o25urtqlm73mnkgmhuielm5hwkklw2",
+      "cidV1": "bafybeisampleud7mttdwmvqxpiq2o25urtqlm73mnkgmhuielm5hwkklw2",
+      "url": "https://ipfs.filebase.io/ipfs/bafybeisampleud7mttdwmvqxpiq2o25urtqlm73mnkgmhuielm5hwkklw2",
       "ipnsLabel": "oracle-dataset-coverage-duval",
       "ipnsName": "k51qzi5uqu5dyvj72znqc3l5bz3uapwfcmqfsex36lylyxorfn5ifponzoy2bi",
       "ipnsUrl": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dyvj72znqc3l5bz3uapwfcmqfsex36lylyxorfn5ifponzoy2bi"
@@ -37,9 +37,9 @@
       "contentType": "application/json",
       "bytes": null,
       "sha256": null,
-      "cid": "bafybeisampleflp4ia2ndyt6ohbunvkqxx3t3zfymz7vc5is77tmcdszgj",
-      "cidV1": "bafybeisampleflp4ia2ndyt6ohbunvkqxx3t3zfymz7vc5is77tmcdszgj",
-      "url": "https://ipfs.filebase.io/ipfs/bafybeisampleflp4ia2ndyt6ohbunvkqxx3t3zfymz7vc5is77tmcdszgj",
+      "cid": "bafybeisamplenl44vbja32qso64m5yk3tn5kufuco6ayrruy4mwg5scdbl",
+      "cidV1": "bafybeisamplenl44vbja32qso64m5yk3tn5kufuco6ayrruy4mwg5scdbl",
+      "url": "https://ipfs.filebase.io/ipfs/bafybeisamplenl44vbja32qso64m5yk3tn5kufuco6ayrruy4mwg5scdbl",
       "ipnsLabel": "oracle-open-data-duval",
       "ipnsName": "k51qzi5uqu5dn6y64sam6b36u55reecu5aaivnsqt25dbm2ucvn2n7het5xes5",
       "ipnsUrl": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dn6y64sam6b36u55reecu5aaivnsqt25dbm2ucvn2n7het5xes5"
@@ -50,9 +50,9 @@
       "contentType": "application/json",
       "bytes": null,
       "sha256": null,
-      "cid": "bafybeisamplegc6w3wlqq3ansajfpr2c4uyin7zy2uo6qinjw3yddabynh",
-      "cidV1": "bafybeisamplegc6w3wlqq3ansajfpr2c4uyin7zy2uo6qinjw3yddabynh",
-      "url": "https://ipfs.filebase.io/ipfs/bafybeisamplegc6w3wlqq3ansajfpr2c4uyin7zy2uo6qinjw3yddabynh",
+      "cid": "bafybeisample3joatc5uh5a7xgpf52qanlal7flynpgceqkkstfgw2kq2d",
+      "cidV1": "bafybeisample3joatc5uh5a7xgpf52qanlal7flynpgceqkkstfgw2kq2d",
+      "url": "https://ipfs.filebase.io/ipfs/bafybeisample3joatc5uh5a7xgpf52qanlal7flynpgceqkkstfgw2kq2d",
       "ipnsLabel": "oracle-run-history-duval",
       "ipnsName": "k51qzi5uqu5dgnd5goiqhxib4t37xoz6wofz2ksddp2rndfoerhhe4wqegwlg7",
       "ipnsUrl": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dgnd5goiqhxib4t37xoz6wofz2ksddp2rndfoerhhe4wqegwlg7"
@@ -63,9 +63,9 @@
       "contentType": "application/json",
       "bytes": null,
       "sha256": null,
-      "cid": "bafybeisampleruz3xt6l5eb4kobed7avzhwt2gutfxih4qz7ptmcgmpcbr",
-      "cidV1": "bafybeisampleruz3xt6l5eb4kobed7avzhwt2gutfxih4qz7ptmcgmpcbr",
-      "url": "https://ipfs.filebase.io/ipfs/bafybeisampleruz3xt6l5eb4kobed7avzhwt2gutfxih4qz7ptmcgmpcbr",
+      "cid": "bafybeisamplejhzjjm42ayqsxli5zqcj4ap4ikprcpni4r2wjucathpjly",
+      "cidV1": "bafybeisamplejhzjjm42ayqsxli5zqcj4ap4ikprcpni4r2wjucathpjly",
+      "url": "https://ipfs.filebase.io/ipfs/bafybeisamplejhzjjm42ayqsxli5zqcj4ap4ikprcpni4r2wjucathpjly",
       "ipnsLabel": "oracle-published-counties",
       "ipnsName": "k51qzi5uqu5dv5sa5zqwmmqgtgtgfsbmbjwne2wabnj5vkpqeiew2wdmhgjabc",
       "ipnsUrl": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dv5sa5zqwmmqgtgtgfsbmbjwne2wabnj5vkpqeiew2wdmhgjabc"
@@ -75,31 +75,31 @@
     "oracle-query-table-duval": {
       "label": "oracle-query-table-duval",
       "networkKey": "k51qzi5uqu5dyfgg7ddlhig72dlqbr5wllc5p4ycmls6tlkyddpd5gdykqmhuk",
-      "cid": "bafybeisamplekmrsrylxmcrrsdfsnvyfxqhisrifuawna7kiguzaovzh7o",
+      "cid": "bafybeisampledsyxs5e3tympzxemoklknpg6cuugdxvpfa7dex4g7dabbr",
       "gatewayUrl": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dyfgg7ddlhig72dlqbr5wllc5p4ycmls6tlkyddpd5gdykqmhuk"
     },
     "oracle-dataset-coverage-duval": {
       "label": "oracle-dataset-coverage-duval",
       "networkKey": "k51qzi5uqu5dyvj72znqc3l5bz3uapwfcmqfsex36lylyxorfn5ifponzoy2bi",
-      "cid": "bafybeisamplekptdwco3y4toro3y4dn3z57iiokr3rituvonebqqjok6ig",
+      "cid": "bafybeisampleud7mttdwmvqxpiq2o25urtqlm73mnkgmhuielm5hwkklw2",
       "gatewayUrl": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dyvj72znqc3l5bz3uapwfcmqfsex36lylyxorfn5ifponzoy2bi"
     },
     "oracle-open-data-duval": {
       "label": "oracle-open-data-duval",
       "networkKey": "k51qzi5uqu5dn6y64sam6b36u55reecu5aaivnsqt25dbm2ucvn2n7het5xes5",
-      "cid": "bafybeisampleflp4ia2ndyt6ohbunvkqxx3t3zfymz7vc5is77tmcdszgj",
+      "cid": "bafybeisamplenl44vbja32qso64m5yk3tn5kufuco6ayrruy4mwg5scdbl",
       "gatewayUrl": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dn6y64sam6b36u55reecu5aaivnsqt25dbm2ucvn2n7het5xes5"
     },
     "oracle-run-history-duval": {
       "label": "oracle-run-history-duval",
       "networkKey": "k51qzi5uqu5dgnd5goiqhxib4t37xoz6wofz2ksddp2rndfoerhhe4wqegwlg7",
-      "cid": "bafybeisamplegc6w3wlqq3ansajfpr2c4uyin7zy2uo6qinjw3yddabynh",
+      "cid": "bafybeisample3joatc5uh5a7xgpf52qanlal7flynpgceqkkstfgw2kq2d",
       "gatewayUrl": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dgnd5goiqhxib4t37xoz6wofz2ksddp2rndfoerhhe4wqegwlg7"
     },
     "oracle-published-counties": {
       "label": "oracle-published-counties",
       "networkKey": "k51qzi5uqu5dv5sa5zqwmmqgtgtgfsbmbjwne2wabnj5vkpqeiew2wdmhgjabc",
-      "cid": "bafybeisampleruz3xt6l5eb4kobed7avzhwt2gutfxih4qz7ptmcgmpcbr",
+      "cid": "bafybeisamplejhzjjm42ayqsxli5zqcj4ap4ikprcpni4r2wjucathpjly",
       "gatewayUrl": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dv5sa5zqwmmqgtgtgfsbmbjwne2wabnj5vkpqeiew2wdmhgjabc"
     }
   }

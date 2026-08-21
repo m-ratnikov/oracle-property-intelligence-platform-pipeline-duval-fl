@@ -1,11 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { config, queryTableParquetUrl } from "@/lib/config";
 import { useJson } from "@/lib/hooks";
 import { parseCatalog } from "@/lib/types";
+import { formatMcpEnv, mcpBindings, parseArtifactsIndex } from "@/lib/artifacts";
 import { formatInt, formatTimestamp } from "@/lib/format";
-import { PageHeader, Section, Callout, Spinner, CopyButton, IdWithCopy } from "@/components/ui";
+import {
+  ArtifactPreload,
+  PageHeader,
+  Section,
+  Callout,
+  Spinner,
+  CopyButton,
+  IdWithCopy,
+} from "@/components/ui";
 
 /* ------------------------------------------------------------ live check */
 
@@ -212,27 +221,37 @@ function IpnsResolveCheck({ url }: { url: string }) {
 
 export default function McpPage() {
   const catalog = useJson(config.catalogUrl, parseCatalog);
+  const artifactsIndex = useJson(config.artifactsIndexUrl, parseArtifactsIndex);
   const parquetUrl = queryTableParquetUrl();
   const mcpUrl = config.mcpUrl;
   const endpoint = mcpUrl ? `${mcpUrl.replace(/\/+$/, "")}/mcp` : null;
 
   const county = catalog.data?.counties.find((entry) => entry.countyKey === config.countyKey);
-  const queryTableForMap = county?.queryTableUrl ?? config.queryTableUrl;
 
-  const envMap = {
-    PROPERTY_QUERY_TABLE_MAP: JSON.stringify({ [config.countyKey]: queryTableForMap }),
-    PROPERTY_QUERY_TABLE_DEFAULT_COUNTY: config.countyKey,
-    DATASET_COVERAGE_MAP: JSON.stringify({ [config.countyKey]: config.coverageUrl }),
-    ORACLE_OPEN_DATA_IPNS_MAP: JSON.stringify({
-      [config.countyKey]: config.openDataIndexUrl ?? "",
-    }),
-    ORACLE_OPEN_DATA_DEFAULT_COUNTY: config.countyKey,
-    PUBLISHED_COUNTY_CATALOG_URL: config.catalogUrl,
-  };
-
-  const envText = Object.entries(envMap)
-    .map(([key, value]) => `${key}=${value}`)
-    .join("\n");
+  /*
+   * The env block is READ from the publish output, not assembled here.
+   *
+   * It used to be built from this deployment's own NEXT_PUBLIC_* URLs and the catalog entry, which
+   * meant the two settings the hosted MCP hands to DuckDB were advertised as mutable /ipns/ URLs.
+   * That is the exact configuration that hard-failed every data tool: DuckDB pins the ETag it saw
+   * when it created its view, on IPFS the ETag is the CID, and this pipeline re-points every name
+   * on every publish. The published artifacts index carries the immutable /ipfs/<cid> URL for each
+   * object alongside its IPNS name, so the addressing decision is made once, in the pipeline, and
+   * rendered here from what the publish actually produced. See lib/artifacts.ts.
+   */
+  const bindings = useMemo(
+    () =>
+      mcpBindings({
+        countyKey: config.countyKey,
+        index: artifactsIndex.data,
+        openDataIndexUrl: config.openDataIndexUrl,
+      }),
+    [artifactsIndex.data],
+  );
+  const envText = formatMcpEnv(bindings);
+  const perPublish = bindings.filter((binding) => binding.perPublish);
+  const setOnce = bindings.filter((binding) => !binding.perPublish);
+  const unresolved = bindings.filter((binding) => !binding.resolved);
 
   const stdioConfig = JSON.stringify(
     {
@@ -264,6 +283,7 @@ export default function McpPage() {
 
   return (
     <div>
+      <ArtifactPreload urls={[config.artifactsIndexUrl, config.catalogUrl]} />
       <PageHeader
         title="MCP access"
         lead="The dataset is content addressed and public, so any MCP client can read it directly. Nothing in this section depends on infrastructure we keep running."
@@ -323,10 +343,79 @@ export default function McpPage() {
 
       <Section
         title="Environment map we deploy with"
-        description="These are the variables the MCP server reads to find this county's artifacts. They are all public URLs, which is the point: there is no credential to hand out and nothing to keep online."
+        description="The variables the MCP server reads to find this county's artifacts, taken from the published artifacts index the last publish wrote. They are all public URLs, which is the point: there is no credential to hand out and nothing to keep online."
       >
-        <div className="card card-pad">
-          <pre className="block">{envText}</pre>
+        <div className="mb-3">
+          <Callout tone="warn" title="Two of these must be re-applied after every publish">
+            The hosted server hands the query table straight to DuckDB, and DuckDB pins the ETag it
+            saw when it created its view. On an IPFS gateway the ETag <em>is</em> the content
+            identifier, so pointing that setting at a mutable{" "}
+            <span className="mono">/ipns/</span> name breaks every data tool on every warm instance
+            the moment the pipeline republishes. The two settings DuckDB reads are therefore pinned
+            to immutable <span className="mono">/ipfs/&lt;cid&gt;</span> URLs and re-applied per
+            publish. Everything fetched as plain JSON behind a short TTL keeps its IPNS name and is
+            set once.
+          </Callout>
+        </div>
+
+        <div className="table-wrap" style={{ maxHeight: "none" }}>
+          <table className="grid">
+            <thead>
+              <tr>
+                <th>setting</th>
+                <th>addressing</th>
+                <th>re-apply</th>
+                <th style={{ minWidth: 320 }}>why</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bindings.map((binding) => (
+                <tr key={binding.env} data-testid={`mcp-binding-${binding.env}`}>
+                  <td className="mono font-semibold">{binding.env}</td>
+                  <td>
+                    <span
+                      className={
+                        binding.addressing === "cid"
+                          ? "badge badge-good"
+                          : binding.addressing === "ipns"
+                            ? "badge badge-accent"
+                            : "badge badge-neutral"
+                      }
+                    >
+                      {binding.addressing === "cid"
+                        ? "immutable CID"
+                        : binding.addressing === "ipns"
+                          ? "IPNS name"
+                          : "literal"}
+                    </span>
+                  </td>
+                  <td>
+                    {binding.perPublish ? (
+                      <span className="badge badge-warn">every publish</span>
+                    ) : (
+                      <span className="text-[12px] text-faint">set once</span>
+                    )}
+                  </td>
+                  <td style={{ whiteSpace: "normal" }} className="text-[12px] text-muted">
+                    {binding.reason}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="card card-pad mt-3">
+          <div className="text-[12px] font-semibold text-warn">
+            Per publish, re-apply then redeploy
+          </div>
+          <pre className="block mt-1">
+            {perPublish.map((binding) => `${binding.env}=${binding.value}`).join("\n")}
+          </pre>
+          <div className="mt-3 text-[12px] font-semibold">Set once, stable across publishes</div>
+          <pre className="block mt-1">
+            {setOnce.map((binding) => `${binding.env}=${binding.value}`).join("\n")}
+          </pre>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <CopyButton text={envText} label="copy env" />
             <span className="text-[11.5px] text-faint">
@@ -336,21 +425,36 @@ export default function McpPage() {
           </div>
         </div>
 
-        {catalog.loading ? (
+        {artifactsIndex.loading ? (
+          <div className="mt-3">
+            <Spinner label="Reading the published artifacts index" />
+          </div>
+        ) : unresolved.length > 0 ? (
+          <div className="mt-3">
+            <Callout tone="warn" title="Some values are placeholders">
+              No published artifact backs{" "}
+              <span className="mono">{unresolved.map((binding) => binding.env).join(", ")}</span>{" "}
+              yet, so the block above shows a placeholder for{" "}
+              {unresolved.length === 1 ? "it" : "them"} rather than a URL nothing serves.
+            </Callout>
+          </div>
+        ) : null}
+
+        {county ? (
+          <p className="mt-3 text-[12px] text-muted">
+            The published counties catalog carries the same artifact URLs, last updated{" "}
+            {formatTimestamp(county.updatedAt)}, and the publish step fails if the catalog and this
+            block ever name different objects. A client that reads the catalog discovers this county
+            without being configured for it at all.
+          </p>
+        ) : catalog.loading ? (
           <div className="mt-3">
             <Spinner label="Reading the published counties catalog" />
           </div>
-        ) : county ? (
-          <p className="mt-3 text-[12px] text-muted">
-            The map above uses the catalog entry for{" "}
-            <span className="mono">{county.countyKey}</span>, last updated{" "}
-            {formatTimestamp(county.updatedAt)}. A client that reads the catalog discovers this
-            county without being configured for it at all.
-          </p>
         ) : (
           <p className="mt-3 text-[12px] text-warn">
-            No catalog entry for <span className="mono">{config.countyKey}</span> was found, so the
-            map falls back to the URLs this UI was built with.
+            No catalog entry for <span className="mono">{config.countyKey}</span> was found in the
+            published catalog.
           </p>
         )}
       </Section>

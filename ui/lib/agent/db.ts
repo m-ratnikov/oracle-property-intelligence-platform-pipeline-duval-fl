@@ -16,6 +16,10 @@
  *
  * A local file in dev and tests is read in place as before. No extension is installed unless the
  * source is http(s).
+ *
+ * Whichever path it took, the instance is then SEALED (see harden/seal below): the one parquet is
+ * the only file or URL DuckDB will open, and the configuration is locked so nothing can undo that.
+ * This is the security boundary for /api/agent, not the SQL string guard in lib/sql.ts.
  */
 
 import type { Env } from "./types";
@@ -144,6 +148,45 @@ async function localCopy(source: string): Promise<string | null> {
   }
 }
 
+/**
+ * Seal the engine so it can only ever read the one parquet this database is built over.
+ *
+ * This is the security boundary for /api/agent, and it has to be, because everything upstream of
+ * it is untrusted: the route is public and unauthenticated, the SQL it runs was written by a model
+ * that a caller can argue with, and the process holds a model provider API key. A string guard over
+ * the SQL (lib/sql.ts guardSql) is a denylist and denylists lose; this is the layer that does not
+ * have to be right about every function name DuckDB will ever ship.
+ *
+ * Three settings do the work, in this order:
+ *   allowed_paths            the single file or URL the view reads, and nothing else.
+ *   enable_external_access   off. Every other file system and network path is refused at the
+ *                            engine, so read_text('/proc/self/environ'), read_blob, glob('/**'),
+ *                            read_csv_auto('file:///etc/passwd') and a read_parquet of an attacker
+ *                            chosen URL all come back "Permission Error: file system operations
+ *                            are disabled by configuration". ATTACH, COPY TO and INSTALL go with
+ *                            them.
+ *   lock_configuration       on, last. Without it the whole thing is advisory: one
+ *                            `SET enable_external_access = true` inside a model authored statement
+ *                            would undo it. With it that statement errors instead.
+ *
+ * The extension settings are set before the lock too, so nothing can be autoloaded on demand by a
+ * crafted query. httpfs, when the remote fallback needs it, is installed and loaded BEFORE any of
+ * this, which is the only window in which that is possible.
+ */
+async function harden(setup: DuckDBConnection, readFrom: string): Promise<void> {
+  await setup.run(`SET allowed_paths = [${sqlString(readFrom)}]`);
+  await setup.run("SET autoinstall_known_extensions = false");
+  await setup.run("SET autoload_known_extensions = false");
+  await setup.run("SET allow_community_extensions = false");
+  await setup.run("SET allow_unsigned_extensions = false");
+  await setup.run("SET allow_persistent_secrets = false");
+}
+
+async function seal(setup: DuckDBConnection): Promise<void> {
+  await setup.run("SET enable_external_access = false");
+  await setup.run("SET lock_configuration = true");
+}
+
 async function createInstance(source: string): Promise<DuckDBInstance> {
   const openedAt = Date.now();
   const isHttp = /^https?:\/\//i.test(source);
@@ -156,19 +199,30 @@ async function createInstance(source: string): Promise<DuckDBInstance> {
   try {
     if (needsHttpfs) {
       // Serverless file systems are read only except the temp directory, and
-      // httpfs has to be fetched once per cold start.
+      // httpfs has to be fetched once per cold start. This is the last moment an
+      // extension can be installed: harden() turns autoloading off and seal()
+      // turns the network off for everything except readFrom.
       const extensionDir = resolve(tmpdir(), "duckdb-extensions");
       await setup.run(`SET extension_directory = ${sqlString(extensionDir)}`);
       await setup.run("INSTALL httpfs");
       await setup.run("LOAD httpfs");
     }
+    await harden(setup, readFrom);
     await setup.run(
       `CREATE OR REPLACE VIEW ${VIEW_NAME} AS SELECT * FROM read_parquet(${sqlString(readFrom)})`,
     );
+    await seal(setup);
   } finally {
     setup.closeSync();
   }
-  logAgent("info", "query table opened", { ms: Date.now() - openedAt, cached: cached !== null, httpfs: needsHttpfs });
+  logAgent("info", "query table opened", {
+    ms: Date.now() - openedAt,
+    cached: cached !== null,
+    httpfs: needsHttpfs,
+    // the sealed flag is in the log on purpose: if this ever reads false in production it is an
+    // open file system on a public route, and nothing else in the log would say so.
+    sealed: true,
+  });
   return instance;
 }
 

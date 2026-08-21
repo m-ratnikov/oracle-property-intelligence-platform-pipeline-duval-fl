@@ -114,5 +114,40 @@ export function queryTableParquetUrl(cfg: AppConfig = config): string {
   return resolveArtifactUrl(cfg.queryTableUrl, QUERY_TABLE_OBJECT);
 }
 
+/**
+ * Where the DuckDB-WASM build fetches its parquet reader from. Named here so the document can open
+ * the connection before the engine asks for it.
+ */
+export const DUCKDB_EXTENSION_ORIGIN = "https://extensions.duckdb.org";
+
+/**
+ * Distinct origins this app talks to for published data.
+ *
+ * Every artifact is a cross origin request to an IPFS gateway, and the first one pays DNS, TLS and
+ * the gateway's IPNS resolution before a single byte arrives. Opening those connections while the
+ * document is still parsing takes that cost off the critical path of the stat tiles.
+ */
+export function artifactOrigins(cfg: AppConfig = config): string[] {
+  const origins = new Set<string>();
+  const candidates = [
+    cfg.queryTableUrl,
+    cfg.runHistoryUrl,
+    cfg.coverageUrl,
+    cfg.catalogUrl,
+    cfg.openDataIndexUrl,
+    cfg.artifactsIndexUrl,
+  ];
+  for (const candidate of candidates) {
+    if (!candidate || candidate.startsWith("/")) continue;
+    try {
+      origins.add(new URL(candidate).origin);
+    } catch {
+      // A malformed configured URL is reported by the page that uses it, not here.
+    }
+  }
+  origins.add(DUCKDB_EXTENSION_ORIGIN);
+  return [...origins];
+}
+
 export const ZERO_COST_LINE =
   "Nothing runs when nobody is looking: the data sits on IPFS, GitHub Actions only wakes on a schedule, and every query in this UI executes in your browser with DuckDB-WASM. No database, no server, no standing bill.";
