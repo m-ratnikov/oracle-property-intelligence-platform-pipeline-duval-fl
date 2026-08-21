@@ -16,12 +16,12 @@ page.on("console", (m) => {
   if (m.type() === "error") failures.push(`console: ${m.text().slice(0, 160)}`);
 });
 
-await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+await page.goto(`${BASE}/`, { waitUntil: "domcontentloaded", timeout: 120_000 });
 const banner = await page.locator("body").innerText();
 console.log(`SAMPLE banner present: ${banner.includes("SAMPLE DATA")}`);
 
 // engine status reports the row count it actually loaded from the parquet
-await page.goto(`${BASE}/questions`, { waitUntil: "networkidle" });
+await page.goto(`${BASE}/questions`, { waitUntil: "domcontentloaded", timeout: 120_000 });
 await page.getByText(/duckdb ready/i).first().waitFor({ timeout: 120_000 });
 const status = await page.locator("text=/parcels, \\d+ columns/").first().innerText();
 console.log(`engine: ${status.replace(/\s+/g, " ").trim()}`);
@@ -51,7 +51,7 @@ for (const id of ids) {
   }
 }
 
-await page.goto(`${BASE}/runs`, { waitUntil: "networkidle" });
+await page.goto(`${BASE}/runs`, { waitUntil: "domcontentloaded", timeout: 120_000 });
 const runs = await page.locator("body").innerText();
 console.log(`runs page mentions run ids: ${/01M0H[A-Z0-9]{6,}/.test(runs)}`);
 

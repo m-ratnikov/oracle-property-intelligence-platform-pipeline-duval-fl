@@ -68,17 +68,24 @@ export const config: AppConfig = {
 };
 
 /**
- * IPNS pointers published by the pipeline are directory roots, for example
- * `https://ipfs.filebase.io/ipns/k51.../`. A directory root cannot be range
- * read by DuckDB, so append the object name when the configured URL does not
- * already name a file.
+ * Resolve a configured artifact URL to the exact object DuckDB should range read.
+ *
+ * A trailing slash means "this is a directory, append the object name"; anything else addresses
+ * the object directly and is used unchanged.
+ *
+ * The trailing slash has to carry that meaning because nothing else can. This publisher points
+ * each IPNS name at a single file's CID, so the query table lives at `/ipns/k51...` with nothing
+ * after it - while the Elephant convention also permits a name pointing at a directory, which
+ * looks identical as a string. An earlier version guessed from a file extension, decided a bare
+ * `/ipns/k51...` had to be a directory, and requested `/ipns/k51.../query-table.parquet`. The
+ * gateway returned 404, DuckDB fell back to downloading the whole object, got the same 404, and
+ * the deployed page showed "DuckDB-WASM could not load the query table" against a perfectly good
+ * artifact.
  */
 export function resolveArtifactUrl(baseUrl: string, objectName: string): string {
   const [withoutHash] = baseUrl.split("#");
-  const [path, query] = withoutHash.split("?");
-  const last = path.split("/").filter(Boolean).pop() ?? "";
-  const namesAFile = /\.[a-z0-9]{2,8}$/i.test(last);
-  if (namesAFile) return baseUrl;
+  const [path = "", query] = withoutHash.split("?");
+  if (!path.endsWith("/")) return baseUrl;
   const joined = `${path.replace(/\/+$/, "")}/${objectName}`;
   return query ? `${joined}?${query}` : joined;
 }

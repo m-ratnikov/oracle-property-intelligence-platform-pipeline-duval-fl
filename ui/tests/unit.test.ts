@@ -64,16 +64,24 @@ describe("workbench guard", () => {
 });
 
 describe("artifact url resolution", () => {
-  it("appends the object name to an IPNS directory root", () => {
-    expect(resolveArtifactUrl("https://ipfs.filebase.io/ipns/k51abc", "query-table.parquet")).toBe(
+  // The contract: a trailing slash means "directory, append the object name". Anything else
+  // already addresses the object. Nothing else can carry that meaning - a name pointing at a
+  // file and a name pointing at a directory are the same string.
+  it("appends the object name to a directory root, which is marked by the trailing slash", () => {
+    expect(resolveArtifactUrl("https://ipfs.filebase.io/ipns/k51abc/", "query-table.parquet")).toBe(
       "https://ipfs.filebase.io/ipns/k51abc/query-table.parquet",
     );
   });
 
-  it("tolerates a trailing slash", () => {
-    expect(resolveArtifactUrl("https://ipfs.filebase.io/ipns/k51abc/", "query-table.parquet")).toBe(
-      "https://ipfs.filebase.io/ipns/k51abc/query-table.parquet",
-    );
+  it("leaves a bare IPNS name alone, because this publisher points names at a single file", () => {
+    // regression: appending here produced a 404 and a dead query engine on the deployed site
+    const url = "https://ipfs.filebase.io/ipns/k51qzi5uqu5djeq93ll0n7gsrzwfry2jmxb3xa66tcthufpjxv0c3odj1hpq4r";
+    expect(resolveArtifactUrl(url, "query-table.parquet")).toBe(url);
+  });
+
+  it("leaves a bare CID alone for the same reason", () => {
+    const url = "https://ipfs.filebase.io/ipfs/bafybeichwef3od3yqpkumixe6mxqsyt4kasgdb7aauog5jg6u5fd3rrjs4";
+    expect(resolveArtifactUrl(url, "query-table.parquet")).toBe(url);
   });
 
   it("leaves a url that already names a file alone", () => {
@@ -81,8 +89,8 @@ describe("artifact url resolution", () => {
     expect(resolveArtifactUrl(url, "query-table.parquet")).toBe(url);
   });
 
-  it("keeps a query string", () => {
-    expect(resolveArtifactUrl("https://gw.example/ipns/k51?token=x", "a.parquet")).toBe(
+  it("keeps a query string when appending", () => {
+    expect(resolveArtifactUrl("https://gw.example/ipns/k51/?token=x", "a.parquet")).toBe(
       "https://gw.example/ipns/k51/a.parquet?token=x",
     );
   });
