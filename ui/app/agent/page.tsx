@@ -108,11 +108,15 @@ function cellText(value: unknown): string {
 function EvidenceTable({ rows }: { rows: AgentEvidenceRow[] }) {
   const matched = new Set<string>();
   for (const row of rows) for (const key of Object.keys(row)) if (!EVIDENCE_META.has(key)) matched.add(key);
-  const columns = [...matched].slice(0, 8);
+  // At full width there is room for the columns that actually justify the answer, so the cap goes
+  // up. The container scrolls in both directions rather than the page doing it: a wide table must
+  // never make the whole page scroll sideways, and 25 rows of evidence should not push the
+  // assumptions below it off the screen.
+  const columns = [...matched].slice(0, 14);
   return (
-    <div className="overflow-auto">
-      <table className="w-full text-[11.5px]">
-        <thead>
+    <div className="overflow-auto" style={{ maxHeight: 420 }}>
+      <table className="w-full text-[11.5px]" style={{ minWidth: 720 }}>
+        <thead className="sticky top-0 z-10" style={{ background: "var(--color-surface)" }}>
           <tr className="text-left text-faint">
             <th className="px-2 py-1 font-semibold">property_id</th>
             <th className="px-2 py-1 font-semibold">address</th>
@@ -433,8 +437,33 @@ export default function AgentPage() {
         lead="The same dataset, asked in plain English. The transcript panel shows every tool call the agent made and the evidence panel shows the rows the answer rests on, so an answer can always be traced back to a county record."
       />
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="card flex flex-col" style={{ minHeight: 560 }}>
+    <div className="mb-4 flex flex-wrap items-center gap-3">
+        <EngineStatus compact />
+        {choices.length > 0 ? (
+          <label className="flex flex-wrap items-center gap-1.5 text-[11.5px] text-faint">
+            model
+            <select
+              className="field"
+              value={model ?? ""}
+              onChange={(event) => setModel(event.target.value)}
+              disabled={pending}
+              aria-label="Model"
+            >
+              {choices.map((choice) => (
+                <option key={choice.id} value={choice.id}>
+                  {choice.label}
+                </option>
+              ))}
+            </select>
+            {providerLabel ? <span className="mono text-muted">{providerLabel}</span> : null}
+          </label>
+        ) : config && !config.configured ? (
+          <span className="badge badge-warn">no model configured</span>
+        ) : null}
+        <FreshnessBadge freshness={freshness} />
+      </div>
+
+      <div className="card flex flex-col" style={{ minHeight: 560 }}>
           <div ref={scroller} className="flex-1 space-y-3 overflow-auto px-4 py-4">
             {messages.map((message) => (
               <div key={message.id}>
@@ -573,34 +602,15 @@ export default function AgentPage() {
             </form>
           </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-border pt-3">
-          <EngineStatus compact />
-          {choices.length > 0 ? (
-            <label className="flex flex-wrap items-center gap-1.5 text-[11.5px] text-faint">
-              model
-              <select
-                className="field"
-                value={model ?? ""}
-                onChange={(event) => setModel(event.target.value)}
-                disabled={pending}
-                aria-label="Model"
-              >
-                {choices.map((choice) => (
-                  <option key={choice.id} value={choice.id}>
-                    {choice.label}
-                  </option>
-                ))}
-              </select>
-              {providerLabel ? <span className="mono text-muted">{providerLabel}</span> : null}
-            </label>
-          ) : config && !config.configured ? (
-            <span className="badge badge-warn">no model configured</span>
-          ) : null}
-          <FreshnessBadge freshness={freshness} />
-        </div>
-        </div>
+      </div>
 
-        <aside className="space-y-4">
+      {/*
+        Below the chat, at full width. It used to be a 380px rail beside the answer, which meant the
+        evidence table - the widest thing on the page, one row per parcel with its matched columns
+        and provenance - was squeezed into a third of the screen. It reads as the working behind the
+        answer, so it belongs after it.
+      */}
+      <div className="mt-4 space-y-4">
           <div className="card">
             <div className="border-b border-border px-3 py-2 text-[12px] font-semibold">
               Tool call transcript {toolCalls.length > 0 ? `(${toolCalls.length})` : ""}
@@ -668,7 +678,6 @@ export default function AgentPage() {
             Read-only tools: <span className="mono">{TOOL_NAMES.join(", ")}</span>. The same
             questions run without a model at all on the <Link href="/questions">Questions</Link> page.
           </p>
-        </aside>
       </div>
     </div>
   );
