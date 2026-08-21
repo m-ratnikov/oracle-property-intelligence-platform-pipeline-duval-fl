@@ -126,6 +126,8 @@ export interface OpenDataPublishResult {
   publishedIndexCid: string | null;
   ipnsName: string | null;
   ipnsUrl: string | null;
+  /** Set when the IPNS label could not be minted (e.g. free-plan name cap); the index stays CID-addressed. */
+  ipnsError?: string | null;
   verified: boolean | null;
   ms: number;
 }
@@ -209,13 +211,23 @@ export async function publishOpenData(opts: { paths: Paths; env: NodeJS.ProcessE
   if (indexRemote !== undefined && !sameCid(indexRemote, indexLocal.cid)) throw new Error(`index.json CID mismatch: remote ${indexRemote} local ${indexLocal.cid}`);
   saveCheckpoint(outDir, cp);
 
-  // IPNS last, then verify through the gateway
-  const { networkKey } = await upsertIpnsName(fetch as never, ipnsToken(fbEnv), OPEN_DATA_LABEL, indexLocal.cid);
-  const urls = gatewayUrls(fbEnv.gateway, networkKey);
+  // IPNS last, then verify through the gateway. The name is a convenience pointer, not the address of
+  // record: every file here is already CID-addressed and the index CID is in the result. A capped account
+  // (the Filebase free plan allows one name, which the query table takes) must not lose an upload of
+  // hundreds of thousands of objects to a failed mint, so the failure is recorded and the run continues.
+  let networkKey: string | null = null;
+  let ipnsError: string | null = null;
+  try {
+    ({ networkKey } = await upsertIpnsName(fetch as never, ipnsToken(fbEnv), OPEN_DATA_LABEL, indexLocal.cid));
+  } catch (err) {
+    ipnsError = err instanceof Error ? err.message : String(err);
+    log.warn("open_data_ipns_point_failed", { label: OPEN_DATA_LABEL, cid: indexLocal.cid, reason: ipnsError, fallback: "cid-addressed" });
+  }
+  const urls = networkKey === null ? null : gatewayUrls(fbEnv.gateway, networkKey);
   let verified: boolean | null = null;
   let publishedIndexCid: string | null = null;
   try {
-    const res = await fetch(urls.filebase, { signal: AbortSignal.timeout(60_000) });
+    const res = await fetch(urls === null ? ipfsUrl(fbEnv.gateway, indexLocal.cid) : urls.filebase, { signal: AbortSignal.timeout(60_000) });
     const roots = res.headers.get("x-ipfs-roots");
     publishedIndexCid = roots ? (roots.split(",").pop() ?? null) : null;
     const body = (await res.json()) as { propertyCount?: number };
@@ -225,7 +237,7 @@ export async function publishOpenData(opts: { paths: Paths; env: NodeJS.ProcessE
     verified = false;
   }
   const result: OpenDataPublishResult = {
-    mode: "published", plan, uploaded, skipped, failed, indexCid: indexLocal.cid, publishedIndexCid, ipnsName: networkKey, ipnsUrl: urls.filebase, verified, ms: Date.now() - t0,
+    mode: "published", plan, uploaded, skipped, failed, indexCid: indexLocal.cid, publishedIndexCid, ipnsName: networkKey, ipnsUrl: urls?.filebase ?? null, ipnsError, verified, ms: Date.now() - t0,
   };
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, "publish-result.json"), JSON.stringify(result, null, 2));
@@ -240,8 +252,13 @@ export function formatOpenDataResult(r: OpenDataPublishResult, bucket: string | 
     lines.push(`index URL after publish: ${ipfsUrl(gateway, r.indexCid)} (content-addressed; IPNS name resolved on real publish)`);
     lines.push(`MCP env: ORACLE_OPEN_DATA_IPNS_MAP={"${COUNTY.key}":"<k51 of ${OPEN_DATA_LABEL}>"}  ORACLE_OPEN_DATA_DEFAULT_COUNTY=${COUNTY.key}`);
   } else {
-    lines.push(`uploaded ${r.uploaded}, skipped (checkpoint) ${r.skipped}, failed ${r.failed}; index cid ${r.indexCid}; IPNS ${OPEN_DATA_LABEL} -> ${r.ipnsName} (${r.ipnsUrl}); verified ${r.verified}`);
-    lines.push(`MCP env: ORACLE_OPEN_DATA_IPNS_MAP={"${COUNTY.key}":"${r.ipnsName}"}  ORACLE_OPEN_DATA_DEFAULT_COUNTY=${COUNTY.key}`);
+    const ipnsPart = r.ipnsName === null ? `IPNS ${OPEN_DATA_LABEL} SKIPPED (${r.ipnsError ?? "unavailable"}); index stays CID-addressed at ${ipfsUrl(gateway, r.indexCid)}` : `IPNS ${OPEN_DATA_LABEL} -> ${r.ipnsName} (${r.ipnsUrl})`;
+    lines.push(`uploaded ${r.uploaded}, skipped (checkpoint) ${r.skipped}, failed ${r.failed}; index cid ${r.indexCid}; ${ipnsPart}; verified ${r.verified}`);
+    lines.push(
+      r.ipnsName === null
+        ? `MCP env: ORACLE_OPEN_DATA_URL_MAP={"${COUNTY.key}":"${ipfsUrl(gateway, r.indexCid)}"}  ORACLE_OPEN_DATA_DEFAULT_COUNTY=${COUNTY.key}`
+        : `MCP env: ORACLE_OPEN_DATA_IPNS_MAP={"${COUNTY.key}":"${r.ipnsName}"}  ORACLE_OPEN_DATA_DEFAULT_COUNTY=${COUNTY.key}`,
+    );
   }
   return lines.join("\n");
 }

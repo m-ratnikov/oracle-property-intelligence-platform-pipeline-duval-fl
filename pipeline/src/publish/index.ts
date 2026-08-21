@@ -51,6 +51,13 @@ export interface PublishedObject extends PublishObject {
   ipns: { label: string; networkKey: string; gatewayUrl: string; created: boolean } | null;
 }
 
+/** An IPNS label the account could not mint (plan cap, auth, transient); the artifact stays CID-addressed. */
+export interface IpnsFailure {
+  label: string;
+  cid: string;
+  reason: string;
+}
+
 export interface PublishManifest {
   county: string;
   mode: "dry-run" | "published";
@@ -62,6 +69,8 @@ export interface PublishManifest {
   /** What to set on an elephant-mcp deployment so it serves Duval. */
   mcpEnv: Record<string, string>;
   missingEnv: string[];
+  /** IPNS labels that could not be minted (e.g. free-plan name cap); those artifacts stay CID-addressed. */
+  ipnsFailures: IpnsFailure[];
 }
 
 const PARQUET = "application/vnd.apache.parquet";
@@ -120,6 +129,8 @@ export async function executePublish(opts: {
   publish: boolean;
   logger: Logger;
   fetchImpl?: typeof fetch;
+  /** Test seam: supply the S3 client instead of opening a real Filebase connection. */
+  clientFactory?: (fb: FilebaseEnv) => ReturnType<typeof createFilebaseClient>;
 }): Promise<PublishManifest> {
   const log = opts.logger.child({ stage: "publish" });
   const fb: FilebaseEnv | null = readFilebaseEnv(opts.env);
@@ -132,7 +143,7 @@ export async function executePublish(opts: {
   const publishedAt = new Date().toISOString();
   const planned = await planPublish(opts.paths);
 
-  const client = live && fb ? createFilebaseClient(fb) : null;
+  const client = live && fb ? (opts.clientFactory ?? createFilebaseClient)(fb) : null;
   const token = live && fb ? ipnsToken(fb) : null;
   const fetchImpl = opts.fetchImpl ?? fetch;
 
@@ -154,12 +165,26 @@ export async function executePublish(opts: {
     }
     return { ...o, uploaded, remoteCid, gatewayUrl: ipfsUrl(gateway, o.cidV1), ipns: null };
   };
+  // IPNS names are a metered resource: the Filebase free plan allows a single name per account, so a
+  // second create returns an error. A mutable pointer is a convenience, not the address of record (every
+  // artifact is CID-addressed and the manifest carries the CIDs), so a name we cannot mint is recorded as
+  // a limitation and the artifact keeps its CID URL rather than failing the whole publish. Objects are
+  // planned query-table first, so the one name a capped account does get goes to the artifact the MCP
+  // deployment needs to follow across runs.
+  const ipnsFailures: IpnsFailure[] = [];
   const pointIpns = async (o: PublishedObject): Promise<PublishedObject> => {
     if (o.ipnsLabel === null) return o;
     if (token === null) return o;
-    const { networkKey, created } = await upsertIpnsName(fetchImpl as never, token, o.ipnsLabel, o.cid);
-    log.info("ipns_pointed", { label: o.ipnsLabel, networkKey, cid: o.cid, created });
-    return { ...o, ipns: { label: o.ipnsLabel, networkKey, gatewayUrl: gatewayUrls(gateway, networkKey).filebase, created } };
+    try {
+      const { networkKey, created } = await upsertIpnsName(fetchImpl as never, token, o.ipnsLabel, o.cid);
+      log.info("ipns_pointed", { label: o.ipnsLabel, networkKey, cid: o.cid, created });
+      return { ...o, ipns: { label: o.ipnsLabel, networkKey, gatewayUrl: gatewayUrls(gateway, networkKey).filebase, created } };
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      ipnsFailures.push({ label: o.ipnsLabel, cid: o.cid, reason });
+      log.warn("ipns_point_failed", { label: o.ipnsLabel, cid: o.cid, reason, fallback: "cid-addressed" });
+      return o;
+    }
   };
 
   for (const o of planned) results.push(await pointIpns(await upload(o)));
@@ -245,6 +270,7 @@ export async function executePublish(opts: {
     ipns,
     mcpEnv,
     missingEnv,
+    ipnsFailures,
   };
   mkdirSync(opts.paths.publishDir, { recursive: true });
   writeFileSync(join(opts.paths.publishDir, "publish-manifest.json"), JSON.stringify(manifest, null, 2));
@@ -258,6 +284,7 @@ export function formatManifest(m: PublishManifest): string {
   lines.push(`county:   ${m.county}`);
   lines.push(`bucket:   ${m.bucket ?? "<unset>"}`);
   if (m.missingEnv.length > 0) lines.push(`missing:  ${m.missingEnv.join(", ")}`);
+  for (const f of m.ipnsFailures) lines.push(`ipns SKIPPED label=${f.label} -> stays CID-addressed (${f.reason})`);
   const w = Math.max(...m.objects.map((o) => o.name.length));
   for (const o of m.objects) {
     lines.push(`${o.name.padEnd(w)}  ${String(o.bytes).padStart(11)} B  ${o.uploaded ? "uploaded" : "would PUT"}  s3://${m.bucket ?? "<bucket>"}/${o.key}`);
