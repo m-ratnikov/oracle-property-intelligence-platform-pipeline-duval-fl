@@ -1,6 +1,6 @@
 {
   "county": "duval",
-  "exportedAt": "2026-08-21T09:40:57.844Z",
+  "exportedAt": "2026-08-21T10:12:05.894Z",
   "datasets": [
     {
       "county": "duval",
@@ -22,7 +22,7 @@
         "No roof attributes in the bulk roll (ACT_YR_BLT/EFF_YR_BLT used as roof-age proxy)",
         "Sale fields cover only the roll's current and prior year (2025-2026)"
       ],
-      "last_run_id": "01M0HSJS8SG5AJM3H41ZW0T1N1",
+      "last_run_id": "01M0HVMB6XDGHJ5R0BY64HWH8Z",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null
@@ -30,11 +30,11 @@
     {
       "county": "duval",
       "source": "sales",
-      "ingested_count": 65876,
+      "ingested_count": 67485,
       "expected_count": 64532,
       "first_loaded_at": "2026-08-21T09:16:52Z",
-      "last_loaded_at": "2026-08-21T09:40:34Z",
-      "cid": "QmfAw6ZD1NVJMa9USTCotEGp1d6tjW2RBqV9RMFzTCgw7R",
+      "last_loaded_at": "2026-08-21T10:11:38Z",
+      "cid": "QmPc5TvU1MDdXpWS31yyZj2gH9AGtwvP8JwQ2QH2kcbNnb",
       "ipns_label": "duval-oracle-artifacts",
       "track": "sales",
       "source_system": "fdor_sdf",
@@ -46,7 +46,7 @@
         "Sale dates carry year+month only (day unknown; stored as first of month)",
         "Only 2025-2026 transfers; older tenure comes from the COJ parcels layer (SALESL*)"
       ],
-      "last_run_id": "01M0HSJS8SG5AJM3H41ZW0T1N1",
+      "last_run_id": "01M0HVMB6XDGHJ5R0BY64HWH8Z",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null
@@ -70,7 +70,7 @@
         "192 MB archive; centroids computed from polygons (not rooftop points)",
         "Parcels present in NAL but missing from the shapefile get no coordinates"
       ],
-      "last_run_id": "01M0HSJS8SG5AJM3H41ZW0T1N1",
+      "last_run_id": "01M0HVMB6XDGHJ5R0BY64HWH8Z",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
@@ -96,7 +96,7 @@
         "No GTFS-RT; no licence text published",
         "Walking distance is straight-line (haversine), not network distance"
       ],
-      "last_run_id": "01M0HSJS8SG5AJM3H41ZW0T1N1",
+      "last_run_id": "01M0HVMB6XDGHJ5R0BY64HWH8Z",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
@@ -123,7 +123,7 @@
         "NHD lake/pond polygons below 1 ha and unnamed flowlines are excluded",
         "Parcel polygons are not stored; the parcel bounding box stands in for the polygon"
       ],
-      "last_run_id": "01M0HSJS8SG5AJM3H41ZW0T1N1",
+      "last_run_id": "01M0HVMB6XDGHJ5R0BY64HWH8Z",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
@@ -148,7 +148,7 @@
         "Brand matching by name (Starbucks); confidence varies; CDLA-Permissive 2.0",
         "Reading the release scans ~2.5 min of remote parquet"
       ],
-      "last_run_id": "01M0HSJS8SG5AJM3H41ZW0T1N1",
+      "last_run_id": "01M0HVMB6XDGHJ5R0BY64HWH8Z",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
@@ -175,7 +175,7 @@
         "Layout page (dos.sunbiz.org/data-definitions/cor.html) was unreachable (HTTP 522); offsets validated against live records instead",
         "Officers kept as names only; events file parsed for doc number + raw line"
       ],
-      "last_run_id": "01M0HSJS8SG5AJM3H41ZW0T1N1",
+      "last_run_id": "01M0HVMB6XDGHJ5R0BY64HWH8Z",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
@@ -188,9 +188,9 @@
       "source": "entity_links",
       "ingested_count": 1176361,
       "expected_count": 1176361,
-      "first_loaded_at": "2026-08-21T09:40:34Z",
-      "last_loaded_at": "2026-08-21T09:40:34Z",
-      "cid": "QmYFnyQtc826sqU2QRMrHQTduMZuApNtzgNBGMC2vLqSec",
+      "first_loaded_at": "2026-08-21T10:11:38Z",
+      "last_loaded_at": "2026-08-21T10:11:38Z",
+      "cid": "QmVaiUrHbgDLT5KzZNZk24mHo3E5KCKSyVdKUEFBf7ENQD",
       "ipns_label": "duval-oracle-artifacts",
       "track": "links",
       "source_system": "duval_reconciliation",
@@ -201,7 +201,7 @@
       "limitations": [
         "Address matching is exact on the normalized line 1 + ZIP5; unit-level mismatches are not linked"
       ],
-      "last_run_id": "01M0HSJS8SG5AJM3H41ZW0T1N1",
+      "last_run_id": "01M0HVMB6XDGHJ5R0BY64HWH8Z",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
@@ -226,7 +226,7 @@
         "US egress only (COJ hosts block non-US and cloud IPs)",
         "Paged at 2000 rows, concurrency 2, 250 ms delay"
       ],
-      "last_run_id": "01M0HSJS8SG5AJM3H41ZW0T1N1",
+      "last_run_id": "01M0HVMB6XDGHJ5R0BY64HWH8Z",
       "last_run_status": "completed",
       "requires_us_egress": true,
       "last_skip_reason": null,
@@ -251,7 +251,7 @@
         "US egress only (COJ hosts block non-US and cloud IPs)",
         "First run is a full paged pull; later runs filter EDIT_DATE"
       ],
-      "last_run_id": "01M0HSJS8SG5AJM3H41ZW0T1N1",
+      "last_run_id": "01M0HVMB6XDGHJ5R0BY64HWH8Z",
       "last_run_status": "completed",
       "requires_us_egress": true,
       "last_skip_reason": null
@@ -301,7 +301,7 @@
         "US egress only; one cheap discovery + probe per run is kept as evidence (status codes recorded); enumeration runs only when a probe returns JSON",
         "Angular shell loads chunks dynamically, so static literal discovery finds no API paths"
       ],
-      "last_run_id": "01M0HSJS8SG5AJM3H41ZW0T1N1",
+      "last_run_id": "01M0HVMB6XDGHJ5R0BY64HWH8Z",
       "last_run_status": "completed",
       "requires_us_egress": true,
       "last_skip_reason": null,
@@ -311,10 +311,10 @@
     {
       "county": "duval",
       "source": "pa_detail",
-      "ingested_count": 214,
+      "ingested_count": 466,
       "expected_count": 398324,
       "first_loaded_at": "2026-08-21T09:40:34Z",
-      "last_loaded_at": "2026-08-21T09:40:34Z",
+      "last_loaded_at": "2026-08-21T10:11:38Z",
       "cid": null,
       "ipns_label": null,
       "track": "pa_detail",
@@ -328,7 +328,7 @@
         "Slow source by design: ~300 pages per run; full seed (398,324 parcels) needs many runs; throughput recorded per run",
         "Lexicon transform runs the vendored Elephant scripts per page; owners/*.json prerequisites come from the mapping scripts on the same page"
       ],
-      "last_run_id": "01M0HSJS8SG5AJM3H41ZW0T1N1",
+      "last_run_id": "01M0HVMB6XDGHJ5R0BY64HWH8Z",
       "last_run_status": "completed",
       "requires_us_egress": true,
       "last_skip_reason": null
