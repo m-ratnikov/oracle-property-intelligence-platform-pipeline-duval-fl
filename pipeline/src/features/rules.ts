@@ -87,6 +87,33 @@ export function ownerRegionSql(p: string): string {
     ELSE 'FOREIGN' END`;
 }
 
+/**
+ * The only multi-owner signal the FDOR NAL roll carries.
+ *
+ * NAL publishes a single 30-character `OWN_NAME` per parcel and no co-owner column (`FIDU_NAME` is
+ * a fiduciary, not a second owner, and is empty for all 404,023 Duval parcels). Where more owners
+ * exist than the one it names, the roll appends "ET AL" (and others) or "ET UX" (and wife) to the
+ * name. That marker is the whole of what the source says about additional owners: it tells you
+ * that there are more, never how many. `owner_count` is therefore published NULL rather than
+ * guessed; this flag publishes the signal that does exist.
+ *
+ * Splitting the name on "&" / " AND " is deliberately NOT used: the 30-character truncation strips
+ * the entity suffix, so names like "SOUTHERN BELL TELEPHONE AND TE" or "C AND C FLOWERS AND
+ * LANDSCAPIN" are indistinguishable from two co-owners.
+ */
+const ADDITIONAL_OWNER_MARKER = /\bET\s*(AL|UX)\b/;
+
+/** true when the roll records owners beyond the one it names; null when there is no owner name. */
+export function hasAdditionalOwners(ownerName: string | null | undefined): boolean | null {
+  if (ownerName === null || ownerName === undefined) return null;
+  return ADDITIONAL_OWNER_MARKER.test(ownerName.toUpperCase());
+}
+
+/** SQL twin of {@link hasAdditionalOwners}. */
+export function hasAdditionalOwnersSql(col: string): string {
+  return `CASE WHEN ${col} IS NULL THEN NULL ELSE regexp_matches(upper(${col}), '\\bET\\s*(AL|UX)\\b') END`;
+}
+
 const MS_PER_YEAR = 365.25 * 24 * 60 * 60 * 1000;
 
 /** Whole years elapsed between the last sale date and `asOf` (floor). null when no sale date. */

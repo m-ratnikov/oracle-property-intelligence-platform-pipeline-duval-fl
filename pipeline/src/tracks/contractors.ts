@@ -306,6 +306,12 @@ export const runContractors: TrackRunner = async (ctx, source) => {
   for (const ex of DBPR_EXTRACTS) {
     await ctx.conn.run(`UPDATE ${hashed} SET source_url = ${q(ex.url)}, source_sha256 = ${q(String(result.notes[`${ex.name}_sha256`] ?? ""))} WHERE extract_file = ${q(ex.name)}`);
   }
+  // Deliberately unscoped, unlike businesses / permits / coj_addresses. Both CILB extracts are full
+  // statewide snapshots re-read in full on every run (downloadArtifact only skips the network when
+  // the bytes are unchanged; the CSV is re-scanned either way), the Duval filter is applied to the
+  // whole of both files, and this track is the only writer of `contractors`. So a licence held here
+  // and absent from the staging really is a licence the source dropped, and missing_in_source may
+  // speak for the whole table.
   result.merge = await mergeStaging(ctx.conn, { target: "contractors", staging: hashed, keys: ["license_no"] });
   log.info("merged", { table: "contractors", ...result.merge, duval: result.rowsStaged, roofing: result.notes.roofingContractorsDuval });
   result.status = "completed";

@@ -79,16 +79,31 @@ jobs:
             pnpm run publish:ipfs
           fi
 
-      - name: Print the URLs to set on Vercel
+      - name: Print the env block to set on Vercel
+        if: always()
         working-directory: ${{ github.workspace }}
         run: |
-          echo "=== publish-manifest.json ==="
-          cat .data/artifacts/publish/duval/publish-manifest.json
+          # mcp-env.txt is written by the publish itself and is the single source of truth for the
+          # MCP deployment's configuration. The two per-publish lines are immutable CID URLs and
+          # have to be re-applied after every publish; the rest is set once. Same values as the
+          # published catalog, by construction.
+          echo "=== mcp-env.txt (paste into the MCP deployment) ==="
+          cat .data/artifacts/publish/duval/mcp-env.txt
+          {
+            echo "## MCP configuration for this publish"
+            echo ""
+            echo '```dotenv'
+            cat .data/artifacts/publish/duval/mcp-env.txt
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload the manifest
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: publish-manifest-${{ github.run_id }}
-          path: .data/artifacts/publish/duval/publish-manifest.json
+          path: |
+            .data/artifacts/publish/duval/publish-manifest.json
+            .data/artifacts/publish/duval/mcp-env.txt
+            .data/artifacts/publish/duval/published-counties.json
           if-no-files-found: warn

@@ -175,6 +175,94 @@ describe("missing-in-source scoping", () => {
   });
 });
 
+describe("windowed sources that stage nothing", () => {
+  it("reports zero missing when the staged window is empty and scoped", async () => {
+    const db = await setupShared();
+    await stageAndMerge(db, [["w1", "alpha", "p1", "one"], ["w2", "alpha", "p2", "two"]], "run1");
+    // a delta feed whose window produced no files at all: this is the businesses-track shape
+    await db.conn.run(
+      "CREATE OR REPLACE TABLE staging.gadgets AS SELECT * FROM (VALUES ('x','x','x','x')) t(id,writer,parcel_id,name) WHERE false",
+    );
+    const h = await hashStaging(db.conn, "staging.gadgets", prov("run2"));
+    const unscoped = await mergeStaging(db.conn, { target: "gadgets", staging: h, keys: ["id"] });
+    expect(unscoped).toMatchObject({ staged: 0, inserted: 0, unchanged: 0, missingInSource: 2 });
+
+    const scoped = await mergeStaging(db.conn, { target: "gadgets", staging: h, keys: ["id"], authoritativeScope: "FALSE" });
+    expect(scoped).toMatchObject({ staged: 0, inserted: 0, unchanged: 0, missingInSource: 0, totalAfter: 2 });
+    await db.close();
+  });
+
+  it("reports zero missing when the staged files are the scope and no file was loaded", async () => {
+    const db = await setupShared();
+    // `writer` stands in for businesses.source_file: the daily file a row was last seen in
+    await stageAndMerge(db, [["b1", "20260801c.txt", "p1", "one"], ["b2", "20260802c.txt", "p2", "two"]], "run1");
+    await db.conn.run(
+      "CREATE OR REPLACE TABLE staging.gadgets AS SELECT * FROM (VALUES ('x','x','x','x')) t(id,writer,parcel_id,name) WHERE false",
+    );
+    const h = await hashStaging(db.conn, "staging.gadgets", prov("run2"));
+    // no files this run -> the scope is the empty file list
+    const stats = await mergeStaging(db.conn, { target: "gadgets", staging: h, keys: ["id"], authoritativeScope: "FALSE" });
+    expect(stats.missingInSource).toBe(0);
+    expect(stats.totalAfter).toBe(2);
+    await db.close();
+  });
+});
+
+describe("partial-column staging", () => {
+  it("an update overwrites only the staged columns and keeps the rest", async () => {
+    const db = await openDb(":memory:");
+    await db.conn.run("CREATE SCHEMA staging");
+    await db.conn.run(`CREATE TABLE items (id VARCHAR NOT NULL, name VARCHAR, price DOUBLE, colour VARCHAR, ${PROVENANCE_COLUMNS})`);
+    await db.conn.run("CREATE TABLE staging.items AS SELECT * FROM (VALUES ('a','alpha',1.0,'red')) t(id,name,price,colour)");
+    await mergeStaging(db.conn, { target: "items", staging: await hashStaging(db.conn, "staging.items", prov("run1")), keys: ["id"] });
+
+    // a second writer carries only id + name; price and colour are not its to say anything about
+    await db.conn.run("CREATE TABLE staging.items_partial AS SELECT * FROM (VALUES ('a','alpha-renamed')) t(id,name)");
+    const s = await mergeStaging(db.conn, {
+      target: "items",
+      staging: await hashStaging(db.conn, "staging.items_partial", prov("run2")),
+      keys: ["id"],
+    });
+    expect(s).toMatchObject({ staged: 1, inserted: 0, updated: 1, unchanged: 0, totalAfter: 1 });
+    expect(await scalar(db.conn, "SELECT name FROM items WHERE id = 'a'")).toBe("alpha-renamed");
+    expect(await scalar(db.conn, "SELECT price FROM items WHERE id = 'a'")).toBe(1.0);
+    expect(await scalar(db.conn, "SELECT colour FROM items WHERE id = 'a'")).toBe("red");
+    // provenance is staged, so it does move to the writer that touched the row
+    expect(await scalar(db.conn, "SELECT run_id FROM items WHERE id = 'a'")).toBe("run2");
+    expect(await scalar(db.conn, "SELECT source_url FROM items WHERE id = 'a'")).toBe("https://example.test/file.zip");
+    await db.close();
+  });
+
+  it("a partial-column insert leaves the unstaged columns NULL rather than failing", async () => {
+    const db = await openDb(":memory:");
+    await db.conn.run("CREATE SCHEMA staging");
+    await db.conn.run(`CREATE TABLE items (id VARCHAR NOT NULL, name VARCHAR, price DOUBLE, ${PROVENANCE_COLUMNS})`);
+    await db.conn.run("CREATE TABLE staging.items AS SELECT * FROM (VALUES ('a','alpha')) t(id,name)");
+    const s = await mergeStaging(db.conn, { target: "items", staging: await hashStaging(db.conn, "staging.items", prov("run1")), keys: ["id"] });
+    expect(s).toMatchObject({ inserted: 1, totalAfter: 1 });
+    expect(await scalar(db.conn, "SELECT price FROM items WHERE id = 'a'")).toBeNull();
+    await db.close();
+  });
+});
+
+describe("post-merge invariant", () => {
+  it("rolls back the whole merge when the duplicate-key invariant is violated", async () => {
+    const db = await setup();
+    // two rows with the same key, put there behind the merge's back
+    await db.conn.run(
+      `INSERT INTO widgets VALUES ('a','alpha',1.0,'h1','test',NULL,NULL,NULL,'2026-08-21T00:00:00'::TIMESTAMP,'seed'),
+                                 ('a','alpha2',1.5,'h2','test',NULL,NULL,NULL,'2026-08-21T00:00:00'::TIMESTAMP,'seed')`,
+    );
+    await db.conn.run("CREATE TABLE staging.widgets AS SELECT * FROM (VALUES ('b','beta',2.0)) t(id,name,price)");
+    const h = await hashStaging(db.conn, "staging.widgets", prov("run1"));
+    await expect(mergeStaging(db.conn, { target: "widgets", staging: h, keys: ["id"] })).rejects.toThrow(/invariant violated/);
+    // the insert that tripped the check must not have survived the failure
+    expect(await scalar(db.conn, "SELECT count(*) FROM widgets WHERE id = 'b'")).toBe("0");
+    expect(await scalar(db.conn, "SELECT count(*) FROM widgets")).toBe("2");
+    await db.close();
+  });
+});
+
 describe("assertHeader", () => {
   it("passes on exact header, throws on missing, throws on new unless allowed", () => {
     expect(() => assertHeader({ expected: ["A", "B"], actual: ["a", "b"], source: "t" })).not.toThrow();

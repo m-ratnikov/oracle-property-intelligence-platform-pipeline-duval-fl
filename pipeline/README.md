@@ -115,6 +115,7 @@ No secrets are read anywhere except `publish/filebase.ts` and `tracks/businesses
 5. Stage into `staging.<table>`, add `row_hash = md5(to_json(row))` + provenance, MERGE into the target: `inserted` / `updated` (hash differs) / `unchanged` (provenance kept) / `missing_in_source` (kept, counted; scoped by `authoritativeScope` where the staging table cannot speak for the whole target, which is the case for a table two tracks write (`sales_history`) and for a track that stages one bounded window per run (`pa_detail`); not meaningful at all for delta feeds such as Sunbiz daily files). Duplicate or NULL natural keys in staging abort the merge.
 6. Nearest-neighbour features (transit stops, Starbucks) via a grid join + brute-force fallback; water distance via shoreline vertices on a grid join; `links` rebuilds owners + entity_links.
 7. `derived.properties_features` (one row per parcel), `query-table.parquet`, the validation gate (rows == distinct folio in `parcels`, 0 null, 0 dup, canonical columns present, per-column coverage printed), entity parquet tables, `dataset-coverage.json`, `run-history.json` (all runs), `runs/<run_id>.json` (committed by CI).
+7b. `export:consolidation` runs after the ingestion run and rewrites the query table, so it applies the SAME gate, and it builds into `query-table.staging.parquet` and promotes only on a pass. A failed gate leaves the last artifact that passed exactly where it was and exits non-zero, which stops the job before the publish step.
 8. `publish` (separate command, dry-run by default) computes CIDs locally with `ipfs-only-hash` (same defaults as the Elephant reference uploaders; CIDv1 rendering also shown), PUTs to Filebase, checks `x-amz-meta-cid`, upserts IPNS labels, writes `published-counties.json`, `artifacts-index.json`, `publish-manifest.json`.
 
 ### Provenance
@@ -155,6 +156,52 @@ Rules (TS and SQL twins in `src/features/rules.ts` and `src/features/normalize.t
 - Columns whose source is not loaded are NULL, never false / 0 (`has_permits`, `permit_count`, `fld_zone`, `zoning` until the US-only tracks run in Actions).
 - `property_cid` = CID of the property's open-data JSON (`export:consolidation`); NULL until the first export.
 
+## MCP configuration: the publish output is the only source of truth
+
+Every publish writes `publish/duval/mcp-env.txt` (and the same values under `mcpEnv` /
+`mcpBindings` in `publish-manifest.json`, copied to `runs/latest-publish-manifest.json` and
+`runs/latest-mcp-env.txt`). Paste that file into the MCP deployment. Nothing else should be
+hand-assembled, because the same values are what the published `published-counties.json` catalog
+advertises, and the publish refuses to finish if the two disagree.
+
+**The query table is addressed by CID, not by its IPNS name.** This is not a preference:
+
+`@elephant-xyz/mcp` resolves a county's parquet from `PROPERTY_QUERY_TABLE_MAP` and hands the URL
+straight to DuckDB, `CREATE VIEW properties AS SELECT * FROM read_parquet('<url>')`, then caches
+that connection for the life of the warm instance keyed on the URL. DuckDB's `httpfs` remembers the
+ETag it saw when the view was created and revalidates it on every later range read. An
+`/ipns/k51.../` URL therefore works exactly until the next publish re-points the name, at which
+point the gateway answers with a different ETag and every data tool on that warm instance fails
+with `ETag on reading file ".../ipns/k51..." was initially "QmV25TMv..." and now it returned
+"QmT5tK6ry..."`. Publishing every six hours guarantees that several times a day. The server is
+deployed unmodified and exposes no way to disable the check, and the catalog is not consulted for
+the parquet location, so an immutable `/ipfs/<cidv1>` URL is the only configuration that survives a
+publish. Changing the URL also changes DuckDB's cache key, so the redeploy picks up the new
+artifact cleanly instead of poisoning a cached view.
+
+`DATASET_COVERAGE_MAP` is read with a plain `fetch` behind a five minute TTL, so a name would work
+there. It is pinned to the same publish anyway, so the coverage numbers a client reads always
+describe the exact parquet that client is querying rather than racing ahead of it.
+
+Everything else stays on a stable IPNS name and is set once: `PUBLISHED_COUNTY_CATALOG_URL` and
+`ORACLE_OPEN_DATA_IPNS_MAP` are both fetched as JSON behind short TTLs and never touch DuckDB.
+
+| Setting | Addressing | Re-apply after every publish |
+|---|---|---|
+| `PROPERTY_QUERY_TABLE_MAP` | `/ipfs/<cidv1>` | yes |
+| `DATASET_COVERAGE_MAP` | `/ipfs/<cidv1>` | yes |
+| `PROPERTY_QUERY_TABLE_DEFAULT_COUNTY`, `ORACLE_OPEN_DATA_DEFAULT_COUNTY` | literal `duval` | no |
+| `ORACLE_OPEN_DATA_IPNS_MAP` | `/ipns/k51...` | no |
+| `PUBLISHED_COUNTY_CATALOG_URL` | `/ipns/k51...` | no |
+
+The IPNS names are still minted and still recorded in `publish-manifest.json` and
+`artifacts-index.json`: the UI follows `oracle-run-history-duval` across runs (a CID there once
+froze the runs page at eight runs), and the catalog name is what lets an operator set
+`PUBLISHED_COUNTY_CATALOG_URL` once and never touch it again.
+
+The two per-publish lines are printed by `publish-artifacts.yml` in its job summary, so the current
+values are one click away in the Actions tab without downloading anything.
+
 ## The six questions: availability today (local run, before the US-only tracks)
 
 | Question | Parcels with the feature | Basis | Gap |
@@ -193,6 +240,37 @@ country each run; the run record stores it too.
 - `.github/workflows/pipeline.yml`: cron every 6 h + dispatch; runs ALL tracks with `SUNBIZ_WINDOW_DAYS=14`, `PERMITS_WINDOW=300`, `PA_DETAIL_WINDOW=300`; then `export:consolidation --since changed`; caches the source zips, seed, PA pages, open-data export and the DuckDB file between runs; uploads `publish/duval/*` (minus the per-property files) and the discovered JaxEPICS API as workflow artifacts; commits `runs/*.json` back; publishes open data + query table when `FILEBASE_*` secrets exist.
 - `.github/workflows/pipeline-window.yml`: dispatch-only bounded run (tracks + window + force + optional publish) for ad-hoc permit / Sunbiz / COJ pulls.
 - `.github/workflows/probe-sources.yml`: reachability probe (unchanged).
+- `.github/workflows/publish-artifacts.yml`: dispatch-only re-publish of the ~10 runtime artifacts from the cached working set, without re-ingesting; prints `mcp-env.txt` into the job summary.
+- `.github/workflows/ci.yml`: push / PR tests for the whole repository. Three jobs: `pipeline` (tsc + vitest), `ui` (tsc + vitest) and `ui-e2e` (Playwright smoke, `continue-on-error` until the suite has been green for a few consecutive runs). Before this existed, only `pipeline/` was tested, inside the 40-minute ingestion workflow.
+
+### What is committed back, and why
+
+`runs/` is the only durable record this pipeline has: the DuckDB working set lives in a
+branch-scoped Actions cache that GitHub evicts after seven days without a hit, so `run_log` cannot
+be trusted to remember anything. Alongside `runs/<run_id>.json` the pipeline commits:
+
+- `runs/ci-runs.json` - one entry per run with the GitHub event that started it (`schedule`,
+  `workflow_dispatch`, ...), the workflow run id and a link to it, plus a `by_event` tally. The
+  consolidation pass keeps `trigger: "consolidation"` because that is the run KIND the UI groups
+  on, so the CI event is recorded here instead and a scheduled consolidation is as provable as a
+  scheduled ingestion run. `jq .by_event runs/ci-runs.json` answers "is the cron actually running".
+- `runs/table-highwater.json` - the largest each table has ever been on this lineage, the current
+  value, and an event log of every time a total went backwards. A run whose totals are below the
+  marks fails before it publishes; `--allow-regression --regression-note "<why>"` re-bases the
+  marks and records who did it and why.
+- `runs/track-state.json` - every accumulating track's cursor after the run, so a rewind is visible
+  in the diff of the commit that caused it.
+- `runs/latest-publish-manifest.json`, `runs/latest-mcp-env.txt`, `runs/latest-dataset-coverage.json`,
+  `runs/latest-jaxepics-api.json`.
+
+The commit-back rebases and retries five times before failing the step. A single attempt is not
+enough: the record of the scheduled run 32513420281 was pushed to `main` as commit `48d8806` and
+then lost when the branch moved underneath it, which is why no committed run carried
+`trigger: "schedule"` for a while. `runs/*.json` is also uploaded as a workflow artifact on every
+run, so the record survives even when the commit cannot land.
+
+A failed **scheduled** run opens (or comments on) a `pipeline-failure` GitHub issue and writes the
+detail into the job summary. Dispatched runs do not alert, because a human is already watching them.
 
 ## Cost model ($0 standing)
 
@@ -203,4 +281,4 @@ country each run; the run record stores it too.
 
 ## Engineering notes
 
-TypeScript / Node 22 / ESM, `@duckdb/node-api` (+ spatial, httpfs), `@aws-sdk/client-s3` (Filebase), `ssh2-sftp-client` (Sunbiz), `ipfs-only-hash` + `multiformats`, zod, vitest, tsx. Structured JSON logs (`src/log.ts`). Deviations from the team Golden Path: no CDK / Glue / PySpark because the requirement is zero standing infrastructure (Actions + DuckDB + IPFS); no PagerDuty (a failed run fails the workflow and is visible in `run_log` / run history).
+TypeScript / Node 22 / ESM, `@duckdb/node-api` (+ spatial, httpfs), `@aws-sdk/client-s3` (Filebase), `ssh2-sftp-client` (Sunbiz), `ipfs-only-hash` + `multiformats`, zod, vitest, tsx. Structured JSON logs (`src/log.ts`). Deviations from the team Golden Path: no CDK / Glue / PySpark because the requirement is zero standing infrastructure (Actions + DuckDB + IPFS); no PagerDuty, because there is no standing infrastructure to pay for one: a failed scheduled run instead opens a `pipeline-failure` GitHub issue (and posts to `ALERT_WEBHOOK_URL` when that secret is set), which is the same alerting contract at zero cost.

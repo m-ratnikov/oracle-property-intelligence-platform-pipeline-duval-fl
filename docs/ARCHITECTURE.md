@@ -130,7 +130,7 @@ sequenceDiagram
     P->>DB: build derived.properties_features (103 columns)
     P->>DB: COPY to query-table.parquet
     P->>P: validate — rows == distinct folios, no null keys
-    Note over P: a failed gate aborts before anything is published
+    Note over P: a failed gate keeps the last artifact that passed, and stops the job
     P->>DB: export entity tables, coverage snapshot
     P->>P: write run-history.json and runs/run_id.json
     P->>FB: PUT artifacts, then move IPNS names
@@ -138,8 +138,12 @@ sequenceDiagram
     CI->>CI: save .data cache, commit runs back
 ```
 
-The validation gate matters: the parquet is checked **before** publish, so a bad build cannot replace
-a good published artifact.
+The validation gate matters, and it guards both passes that build the parquet. The ingestion run
+validates and exits non-zero on failure. The consolidation pass, which runs afterwards and rewrites
+the same file, builds into `query-table.staging.parquet` and promotes it over `query-table.parquet`
+only when the gate passes; a failed gate leaves the last artifact that passed exactly where it was
+and exits non-zero, which stops the job before the publish step. A bad build therefore cannot
+replace a good published artifact, and it cannot reach IPFS.
 
 ---
 
@@ -379,11 +383,20 @@ sequenceDiagram
 Configuration is four public URLs and no credential:
 
 ```
-PROPERTY_QUERY_TABLE_MAP={"duval":"https://ipfs.filebase.io/ipns/k51...hpq4r"}
+PROPERTY_QUERY_TABLE_MAP={"duval":"https://ipfs.filebase.io/ipfs/bafybei...zun4"}
 PROPERTY_QUERY_TABLE_DEFAULT_COUNTY=duval
-DATASET_COVERAGE_MAP={"duval":"https://ipfs.filebase.io/ipns/k51...pwum"}
+DATASET_COVERAGE_MAP={"duval":"https://ipfs.filebase.io/ipfs/bafybei...u2c4"}
 PUBLISHED_COUNTY_CATALOG_URL=https://ipfs.filebase.io/ipns/k51...ijy7d
 ```
+
+The addressing is not uniform, and the difference is the point. Anything DuckDB opens gets an
+immutable `/ipfs/<cid>` URL, because the gateway returns the CID as the ETag and DuckDB validates it:
+a mutable `/ipns/` name re-points on every publish, the ETag changes underneath a warm connection,
+and every query then fails until the process recycles. Anything fetched as plain JSON, such as the
+catalog, keeps an IPNS name and follows the newest publish on its own. The two query-table lines
+therefore have to be re-applied after each publish; `runs/latest-mcp-env.txt` is written by the
+publish step so they are copied rather than assembled by hand, and the publish asserts that the
+catalog and this block name the same artifact.
 
 Because the view is called `properties` in all three readers, SQL written in the browser workbench
 runs unchanged through MCP.

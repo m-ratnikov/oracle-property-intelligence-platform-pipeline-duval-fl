@@ -48,11 +48,23 @@ export async function hashStaging(
   return hashed;
 }
 
+/** A DuckDB-safe temp-table name derived from a target table name. */
+function tempName(target: string): string {
+  return `__merge_new_${target.replace(/[^A-Za-z0-9_]/g, "_")}`;
+}
+
 /**
  * Merge a hashed staging table into its target, reporting inserted / updated / unchanged /
  * missing-in-source counts. Unchanged rows keep their original provenance (fetched_at / run_id say
  * when that row version was last loaded). Rows missing from the new source snapshot are kept
  * (counted, not deleted) so a partial source window never erases history.
+ *
+ * An update overwrites only the columns the staging table actually carries. Everything is written
+ * as delete-then-insert (DuckDB has no UPDATE ... FROM by natural key here), so the replacement row
+ * is built first, taking staged columns from the staging row and every other target column from the
+ * row being replaced. Without that, a track staging a subset of the columns would NULL the rest:
+ * `sales_history` is written by both the sales track and pa_detail with different column sets, and
+ * whichever ran last would blank the other's columns.
  *
  * `missingInSource` only means "the source dropped a row we hold" while two things are true: this
  * staging table is the whole of what the source offered, and this track is the only writer of the
@@ -116,31 +128,39 @@ export async function mergeStaging(
      FROM ${staging} s FULL OUTER JOIN ${target} t ON ${keyEq("s", "t", keys)}`,
   );
 
+  // Build the replacement rows before anything is deleted: staged columns come from the staging row,
+  // every other target column is carried over from the row being replaced (NULL for a brand-new key).
+  const stagedCols = new Set(stagingCols);
+  const newRows = tempName(target);
+  await conn.run(`
+    CREATE OR REPLACE TEMP TABLE ${newRows} AS
+    SELECT ${targetCols.map((c) => `${stagedCols.has(c) ? "s" : "t"}.${ident(c)} AS ${ident(c)}`).join(", ")}
+    FROM ${staging} s LEFT JOIN ${target} t ON ${keyEq("s", "t", keys)}
+    WHERE t.${firstKey} IS NULL OR t.row_hash IS DISTINCT FROM s.row_hash`);
+
   await conn.run("BEGIN TRANSACTION");
   try {
     await conn.run(
-      `DELETE FROM ${target} t WHERE EXISTS (
-         SELECT 1 FROM ${staging} s WHERE ${keyEq("s", "t", keys)} AND s.row_hash <> t.row_hash)`,
+      `DELETE FROM ${target} t WHERE EXISTS (SELECT 1 FROM ${newRows} n WHERE ${keyEq("n", "t", keys)})`,
     );
-    await conn.run(
-      `INSERT INTO ${target} BY NAME
-       SELECT s.* FROM ${staging} s
-       WHERE NOT EXISTS (SELECT 1 FROM ${target} t WHERE ${keyEq("s", "t", keys)})`,
+    await conn.run(`INSERT INTO ${target} BY NAME SELECT * FROM ${newRows}`);
+    // Inside the transaction on purpose: after COMMIT the offending rows are already durable.
+    const dupAfter = await all<{ n: string | number }>(
+      conn,
+      `SELECT count(*) AS n FROM (SELECT ${keys.map(ident).join(", ")} FROM ${target} GROUP BY ALL HAVING count(*) > 1)`,
     );
+    if (Number(dupAfter[0]?.n ?? 0) > 0) {
+      throw new Error(`Target ${target} has duplicate keys after merge; invariant violated`);
+    }
     await conn.run("COMMIT");
   } catch (err) {
     await conn.run("ROLLBACK");
     throw err;
+  } finally {
+    await conn.run(`DROP TABLE IF EXISTS ${newRows}`).catch(() => undefined);
   }
 
   const totalAfter = Number(await scalar<string | number>(conn, `SELECT count(*) FROM ${target}`));
-  const dupAfter = await all<{ n: string | number }>(
-    conn,
-    `SELECT count(*) AS n FROM (SELECT ${keys.map(ident).join(", ")} FROM ${target} GROUP BY ALL HAVING count(*) > 1)`,
-  );
-  if (Number(dupAfter[0]?.n ?? 0) > 0) {
-    throw new Error(`Target ${target} has duplicate keys after merge; invariant violated`);
-  }
 
   return {
     staged,

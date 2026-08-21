@@ -169,7 +169,7 @@ function recordSql(opts: { permits: boolean; businesses: boolean; links: boolean
         valuation := struct_pack(assessmentYear := p.asmnt_yr, justValue := p.jv, justValueChange := p.jv_chng, assessedValueSchool := p.av_sd, assessedValueNonSchool := p.av_nsd,
                                  taxableValueSchool := p.tv_sd, taxableValueNonSchool := p.tv_nsd, landValue := p.lnd_val, homesteadJustValue := p.jv_hmstd, homesteadAssessedValue := p.av_hmstd,
                                  newConstructionValue := p.nconst_val, deletionValue := p.del_val, exemptionCodes := p.exmpt_codes, homesteadFlag := f.homestead_flag),
-        owners := struct_pack(ownerId := ${ownerId}, ownerName := p.own_name, ownersText := f.owners_text, ownerCount := f.owner_count,
+        owners := struct_pack(ownerId := ${ownerId}, ownerName := p.own_name, ownersText := f.owners_text, ownerCount := f.owner_count, hasAdditionalOwners := f.has_additional_owners,
                               mailingAddress := struct_pack(line1 := p.own_addr1, line2 := p.own_addr2, city := p.own_city, state := p.own_state, zip := p.own_zipcd, stateOfDomicile := p.own_state_dom),
                               fiduciary := struct_pack(name := p.fidu_name, line1 := p.fidu_addr1, line2 := p.fidu_addr2, city := p.fidu_city, state := p.fidu_state, zip := p.fidu_zipcd, code := p.fidu_cd),
                               ownerOccupied := f.owner_occupied, ownerRegionClass := f.owner_region_class,
@@ -183,12 +183,13 @@ function recordSql(opts: { permits: boolean; businesses: boolean; links: boolean
         features := struct_pack(
           roofYearEst := f.roof_year_est, roofAgeBasis := f.roof_age_basis, roofPermitCount := f.roof_permit_count, lastRoofPermitYear := f.last_roof_permit_year,
           waterViewFlag := f.water_view_flag, waterViewMajorFlag := f.water_view_major_flag, waterDistM := f.water_dist_m, waterBodyName := f.water_body_name, waterBodyType := f.water_body_type, waterBasis := f.water_basis,
-          lastSaleDateAny := f.last_sale_date_any, tenureBasis := f.tenure_basis, cojLastSaleDate := f.coj_last_sale_date,
+          lastSaleDateAny := f.last_sale_date_any, tenureBasis := f.tenure_basis, tenureSource := f.tenure_source,
+          hasSaleOnRecord := f.has_sale_on_record, cojLastSaleDate := f.coj_last_sale_date,
           ownerRegionClass := f.owner_region_class,
           nearestTransitStopM := f.nearest_transit_stop_m, nearestTransitStopName := f.nearest_transit_stop_name, nearestTransitRouteTypes := f.nearest_transit_route_types, nearTransit800m := f.near_transit_800m,
           nearestStarbucksM := f.nearest_starbucks_m, nearestStarbucksName := f.nearest_starbucks_name, nearStarbucks800m := f.near_starbucks_800m,
           hasPermits := f.has_permits, permitCount := f.permit_count, hasSunbizTenant := f.has_sunbiz_tenant, sunbizBusinessCount := f.sunbiz_business_count),
-        provenance := struct_pack(source_system := p.source_system, source_url := p.source_url, source_artifact := p.source_artifact, source_sha256 := p.source_sha256,
+        provenance := struct_pack(source_system := p.source_system, source_systems := f.source_systems, source_url := p.source_url, source_artifact := p.source_artifact, source_sha256 := p.source_sha256,
                                   fetched_at := p.fetched_at::VARCHAR, run_id := p.run_id,
                                   geometry := struct_pack(source_system := g.source_system, source_url := g.source_url, source_artifact := g.source_artifact, source_sha256 := g.source_sha256, fetched_at := g.fetched_at::VARCHAR, run_id := g.run_id))
       ))::VARCHAR AS record

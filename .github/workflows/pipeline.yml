@@ -6,6 +6,12 @@ name: pipeline
 # Filebase secrets exist, re-publishes the artifacts to IPFS and re-points the IPNS names.
 # The scheduled run executes ALL tracks: the FDOR/JTA/NHD/Overture/Sunbiz tracks run anywhere; the
 # COJ / DBPR / JaxEPICS tracks need a US egress (GitHub runners are US) and self-skip elsewhere.
+#
+# Everything this workflow learns about a run - which CI event started it, where each track's cursor
+# ended up, and how the table totals compare with the largest they have ever been - is committed
+# back under runs/. The DuckDB working set lives in a branch-scoped Actions cache that GitHub
+# evicts, so runs/ is the only durable record and it has to be able to answer "is the cron actually
+# running" and "did a table just shrink" on its own.
 on:
   schedule:
     - cron: "17 */6 * * *"
@@ -23,6 +29,14 @@ on:
         description: "Upload to Filebase + re-point IPNS (requires secrets)"
         required: false
         default: "true"
+      allow_regression:
+        description: "Accept and record table totals that went backwards (use after a deliberate rebuild)"
+        required: false
+        default: "false"
+      regression_note:
+        description: "Why the regression is expected; recorded in runs/table-highwater.json"
+        required: false
+        default: ""
 
 concurrency:
   group: duval-pipeline
@@ -51,6 +65,12 @@ jobs:
           ref: ${{ github.ref }}
           fetch-depth: 0
 
+      - name: One cache lineage
+        if: ${{ github.event_name == 'workflow_dispatch' && github.ref_name != github.event.repository.default_branch }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          echo "::warning title=Second cache lineage::Actions caches are branch scoped. Running the pipeline on '${{ github.ref_name }}' builds a working set that the scheduled run on '${{ github.event.repository.default_branch }}' can never read, and vice versa. That is how pa_detail_buildings went from 1619 rows to 466. Prefer dispatching this workflow on the default branch."
+
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: pipeline/package.json
@@ -62,6 +82,7 @@ jobs:
           cache-dependency-path: pipeline/pnpm-lock.yaml
 
       - name: Restore source artifacts + DuckDB from the previous run
+        id: data-cache
         uses: actions/cache/restore@v4
         with:
           # one stable path entry: GitHub derives the cache version from the path list, so a changed
@@ -71,8 +92,23 @@ jobs:
           restore-keys: |
             duval-data-
 
+      - name: Warm or cold start
+        id: warmth
+        working-directory: ${{ github.workspace }}
+        run: |
+          if [ -f .data/duval.duckdb ]; then
+            echo "cold=false" >> "$GITHUB_OUTPUT"
+            echo "warm start: $(du -h .data/duval.duckdb | cut -f1) working set from cache key '${{ steps.data-cache.outputs.cache-matched-key }}'"
+          else
+            echo "cold=true" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Cold start::No DuckDB in the restored cache, so every accumulating track restarts from cursor zero and the table totals will be far below their high-water marks. The run will stop at the high-water gate before it publishes anything. Re-run once a warm cache exists, or dispatch with allow_regression=true and a regression_note to re-base the marks deliberately."
+          fi
+
       - name: Install
         run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
 
       - name: Unit tests
         run: pnpm test
@@ -82,14 +118,26 @@ jobs:
 
       - name: Run pipeline (all tracks)
         env:
+          # github.event_name is `schedule` on a cron tick, and the CLI records it verbatim in
+          # runs/<run_id>.json and in runs/ci-runs.json. Do not replace it with a literal.
           TRACKS: ${{ github.event.inputs.tracks || 'default' }}
           WINDOW: ${{ github.event.inputs.window || '' }}
+          ALLOW_REGRESSION: ${{ github.event.inputs.allow_regression || 'false' }}
+          REGRESSION_NOTE: ${{ github.event.inputs.regression_note || '' }}
         run: |
           ARGS="--tracks $TRACKS --trigger ${{ github.event_name }}"
           if [ -n "$WINDOW" ]; then ARGS="$ARGS --window $WINDOW"; fi
-          pnpm run pipeline -- $ARGS
+          if [ "$ALLOW_REGRESSION" = "true" ]; then ARGS="$ARGS --allow-regression"; fi
+          if [ -n "$REGRESSION_NOTE" ]; then
+            pnpm run pipeline -- $ARGS --regression-note "$REGRESSION_NOTE"
+          else
+            pnpm run pipeline -- $ARGS
+          fi
 
       - name: Export open-data consolidation (changed properties only; rebuilds shards/index/manifest)
+        # This pass rewrites query-table.parquet, so it applies the SAME validation gate as the run
+        # above and exits non-zero when the gate fails. A failed gate leaves the previous parquet in
+        # place and stops the job before the publish step below.
         run: pnpm run export:consolidation -- --since changed --shard-size 10000
 
       - name: Publish to Filebase / IPFS (dry-run when secrets are absent)
@@ -132,8 +180,13 @@ jobs:
           # still enumerated all 404k per-property files and died with "Maximum call stack size
           # exceeded" (twice: runs 32466876779 and 32469673797). Nothing here recurses into open-data.
           # Those per-property files are addressed by CID on IPFS; they were never a build artifact.
+          #
+          # runs/ is included so this run's record survives even when the commit-back below cannot
+          # land it (a force-push to the branch destroyed run 32513420281's record, which was the
+          # only committed proof that the cron had ever fired).
           path: |
             .data/artifacts/publish/duval/*.json
+            .data/artifacts/publish/duval/*.txt
             .data/artifacts/publish/duval/*.parquet
             .data/artifacts/publish/duval/tables/*.parquet
             .data/artifacts/publish/duval/open-data/index.json
@@ -141,6 +194,7 @@ jobs:
             .data/artifacts/publish/duval/open-data/export-summary.json
             .data/artifacts/publish/duval/open-data/publish-result.json
             .data/artifacts/permits/discovered-api.json
+            runs/*.json
           if-no-files-found: warn
           retention-days: 14
 
@@ -152,10 +206,78 @@ jobs:
           git config user.email "pipeline@users.noreply.github.com"
           mkdir -p runs
           cp .data/artifacts/publish/duval/publish-manifest.json runs/latest-publish-manifest.json 2>/dev/null || true
+          cp .data/artifacts/publish/duval/mcp-env.txt runs/latest-mcp-env.txt 2>/dev/null || true
           cp .data/artifacts/publish/duval/dataset-coverage.json runs/latest-dataset-coverage.json 2>/dev/null || true
           cp .data/artifacts/permits/discovered-api.json runs/latest-jaxepics-api.json 2>/dev/null || true
           git add runs/
           if git diff --cached --quiet; then echo "no run history changes"; exit 0; fi
           git commit -m "pipeline: run history $(date -u +%Y-%m-%dT%H:%MZ) [skip ci]"
-          git pull --rebase origin ${GITHUB_REF_NAME}
-          git push origin HEAD:${GITHUB_REF_NAME}
+          # Push with retry. The previous "commit, pull --rebase, push once" lost the record of the
+          # only scheduled run we had: another push landed on the branch in the same window and the
+          # single attempt did not survive it. Rebase onto whatever is there now and try again.
+          for attempt in 1 2 3 4 5; do
+            if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+              echo "run history pushed on attempt ${attempt}"
+              exit 0
+            fi
+            echo "push rejected on attempt ${attempt}; rebasing onto the current ${GITHUB_REF_NAME}"
+            git fetch origin "${GITHUB_REF_NAME}"
+            git rebase "origin/${GITHUB_REF_NAME}" || git rebase --abort
+            sleep $((attempt * 5))
+          done
+          echo "::error title=Run history not committed::Could not push runs/ after 5 attempts. This run's record exists only in the workflow artifact duval-publish-${{ github.run_id }}."
+          exit 1
+
+  alert:
+    name: Alert on a failed scheduled run
+    needs: run
+    # Only the cron. A dispatched run has a human watching it; a cron failing at 03:17 does not.
+    if: ${{ failure() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open or update the pipeline-failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
+        run: |
+          set -uo pipefail
+          {
+            echo "The 6-hourly Duval ingestion run failed."
+            echo ""
+            echo "- run: ${RUN_URL}"
+            echo "- attempt: ${GITHUB_RUN_ATTEMPT}"
+            echo "- commit: ${GITHUB_SHA}"
+            echo "- branch: ${GITHUB_REF_NAME}"
+            echo ""
+            echo "Continuous ingestion is the claim this repository is built on, so a failed cron is"
+            echo "a broken promise rather than a red tick. Open the run, find the failing step, and"
+            echo "re-dispatch the workflow once it is fixed."
+            echo ""
+            echo "Common causes, in the order they have actually happened here:"
+            echo "1. the validation or high-water gate stopped the run because it started from a cold cache;"
+            echo "2. a county portal blocked the runner (anti-bot or geo-block) and a track failed;"
+            echo "3. an IPNS name did not move and the publish command exited non-zero."
+          } > alert-body.md
+          gh label create pipeline-failure --color B60205 --description "A scheduled pipeline run failed" >/dev/null 2>&1 || true
+          EXISTING="$(gh issue list --state open --label pipeline-failure --limit 1 --json number --jq '.[0].number' 2>/dev/null || true)"
+          if [ -n "${EXISTING}" ]; then
+            gh issue comment "${EXISTING}" --body-file alert-body.md || echo "::error title=Alerting failed::Scheduled run FAILED and the failure issue could not be updated: ${RUN_URL}"
+          else
+            gh issue create --title "Scheduled pipeline run failed" --label pipeline-failure --body-file alert-body.md \
+              || gh issue create --title "Scheduled pipeline run failed" --body-file alert-body.md \
+              || echo "::error title=Alerting failed::Scheduled run FAILED and no issue could be opened (are Issues enabled on this repository?): ${RUN_URL}"
+          fi
+          # Optional second channel, zero cost when the secret is not set.
+          if [ -n "${ALERT_WEBHOOK_URL}" ]; then
+            jq -n --arg text "Duval pipeline: scheduled run FAILED - ${RUN_URL}" '{text: $text}' \
+              | curl -s -X POST -H "Content-Type: application/json" --data @- "${ALERT_WEBHOOK_URL}" >/dev/null || true
+          fi
+          {
+            echo "## Scheduled pipeline run failed"
+            echo ""
+            cat alert-body.md
+          } >> "${GITHUB_STEP_SUMMARY}"

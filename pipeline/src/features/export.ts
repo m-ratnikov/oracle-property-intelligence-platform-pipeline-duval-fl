@@ -1,8 +1,11 @@
 import { mkdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { DuckDBConnection } from "@duckdb/node-api";
+import { COUNTY } from "../config.js";
 import { all, count, duckPath, ident, one, q, tableColumns } from "../db.js";
 import { computeFileCid } from "../publish/cid.js";
+import { SOURCES } from "../sources.js";
+import { COLUMN_FAMILIES, SOURCE_FAMILIES } from "./build.js";
 
 /** The 37 canonical query-table columns, in elephant-query-db run-query-table-export.ts order. */
 export const QUERY_TABLE_CANONICAL_COLUMNS: readonly string[] = [
@@ -13,6 +16,115 @@ export const QUERY_TABLE_CANONICAL_COLUMNS: readonly string[] = [
   "owner_name", "owners_text", "owner_count", "owner_occupied", "last_sale_date", "last_sale_price", "subdivision",
   "has_permits", "permit_count", "has_sunbiz_tenant", "has_bbb_contractor", "hoa_flag",
 ];
+
+/**
+ * Column notes published with the parquet.
+ *
+ * Only columns whose meaning a reader could get wrong are listed; everything else is described by
+ * its family label. These are the sentences a consumer sees when they ask the file what a column
+ * means, so anything that is a proxy, a gap, or a derivation has to say so here.
+ */
+export const QUERY_TABLE_COLUMN_NOTES: Readonly<Record<string, string>> = {
+  source_system:
+    "Canonical Elephant column, scoped to the appraisal-roll spine this row is keyed on. It is the same value on every row and it does NOT describe the enrichment columns: use <family>_source, or source_systems for the whole row.",
+  source_systems:
+    "Every distinct source system that contributed a non-null value to this row, sorted and comma separated.",
+  source_url: "Dataset URL of the appraisal roll (the appraisal family). Enrichment families resolve their URL through <family>_source.",
+  fetched_at: "When the appraisal roll behind this row was fetched. Per family fetch times are in <family>_fetched_at.",
+  owner_count:
+    "Always NULL. FDOR NAL publishes one 30-character OWN_NAME per parcel and no co-owner column, so the source carries no owner count. Previously emitted a literal 1 for every row, which was a constant, not a count. has_additional_owners carries the only multi-owner signal the roll has.",
+  owners_text:
+    "OWN_NAME, plus 'c/o ' and FIDU_NAME when the roll names a fiduciary. FIDU_NAME is empty for every Duval parcel, so this equals owner_name for all 404,023 rows.",
+  has_additional_owners:
+    "True when the roll's owner name carries an ET AL / ET UX marker, meaning more owners exist than the one it names. It never says how many.",
+  last_sale_date:
+    "Sale date from the FDOR roll and SDF file ONLY, which cover the two most recent transfers (2025-2026). NULL on 87% of Duval parcels. A NULL here is not a long hold: use last_sale_date_any / years_since_last_sale, and has_sale_on_record to tell 'no transfer on record' apart.",
+  last_sale_date_any:
+    "The sale date actually used for tenure: the later of last_sale_date and coj_last_sale_date. tenure_basis names which column it came from.",
+  tenure_basis:
+    "Which column last_sale_date_any, years_since_last_sale and no_sale_10y_flag were computed from. FDOR_SALE = last_sale_date; COJ_SALESL = coj_last_sale_date; NO_SALE_ON_RECORD = no transfer in any source, and the three tenure columns are NULL for that reason, NOT because the property was held a long time. Never NULL.",
+  tenure_source: "The source system that published the tenure date named by tenure_basis. NULL when tenure_basis is NO_SALE_ON_RECORD.",
+  has_sale_on_record:
+    "False when no source records any transfer for the parcel. Never NULL. This is the column that separates 'no sale on record' from 'held a long time'; years_since_last_sale is NULL in both directions only when this is false.",
+  years_since_last_sale:
+    "DERIVED. Whole years between last_sale_date_any (NOT last_sale_date) and features_as_of. NULL only when has_sale_on_record is false.",
+  no_sale_10y_flag:
+    "DERIVED. True when last_sale_date_any is at least 10 years before features_as_of. NULL when no sale is on record, which must not be read as true.",
+  roof_age_basis:
+    "DERIVED. Evidence behind roof_year_est: PERMIT (a re-roof permit) or EFF_YR_BLT_PROXY / ACT_YR_BLT_PROXY (year built standing in because no county roof date exists).",
+  water_basis: "DERIVED. Per row statement of how water_view_flag was reached, including the layer and the distance.",
+  has_bbb_contractor: "Always NULL. BBB terms forbid aggregation and no contractor source resolves to a parcel; the column exists only to keep the canonical list complete.",
+  hoa_flag: "Always NULL. Placeholder in the Elephant contract; no Duval source publishes it.",
+  avm_value: "Always NULL. No automated valuation is published for Duval.",
+  coordinates_source: "Which layer the centroid came from (parcel polygons, not rooftop points).",
+  nearest_transit_stop_m: "DERIVED. Straight line (haversine) metres from the parcel centroid, not network walking distance.",
+  nearest_starbucks_m: "DERIVED. Straight line (haversine) metres from the parcel centroid, not network walking distance.",
+};
+
+/** column -> family key, covering the family provenance columns themselves. */
+export const QUERY_TABLE_COLUMN_FAMILY: ReadonlyMap<string, string> = new Map<string, string>([
+  ...COLUMN_FAMILIES.flatMap((f) => f.columns.map((c) => [c, f.key] as [string, string])),
+  ...SOURCE_FAMILIES.flatMap((f) => [
+    [`${f.key}_source`, f.key] as [string, string],
+    [`${f.key}_fetched_at`, f.key] as [string, string],
+  ]),
+]);
+
+/** Bump when the published column set or the provenance contract changes. */
+export const QUERY_TABLE_SCHEMA_VERSION = "2";
+
+export interface QueryTableSchemaMetadata {
+  county: string;
+  schemaVersion: string;
+  families: {
+    key: string;
+    label: string;
+    sourceSystem: string | null;
+    sourceUrl: string | null;
+    sourceColumn: string | null;
+    fetchedAtColumn: string | null;
+    note: string | null;
+    columns: string[];
+  }[];
+  columns: Record<string, { family: string; sourceSystem: string | null; note?: string }>;
+}
+
+/**
+ * The schema and provenance dictionary that travels inside the parquet.
+ *
+ * The MCP builds its `properties` view with `DESCRIBE`, so `getPropertyQuerySchema` only ever sees
+ * names and types. This is where the meaning lives, and it is written into the parquet's key-value
+ * metadata so a consumer holding nothing but the file can map any column to the system that
+ * produced it. Adding a column to derived.properties_features without adding it to a family here
+ * fails the publish gate (see validateQueryTable), which is the point: an undocumented column has
+ * no provenance.
+ */
+export function queryTableSchemaMetadata(): QueryTableSchemaMetadata {
+  const families = COLUMN_FAMILIES.map((f) => {
+    const source = f.track === null ? null : SOURCES[f.track];
+    return {
+      key: f.key,
+      label: f.label,
+      sourceSystem: source?.sourceSystem ?? null,
+      sourceUrl: source?.url ?? null,
+      sourceColumn: source === null ? null : `${f.key}_source`,
+      fetchedAtColumn: source === null ? null : `${f.key}_fetched_at`,
+      note: f.note ?? null,
+      columns: [...f.columns],
+    };
+  });
+  const byKey = new Map(families.map((f) => [f.key, f]));
+  const columns: QueryTableSchemaMetadata["columns"] = {};
+  for (const [column, familyKey] of QUERY_TABLE_COLUMN_FAMILY) {
+    const note = QUERY_TABLE_COLUMN_NOTES[column];
+    columns[column] = {
+      family: familyKey,
+      sourceSystem: byKey.get(familyKey)?.sourceSystem ?? null,
+      ...(note === undefined ? {} : { note }),
+    };
+  }
+  return { county: COUNTY.key, schemaVersion: QUERY_TABLE_SCHEMA_VERSION, families, columns };
+}
 
 export interface ExportResult {
   path: string;
@@ -25,9 +137,14 @@ export async function exportQueryTable(conn: DuckDBConnection, outPath: string):
   const cols = await tableColumns(conn, "derived", "properties_features");
   const extras = cols.filter((c) => !QUERY_TABLE_CANONICAL_COLUMNS.includes(c));
   const ordered = [...QUERY_TABLE_CANONICAL_COLUMNS.filter((c) => cols.includes(c)), ...extras];
+  const kv = [
+    `elephant_county: ${q(COUNTY.key)}`,
+    `elephant_query_table_schema_version: ${q(QUERY_TABLE_SCHEMA_VERSION)}`,
+    `elephant_column_provenance: ${q(JSON.stringify(queryTableSchemaMetadata()))}`,
+  ].join(", ");
   await conn.run(
     `COPY (SELECT ${ordered.map(ident).join(", ")} FROM derived.properties_features ORDER BY request_identifier)
-     TO ${q(duckPath(outPath))} (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000)`,
+     TO ${q(duckPath(outPath))} (FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 100000, KV_METADATA {${kv}})`,
   );
   const rows = await count(conn, "derived.properties_features");
   return { path: outPath, rows, bytes: statSync(outPath).size };
@@ -37,6 +154,9 @@ export interface ColumnCoverage {
   column: string;
   nonNull: number;
   pct: number;
+  /** Which provenance family owns the column, and the system behind it (null for derived/pipeline). */
+  family: string;
+  sourceSystem: string | null;
 }
 
 export interface ValidationReport {
@@ -49,14 +169,17 @@ export interface ValidationReport {
   sourceDistinctFolios: number;
   propertyCidFilled: number;
   missingCanonical: string[];
+  /** Published columns with no provenance family; these fail the gate. */
+  undocumentedColumns: string[];
   problems: string[];
   columns: ColumnCoverage[];
 }
 
 /**
  * The publish GATE (elephant conventions): parquet rows == distinct folios in the source DB,
- * 0 null / 0 duplicate folios, every canonical column present. Also reports per-column coverage so
- * NULL columns are named rather than hidden.
+ * 0 null / 0 duplicate folios, every canonical column present, and every published column mapped
+ * to a provenance family. Also reports per-column coverage so NULL columns are named rather than
+ * hidden.
  */
 export async function validateQueryTable(conn: DuckDBConnection, parquetPath: string): Promise<ValidationReport> {
   const src = q(duckPath(parquetPath));
@@ -82,10 +205,19 @@ export async function validateQueryTable(conn: DuckDBConnection, parquetPath: st
     conn,
     `SELECT ${cols.map((c) => `count(${ident(c)}) AS ${ident(c)}`).join(", ")} FROM read_parquet(${src})`,
   );
+  const meta = queryTableSchemaMetadata();
   const columns: ColumnCoverage[] = cols.map((c) => {
     const nonNull = Number(covRow[c] ?? 0);
-    return { column: c, nonNull, pct: rows === 0 ? 0 : Math.round((nonNull / rows) * 10000) / 100 };
+    const doc = meta.columns[c];
+    return {
+      column: c,
+      nonNull,
+      pct: rows === 0 ? 0 : Math.round((nonNull / rows) * 10000) / 100,
+      family: doc?.family ?? "UNDOCUMENTED",
+      sourceSystem: doc?.sourceSystem ?? null,
+    };
   });
+  const undocumentedColumns = columns.filter((c) => c.family === "UNDOCUMENTED").map((c) => c.column);
 
   const problems: string[] = [];
   const distinctFolios = Number(base.distinct_folios);
@@ -96,6 +228,11 @@ export async function validateQueryTable(conn: DuckDBConnection, parquetPath: st
   if (nullFolios > 0) problems.push(`${nullFolios} null/blank request_identifier rows`);
   if (dupFolios > 0) problems.push(`${dupFolios} duplicated request_identifier values`);
   if (missingCanonical.length > 0) problems.push(`missing canonical columns: ${missingCanonical.join(", ")}`);
+  if (undocumentedColumns.length > 0) {
+    problems.push(
+      `columns with no provenance family (add them to COLUMN_FAMILIES in features/build.ts): ${undocumentedColumns.join(", ")}`,
+    );
+  }
 
   return {
     ok: problems.length === 0,
@@ -107,6 +244,7 @@ export async function validateQueryTable(conn: DuckDBConnection, parquetPath: st
     sourceDistinctFolios: sourceDistinct,
     propertyCidFilled: Number(base.cid_filled),
     missingCanonical,
+    undocumentedColumns,
     problems,
     columns,
   };
@@ -171,10 +309,13 @@ export function formatValidation(r: ValidationReport): string {
   lines.push(`duplicate folios:   ${r.dupFolios}`);
   lines.push(`property_cid:       ${r.propertyCidFilled} filled${r.propertyCidFilled < r.rows ? " (run export:consolidation to fill the rest)" : ""}`);
   if (r.problems.length > 0) lines.push(`problems:           ${r.problems.join("; ")}`);
-  lines.push("per-column non-null coverage:");
+  lines.push("per-column non-null coverage (family / source system the value came from):");
   const width = Math.max(...r.columns.map((c) => c.column.length));
+  const famWidth = Math.max(...r.columns.map((c) => c.family.length));
   for (const c of r.columns) {
-    lines.push(`  ${c.column.padEnd(width)}  ${String(c.nonNull).padStart(8)}  ${c.pct.toFixed(2).padStart(6)}%`);
+    lines.push(
+      `  ${c.column.padEnd(width)}  ${String(c.nonNull).padStart(8)}  ${c.pct.toFixed(2).padStart(6)}%  ${c.family.padEnd(famWidth)}  ${c.sourceSystem ?? "-"}`,
+    );
   }
   return lines.join("\n");
 }

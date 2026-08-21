@@ -93,9 +93,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: duval-window-${{ github.run_id }}
+          # Never glob the publish root: upload-artifact walks the include patterns before it
+          # applies exclusions, so the directory form enumerated all 404k per-property open-data
+          # files and died with "Maximum call stack size exceeded". List the files instead, and
+          # carry runs/ so this run's record survives a commit-back that cannot land.
           path: |
-            .data/artifacts/publish/duval/
+            .data/artifacts/publish/duval/*.json
+            .data/artifacts/publish/duval/*.txt
+            .data/artifacts/publish/duval/*.parquet
+            .data/artifacts/publish/duval/tables/*.parquet
             .data/artifacts/permits/discovered-api.json
+            runs/*.json
           if-no-files-found: warn
           retention-days: 14
       - name: Commit run history
@@ -109,5 +117,17 @@ jobs:
           git add runs/
           if git diff --cached --quiet; then echo "no run history changes"; exit 0; fi
           git commit -m "pipeline: window run $(date -u +%Y-%m-%dT%H:%MZ) [skip ci]"
-          git pull --rebase origin ${GITHUB_REF_NAME}
-          git push origin HEAD:${GITHUB_REF_NAME}
+          # Same retrying push as pipeline.yml: a single attempt loses the record whenever another
+          # push lands on the branch in the same window.
+          for attempt in 1 2 3 4 5; do
+            if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+              echo "run history pushed on attempt ${attempt}"
+              exit 0
+            fi
+            echo "push rejected on attempt ${attempt}; rebasing onto the current ${GITHUB_REF_NAME}"
+            git fetch origin "${GITHUB_REF_NAME}"
+            git rebase "origin/${GITHUB_REF_NAME}" || git rebase --abort
+            sleep $((attempt * 5))
+          done
+          echo "::error title=Run history not committed::Could not push runs/ after 5 attempts. This run's record exists only in the workflow artifact duval-window-${{ github.run_id }}."
+          exit 1

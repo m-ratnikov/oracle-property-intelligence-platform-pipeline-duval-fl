@@ -8,7 +8,16 @@ import { buildFeatures } from "./features/build.js";
 import { exportEntityTables, exportQueryTable, formatValidation, validateQueryTable } from "./features/export.js";
 import { log } from "./log.js";
 import { executePublish, formatManifest, formatPlan, planPublish } from "./publish/index.js";
-import { readFilebaseEnv } from "./publish/filebase.js";
+import { missingFilebaseEnv, readFilebaseEnv } from "./publish/filebase.js";
+import { discardStagedQueryTable, promoteQueryTable } from "./publish/gate.js";
+import {
+  formatRegressions,
+  readCiEnv,
+  recordCiRun,
+  recordTableHighwater,
+  snapshotTrackState,
+  type TrackStateRow,
+} from "./publish/ledger.js";
 import { loadRunHistory, previousTotal, runPipeline, tableTotals, writeRunHistoryFiles } from "./run.js";
 import { insertRunSource, rehydrateRunLog } from "./runLog.js";
 import { parseTracks } from "./sources.js";
@@ -45,6 +54,7 @@ function parseArgs(argv: string[]): Args {
 const HELP = `duval oracle pipeline
 
   pnpm run pipeline -- [--tracks appraisal,sales,geometry|all|default] [--window <w>] [--trigger <t>] [--force] [--no-features]
+                                         [--allow-regression] accept (and record) a table total that went backwards
   pnpm run features                      rebuild derived.properties_features + query-table.parquet + validate
   pnpm run validate                      re-run the query-table validation gate against the DB
   pnpm run publish:ipfs -- [--publish]   dry-run by default; --publish uploads to Filebase + re-points IPNS
@@ -78,6 +88,62 @@ async function main(): Promise<void> {
         );
       }
       process.stdout.write(`totals: ${JSON.stringify(run.totals)}\n`);
+
+      // Which CI event produced this run, recorded where a reviewer can read it without a database
+      // and without trusting an Actions cache. See publish/ledger.ts.
+      const ci = recordCiRun(paths, {
+        run_id: run.run_id,
+        kind: "ingestion",
+        trigger: run.trigger,
+        ...readCiEnv(env),
+        started_at: run.started_at,
+        finished_at: run.finished_at,
+        status: run.status,
+      });
+      log.info("ci_run_recorded", { file: ci.file, by_event: ci.ledger.by_event });
+
+      // Cursors, committed. A rewind then shows up in the diff of the commit that caused it. This
+      // is evidence, not control flow: a run that ingested and validated cleanly is not failed over
+      // a snapshot that could not be written.
+      try {
+        const stateDb = await openDb(paths.dbPath, { readOnly: true });
+        try {
+          const rows = await all<TrackStateRow>(
+            stateDb.conn,
+            "SELECT track, key, value, strftime(updated_at, '%Y-%m-%dT%H:%M:%SZ') AS updated_at, run_id FROM track_state ORDER BY track, key",
+          );
+          const snap = snapshotTrackState(paths, rows, run.run_id);
+          log.info("track_state_snapshot", { file: snap.file, entries: rows.length });
+        } finally {
+          await stateDb.close();
+        }
+      } catch (err) {
+        log.warn("track_state_snapshot_failed", { error: err instanceof Error ? err.message : String(err) });
+      }
+
+      // Accumulating tables must not shrink unnoticed when the working set is rebuilt from scratch.
+      const allowRegression = args.flags.get("allow-regression") === "true";
+      const hw = recordTableHighwater(paths, {
+        runId: run.run_id,
+        trigger: run.trigger,
+        totals: run.totals,
+        allowRegression,
+        note: args.flags.get("regression-note") ?? null,
+      });
+      if (hw.regressions.length > 0) {
+        const verb = allowRegression ? "ACCEPTED" : "BLOCKED";
+        process.stdout.write(`\n=== TABLE TOTAL REGRESSION ${verb} ===\n${formatRegressions(hw.regressions)}\n`);
+        process.stdout.write(`recorded in ${hw.file}\n`);
+        log.error("table_totals_regressed", { accepted: allowRegression, regressions: hw.regressions, file: hw.file });
+        if (!allowRegression) {
+          process.stdout.write(
+            "This run has fewer rows than a previous run on this lineage, which normally means it started from a cold\n" +
+              "working set and an accumulating cursor restarted early. Re-run with the cache restored, or re-run with\n" +
+              "--allow-regression --regression-note \"<why>\" to re-base the high-water mark on purpose.\n",
+          );
+          process.exitCode = 1;
+        }
+      }
       if (validation && !validation.ok) process.exitCode = 1;
       return;
     }
@@ -113,8 +179,23 @@ async function main(): Promise<void> {
         const plan = await planPublish(paths);
         process.stdout.write(formatPlan(plan, fb?.bucket ?? null, fb?.gateway ?? "https://ipfs.filebase.io") + "\n\n");
       }
+      // A publish that was ASKED to upload and could not read its credentials is a failed publish,
+      // not a dry run. It used to print a dry-run manifest and exit 0 inside a step called "Publish".
+      if (args.flags.get("publish") === "true" && args.flags.get("dry-run") !== "true" && readFilebaseEnv(env) === null) {
+        process.stdout.write(`publish requested but Filebase settings are missing: ${missingFilebaseEnv(env).join(", ")}\n`);
+        process.exitCode = 1;
+        return;
+      }
       const manifest = await executePublish({ paths, env, publish, logger: log });
       process.stdout.write(formatManifest(manifest) + "\n");
+      // Uploads throw on failure, so reaching here means every object is in the bucket. What can
+      // still be wrong is a mutable name that did not move; anything other than the storage account
+      // refusing to mint another name is a real failure and has to make CI red.
+      if (!manifest.ok) {
+        const failed = manifest.ipnsFailures.filter((f) => f.kind === "failed");
+        log.error("publish_incomplete", { failed });
+        process.exitCode = 1;
+      }
       return;
     }
     case "consolidation": {
@@ -137,9 +218,22 @@ async function main(): Promise<void> {
         // refresh the query table so property_cid is filled from consolidation_state
         const asOf = new Date().toISOString().slice(0, 10);
         await buildFeatures(db.conn, { asOf, runId });
+        // The SAME gate the ingestion run applies, applied here too - and applied to a STAGED file.
+        // This pass runs after the gated ingestion run and rewrites query-table.parquet, so it is
+        // the code path that actually produces the artifact we publish. It used to compute the
+        // validation report and never look at `ok`, which made "a failed gate aborts before
+        // anything is published" false for the only pass that mattered. Writing to a staging path
+        // and promoting only on a pass means a failed gate cannot even replace the good file on
+        // disk, let alone reach the publish step.
         const qt = join(paths.publishDir, "query-table.parquet");
-        const exported = await exportQueryTable(db.conn, qt);
-        const report = await validateQueryTable(db.conn, qt);
+        const staged = join(paths.publishDir, "query-table.staging.parquet");
+        const stagedExport = await exportQueryTable(db.conn, staged);
+        const stagedReport = await validateQueryTable(db.conn, staged);
+        const gate = promoteQueryTable({ stagedPath: staged, publishPath: qt, ok: stagedReport.ok });
+        if (gate.promoted) log.info("consolidation_gate_passed", { path: gate.publishPath, rows: stagedReport.rows });
+        else log.error("consolidation_gate_failed", { problems: stagedReport.problems, rows: stagedReport.rows, kept: gate.publishPath });
+        const exported = { ...stagedExport, path: gate.builtPath };
+        const report = { ...stagedReport, parquetPath: gate.builtPath };
         // Record the parquet this pass just republished as a published object, under the same name
         // and CID shape the ingestion run uses, so it joins the published artifacts index.
         const artifacts = await consolidationArtifacts({ outDir, stats, exported, validation: report });
@@ -167,12 +261,33 @@ async function main(): Promise<void> {
         });
         const sources = [source];
         await insertRunSource(db, runId, source);
-        await db.conn.run(`UPDATE run_log SET finished_at = ${q(finishedAt)}::TIMESTAMP, status = 'completed', sources = ${q(JSON.stringify(sources))}::JSON, limitations = '[]'::JSON,
+        const status = report.ok ? "completed" : "completed_with_errors";
+        const gateError = report.ok ? null : `query table validation gate failed: ${report.problems.join("; ")}`;
+        await db.conn.run(`UPDATE run_log SET finished_at = ${q(finishedAt)}::TIMESTAMP, status = ${q(status)}, sources = ${q(JSON.stringify(sources))}::JSON,
+          limitations = ${q(JSON.stringify(report.ok ? [] : report.problems))}::JSON,
+          error = ${gateError === null ? "NULL" : q(gateError)},
           totals = ${q(JSON.stringify({ consolidation_state: stats.totalInState, totalBytes: stats.totalBytes, shards: stats.shards }))}::JSON,
           artifacts = ${q(JSON.stringify(artifacts))}::JSON WHERE run_id = ${q(runId)}`);
         await writeRunHistoryFiles(db, paths, runId);
+        // The consolidation pass keeps `trigger: "consolidation"` because that is the run KIND the
+        // UI groups on. Which CI event started it is recorded here instead, so a scheduled
+        // consolidation is as self-evident as a scheduled ingestion run.
+        recordCiRun(paths, {
+          run_id: runId,
+          kind: "consolidation",
+          trigger: "consolidation",
+          ...readCiEnv(env),
+          started_at: startedAt,
+          finished_at: finishedAt,
+          status,
+        });
         process.stdout.write(formatValidation(report) + "\n");
         process.stdout.write(`\n=== CONSOLIDATION ${runId} ===\ncandidates ${stats.candidates}, exported ${stats.exported}, unchanged ${stats.unchanged}, in state ${stats.totalInState}, shards ${stats.shards}, bytes ${stats.totalBytes}, index cid ${stats.indexCid}, ${Math.round(stats.ms / 1000)} s\n`);
+        if (!gate.promoted) {
+          discardStagedQueryTable(staged);
+          process.stdout.write(`\nGATE FAILED: ${gate.message}\n`);
+          process.exitCode = 1;
+        }
       } catch (err) {
         await db.conn.run(`UPDATE run_log SET finished_at = now(), status = 'failed', error = ${q(err instanceof Error ? err.message : String(err))} WHERE run_id = ${q(runId)}`);
         throw err;

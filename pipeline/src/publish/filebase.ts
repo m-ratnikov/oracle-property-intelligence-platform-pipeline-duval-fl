@@ -121,13 +121,48 @@ export async function listIpnsNames(fetchImpl: FetchLike, token: string): Promis
   return Array.isArray(body) ? (body as FilebaseIpnsName[]) : [];
 }
 
-/** Create the label if needed, point it at `cid`, read back and verify. Returns the network_key. */
+/**
+ * How hard to poll the Names API for the write we just made.
+ *
+ * The Names API is eventually consistent: the POST/PUT is accepted and returns, but the list
+ * endpoint keeps serving the PREVIOUS record for a moment afterwards. Reading back exactly once
+ * therefore reports "IPNS readback CID mismatch" for a name that is in fact correct a second later,
+ * which is how three of five names on one publish were recorded as failures while the published
+ * artifacts were fine. Poll with bounded backoff and only call it a failure once the budget is
+ * spent, so a recorded failure means the name really did not move.
+ */
+export interface IpnsReadbackOptions {
+  /** Readback attempts, including the first. */
+  attempts?: number;
+  initialDelayMs?: number;
+  maxDelayMs?: number;
+  /** Test seam: replaces the real timer so the retry path costs nothing in tests. */
+  sleep?: (ms: number) => Promise<void>;
+}
+
+const DEFAULT_READBACK: Required<IpnsReadbackOptions> = {
+  attempts: 6,
+  initialDelayMs: 400,
+  maxDelayMs: 8_000,
+  sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+};
+
+export interface IpnsUpsertResult {
+  networkKey: string;
+  created: boolean;
+  /** Readback attempts spent before the name reported the CID we wrote (1 = immediately consistent). */
+  readbackAttempts: number;
+}
+
+/** Create the label if needed, point it at `cid`, then poll the list endpoint until it agrees. */
 export async function upsertIpnsName(
   fetchImpl: FetchLike,
   token: string,
   label: string,
   cid: string,
-): Promise<{ networkKey: string; created: boolean }> {
+  options: IpnsReadbackOptions = {},
+): Promise<IpnsUpsertResult> {
+  const { attempts, initialDelayMs, maxDelayMs, sleep } = { ...DEFAULT_READBACK, ...options };
   const existing = (await listIpnsNames(fetchImpl, token)).find((n) => n.label === label);
   let created = false;
   if (existing === undefined) {
@@ -146,12 +181,33 @@ export async function upsertIpnsName(
     });
     if (!res.ok) throw new Error(`Filebase IPNS update failed for ${label}: ${res.status} ${res.statusText} ${await res.text()}`);
   }
-  const verified = (await listIpnsNames(fetchImpl, token)).find((n) => n.label === label);
-  if (verified === undefined || verified.network_key.trim().length === 0) {
-    throw new Error(`IPNS readback failed for ${label}`);
+
+  let lastProblem = `IPNS readback failed for ${label}`;
+  let delay = initialDelayMs;
+  for (let attempt = 1; attempt <= Math.max(1, attempts); attempt += 1) {
+    if (attempt > 1) {
+      await sleep(delay);
+      delay = Math.min(delay * 2, maxDelayMs);
+    }
+    let verified: FilebaseIpnsName | undefined;
+    try {
+      verified = (await listIpnsNames(fetchImpl, token)).find((n) => n.label === label);
+    } catch (err) {
+      // A transient list failure is exactly the case retrying exists for.
+      lastProblem = `IPNS readback list failed for ${label}: ${err instanceof Error ? err.message : String(err)}`;
+      continue;
+    }
+    if (verified === undefined || verified.network_key.trim().length === 0) {
+      lastProblem = `IPNS readback found no usable record for ${label}`;
+      continue;
+    }
+    if (verified.cid !== cid) {
+      lastProblem = `IPNS readback CID mismatch for ${label}: ${verified.cid} != ${cid}`;
+      continue;
+    }
+    return { networkKey: verified.network_key, created, readbackAttempts: attempt };
   }
-  if (verified.cid !== cid) throw new Error(`IPNS readback CID mismatch for ${label}: ${verified.cid} != ${cid}`);
-  return { networkKey: verified.network_key, created };
+  throw new Error(`${lastProblem} (after ${Math.max(1, attempts)} readback attempts)`);
 }
 
 export function gatewayUrls(gateway: string, networkKey: string): { filebase: string; dweb: string } {

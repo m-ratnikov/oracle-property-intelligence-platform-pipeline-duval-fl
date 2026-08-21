@@ -14,6 +14,7 @@ import {
   readFilebaseEnv,
   upsertIpnsName,
   type FilebaseEnv,
+  type IpnsReadbackOptions,
 } from "./filebase.js";
 import { mergePublishedRunHistory, type MergeResult } from "./runHistory.js";
 
@@ -67,6 +68,38 @@ export interface IpnsFailure {
   label: string;
   cid: string;
   reason: string;
+  /**
+   * `quota` is the storage account refusing to mint another name (a known, priced limitation of the
+   * plan, not a broken publish). `failed` is anything else that survived the bounded readback
+   * retry, and that is what makes the publish command exit non-zero.
+   */
+  kind: "quota" | "failed";
+}
+
+/**
+ * Why one MCP-facing setting is addressed the way it is.
+ *
+ * The distinction is not cosmetic. `@elephant-xyz/mcp` reads the property query table by handing
+ * the URL straight to DuckDB (`CREATE VIEW properties AS SELECT * FROM read_parquet('<url>')`) and
+ * then caching that connection for the life of the warm instance, keyed on the URL. DuckDB's httpfs
+ * remembers the ETag it saw when the view was created and revalidates it on every later range read,
+ * so the instant an IPNS name is re-pointed the gateway answers with a different ETag and every
+ * data tool on that warm instance fails with
+ * `ETag on reading file ... was initially "Qm..." and now it returned "Qm..."`. Publishing every six
+ * hours guarantees that happens several times a day. The server is deployed unmodified and exposes
+ * no way to turn that check off, so the query table MUST be addressed by an immutable CID.
+ *
+ * Everything the server reads with a plain `fetch` behind a short TTL (the published-county catalog,
+ * the open-data IPNS registry) is safe on a mutable name and belongs there, because a name means the
+ * operator never has to touch that setting again.
+ */
+export interface McpBinding {
+  env: string;
+  value: string;
+  addressing: "cid" | "ipns" | "literal";
+  /** True when this line changes on every publish and must be re-applied to the deployment. */
+  perPublish: boolean;
+  reason: string;
 }
 
 export interface PublishManifest {
@@ -77,13 +110,30 @@ export interface PublishManifest {
   gateway: string;
   objects: PublishedObject[];
   ipns: Record<string, { label: string; networkKey: string | null; cid: string; gatewayUrl: string | null }>;
-  /** What to set on an elephant-mcp deployment so it serves Duval. */
+  /**
+   * What to set on an elephant-mcp deployment so it serves Duval. THIS is the source of truth for
+   * MCP configuration; the same values are written to mcp-env.txt beside the manifest, and the
+   * published catalog names the same artifacts (asserted below, not merely intended).
+   */
   mcpEnv: Record<string, string>;
+  /** Per-setting addressing decision behind `mcpEnv`, so the operator can see what changes when. */
+  mcpBindings: McpBinding[];
   missingEnv: string[];
   /** IPNS labels that could not be minted (e.g. free-plan name cap); those artifacts stay CID-addressed. */
   ipnsFailures: IpnsFailure[];
+  /**
+   * False when this publish did not fully succeed: an IPNS name that is not a plan-quota refusal
+   * failed to move even after the bounded readback retry. The CLI turns this into a non-zero exit
+   * so a partial publish shows up red in CI instead of passing silently.
+   */
+  ok: boolean;
   /** What happened to the already-published run history on this publish (see publish/runHistory.ts). */
   runHistory: MergeResult;
+}
+
+/** The storage account refusing to mint another name reads like this on the Filebase free plan. */
+function isQuotaRefusal(reason: string): boolean {
+  return /\b402\b|payment required|plan limit|limit reached|quota/i.test(reason);
 }
 
 const PARQUET = "application/vnd.apache.parquet";
@@ -144,6 +194,8 @@ export async function executePublish(opts: {
   fetchImpl?: typeof fetch;
   /** Test seam: supply the S3 client instead of opening a real Filebase connection. */
   clientFactory?: (fb: FilebaseEnv) => ReturnType<typeof createFilebaseClient>;
+  /** Test seam / operator knob for the eventually-consistent IPNS readback. */
+  ipnsReadback?: IpnsReadbackOptions;
 }): Promise<PublishManifest> {
   const log = opts.logger.child({ stage: "publish" });
   const fb: FilebaseEnv | null = readFilebaseEnv(opts.env);
@@ -203,13 +255,24 @@ export async function executePublish(opts: {
     if (o.ipnsLabel === null) return o;
     if (token === null) return o;
     try {
-      const { networkKey, created } = await upsertIpnsName(fetchImpl as never, token, o.ipnsLabel, o.cid);
-      log.info("ipns_pointed", { label: o.ipnsLabel, networkKey, cid: o.cid, created });
+      const { networkKey, created, readbackAttempts } = await upsertIpnsName(
+        fetchImpl as never,
+        token,
+        o.ipnsLabel,
+        o.cid,
+        opts.ipnsReadback ?? {},
+      );
+      log.info("ipns_pointed", { label: o.ipnsLabel, networkKey, cid: o.cid, created, readbackAttempts });
       return { ...o, ipns: { label: o.ipnsLabel, networkKey, gatewayUrl: gatewayUrls(gateway, networkKey).filebase, created } };
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      ipnsFailures.push({ label: o.ipnsLabel, cid: o.cid, reason });
-      log.warn("ipns_point_failed", { label: o.ipnsLabel, cid: o.cid, reason, fallback: "cid-addressed" });
+      const kind = isQuotaRefusal(reason) ? "quota" : "failed";
+      ipnsFailures.push({ label: o.ipnsLabel, cid: o.cid, reason, kind });
+      // A quota refusal is a known limitation of the plan and costs convenience only. Anything else
+      // survived the readback retry and is a real failure, logged at error so CI surfaces it.
+      const line = { label: o.ipnsLabel, cid: o.cid, reason, kind, fallback: "cid-addressed" };
+      if (kind === "quota") log.warn("ipns_point_refused_by_quota", line);
+      else log.error("ipns_point_failed", line);
       return o;
     }
   };
@@ -220,10 +283,17 @@ export async function executePublish(opts: {
   const qt = byName("query-table.parquet");
   const cov = byName("dataset-coverage.json");
   if (qt === undefined) throw new Error("query table missing from publish plan");
-  const qtUrl = qt.ipns?.gatewayUrl ?? qt.gatewayUrl;
-  const covUrl = cov?.ipns?.gatewayUrl ?? cov?.gatewayUrl ?? qt.gatewayUrl;
 
-  // 3. catalog
+  // The two artifacts an MCP deployment is pointed at are addressed by the CID THIS publish just
+  // produced, not by their IPNS name. See the McpBinding docblock for why the query table cannot be
+  // served from a mutable name; the coverage snapshot follows it so that the row counts a client
+  // reads always describe the exact parquet the same client is querying, instead of racing ahead of
+  // it. Both names are still minted and still recorded below, for humans and for the UI.
+  const qtUrl = qt.gatewayUrl;
+  const covUrl = cov?.gatewayUrl ?? qt.gatewayUrl;
+
+  // 3. catalog. It advertises the SAME two URLs the MCP env block carries, so the two surfaces
+  //    cannot disagree about which artifact this county is served from.
   const catalog = buildCatalog({ generatedAt: publishedAt, queryTableUrl: qtUrl, datasetCoverageUrl: covUrl });
   const catalogPath = join(opts.paths.publishDir, "published-counties.json");
   writeFileSync(catalogPath, JSON.stringify(catalog, null, 2));
@@ -278,15 +348,69 @@ export async function executePublish(opts: {
       /* keep placeholder */
     }
   }
-  const mcpEnv: Record<string, string> = {
-    PROPERTY_QUERY_TABLE_MAP: JSON.stringify({ [COUNTY.key]: qtUrl }),
-    ORACLE_OPEN_DATA_IPNS_MAP: JSON.stringify({ [COUNTY.key]: openDataIpns }),
-    ORACLE_OPEN_DATA_DEFAULT_COUNTY: COUNTY.key,
-    PROPERTY_QUERY_TABLE_DEFAULT_COUNTY: COUNTY.key,
-    DATASET_COVERAGE_MAP: JSON.stringify({ [COUNTY.key]: covUrl }),
-    PUBLISHED_COUNTY_CATALOG_URL:
-      byName("published-counties.json")?.ipns?.gatewayUrl ?? byName("published-counties.json")?.gatewayUrl ?? "",
-  };
+  const catalogObj = byName("published-counties.json");
+  const catalogUrl = catalogObj?.ipns?.gatewayUrl ?? catalogObj?.gatewayUrl ?? "";
+
+  const mcpBindings: McpBinding[] = [
+    {
+      env: "PROPERTY_QUERY_TABLE_MAP",
+      value: JSON.stringify({ [COUNTY.key]: qtUrl }),
+      addressing: "cid",
+      perPublish: true,
+      reason:
+        "DuckDB reads this URL directly and pins its ETag for the life of a warm instance; a mutable /ipns/ URL breaks every data tool the moment the name moves.",
+    },
+    {
+      env: "PROPERTY_QUERY_TABLE_DEFAULT_COUNTY",
+      value: COUNTY.key,
+      addressing: "literal",
+      perPublish: false,
+      reason: "County key, constant.",
+    },
+    {
+      env: "DATASET_COVERAGE_MAP",
+      value: JSON.stringify({ [COUNTY.key]: covUrl }),
+      addressing: "cid",
+      perPublish: true,
+      reason:
+        "Read with plain fetch, so a name would work, but pinning it to this publish keeps the reported coverage describing the exact parquet PROPERTY_QUERY_TABLE_MAP serves.",
+    },
+    {
+      env: "ORACLE_OPEN_DATA_IPNS_MAP",
+      value: JSON.stringify({ [COUNTY.key]: openDataIpns }),
+      addressing: "ipns",
+      perPublish: false,
+      reason: "An IPNS registry by contract; fetched as JSON behind a short TTL, never handed to DuckDB.",
+    },
+    {
+      env: "ORACLE_OPEN_DATA_DEFAULT_COUNTY",
+      value: COUNTY.key,
+      addressing: "literal",
+      perPublish: false,
+      reason: "County key, constant.",
+    },
+    {
+      env: "PUBLISHED_COUNTY_CATALOG_URL",
+      value: catalogUrl,
+      addressing: "ipns",
+      perPublish: false,
+      reason:
+        "Fetched as JSON behind a 5 minute TTL, so the name is safe and the operator sets this once. It lists the same query-table URL as PROPERTY_QUERY_TABLE_MAP.",
+    },
+  ];
+  const mcpEnv: Record<string, string> = Object.fromEntries(mcpBindings.map((b) => [b.env, b.value]));
+
+  // The two surfaces must not be able to drift: the catalog we just uploaded and the env block we
+  // just printed have to name the same artifact, and it has to be the one this publish produced.
+  const advertised = catalog.counties[0];
+  if (advertised === undefined || advertised.queryTableUrl !== qtUrl || advertised.datasetCoverageUrl !== covUrl) {
+    throw new Error("publish inconsistency: the catalog and the MCP env block name different artifacts");
+  }
+  if (!qtUrl.includes(qt.cidV1)) {
+    throw new Error(`publish inconsistency: PROPERTY_QUERY_TABLE_MAP does not address this publish's query table (${qt.cidV1})`);
+  }
+
+  const ok = ipnsFailures.every((f) => f.kind === "quota");
 
   const manifest: PublishManifest = {
     county: COUNTY.key,
@@ -297,14 +421,45 @@ export async function executePublish(opts: {
     objects: results,
     ipns,
     mcpEnv,
+    mcpBindings,
     missingEnv,
     ipnsFailures,
+    ok,
     runHistory,
   };
   mkdirSync(opts.paths.publishDir, { recursive: true });
   writeFileSync(join(opts.paths.publishDir, "publish-manifest.json"), JSON.stringify(manifest, null, 2));
-  log.info("publish_manifest_written", { mode: manifest.mode, objects: results.length, path: join(opts.paths.publishDir, "publish-manifest.json") });
+  // A pasteable dotenv beside the manifest, so nobody has to hand-assemble the block out of JSON.
+  writeFileSync(join(opts.paths.publishDir, "mcp-env.txt"), formatMcpEnvFile(manifest));
+  log.info("publish_manifest_written", { mode: manifest.mode, objects: results.length, ok, path: join(opts.paths.publishDir, "publish-manifest.json") });
   return manifest;
+}
+
+/**
+ * The MCP deployment's configuration, as a file an operator can paste whole. Everything that has to
+ * be re-applied after every publish is grouped first and labelled, because that is the only part of
+ * this that is an operational obligation rather than a one-time setup.
+ */
+export function formatMcpEnvFile(m: PublishManifest): string {
+  const lines: string[] = [];
+  lines.push(`# @elephant-xyz/mcp configuration for ${m.county}, generated by the publish that produced these artifacts.`);
+  lines.push(`# publish: ${m.publishedAt} (${m.mode})`);
+  lines.push("#");
+  lines.push("# Re-apply the PER-PUBLISH lines after every publish. They are immutable CID URLs because the");
+  lines.push("# server hands the query table straight to DuckDB, which pins the ETag it first saw and fails");
+  lines.push("# every data tool the moment a mutable /ipns/ URL is re-pointed underneath a warm instance.");
+  lines.push("");
+  lines.push("# --- per publish: re-apply these two, then redeploy ---");
+  for (const b of m.mcpBindings.filter((b) => b.perPublish)) {
+    lines.push(`# ${b.reason}`);
+    lines.push(`${b.env}=${b.value}`);
+  }
+  lines.push("");
+  lines.push("# --- set once: stable across publishes ---");
+  for (const b of m.mcpBindings.filter((b) => !b.perPublish)) {
+    lines.push(`${b.env}=${b.value}`);
+  }
+  return lines.join("\n") + "\n";
 }
 
 export function formatManifest(m: PublishManifest): string {
@@ -318,15 +473,22 @@ export function formatManifest(m: PublishManifest): string {
     `history:  ${rh.outcome} (local ${rh.localRuns} + published ${rh.publishedRuns} -> publishing ${rh.mergedRuns} runs)` +
       (rh.detail === null ? "" : ` [${rh.detail}]`),
   );
-  for (const f of m.ipnsFailures) lines.push(`ipns SKIPPED label=${f.label} -> stays CID-addressed (${f.reason})`);
+  for (const f of m.ipnsFailures) {
+    const verb = f.kind === "quota" ? "SKIPPED (account name quota)" : "FAILED";
+    lines.push(`ipns ${verb} label=${f.label} -> stays CID-addressed (${f.reason})`);
+  }
   const w = Math.max(...m.objects.map((o) => o.name.length));
   for (const o of m.objects) {
     lines.push(`${o.name.padEnd(w)}  ${String(o.bytes).padStart(11)} B  ${o.uploaded ? "uploaded" : "would PUT"}  s3://${m.bucket ?? "<bucket>"}/${o.key}`);
     lines.push(`${" ".repeat(w)}  cid=${o.cid}  (v1 ${o.cidV1})`);
     if (o.ipnsLabel) lines.push(`${" ".repeat(w)}  ipns label=${o.ipnsLabel}  name=${o.ipns?.networkKey ?? "<resolved on real publish>"}`);
   }
-  lines.push("MCP env:");
-  for (const [k, v] of Object.entries(m.mcpEnv)) lines.push(`  ${k}=${v}`);
+  lines.push("");
+  lines.push(formatMcpEnvFile(m).trimEnd());
+  if (!m.ok) {
+    lines.push("");
+    lines.push("PUBLISH INCOMPLETE: at least one IPNS name did not move and it was not a plan quota refusal.");
+  }
   return lines.join("\n");
 }
 

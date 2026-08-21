@@ -63,6 +63,23 @@ export async function stageAddressPoints(conn: import("@duckdb/node-api").DuckDB
 }
 
 /**
+ * The `authoritativeScope` for the address_points merge: which target rows this pull can honestly
+ * report as deleted at source.
+ *
+ * A complete, unbounded, error-free full pull IS the whole COJ address layer, and this track is the
+ * only writer of `address_points`, so it may speak for the whole table (undefined = unscoped, on
+ * purpose). An incremental pull only asked for `EDIT_DATE >= watermark`, so it can only speak for
+ * rows at or after that watermark; a row whose edit_date is NULL falls out of scope, which is the
+ * conservative direction. A bounded (COJ_MAX_PAGES) or partially failed pull saw an unknown subset
+ * of the layer and can speak for nothing at all.
+ */
+export function addressPointsScope(opts: { mode: string; lastEdit: string | null; partial: boolean }): string | undefined {
+  if (opts.partial) return "FALSE";
+  if (opts.mode === "incremental" && opts.lastEdit !== null) return `t.edit_date >= ${q(opts.lastEdit)}::TIMESTAMP`;
+  return undefined;
+}
+
+/**
  * COJ address points (US egress). First run: full paged pull. Later runs: `EDIT_DATE >= <last max>`
  * (ArcGIS `timestamp` literal); when the server rejects the date filter the run falls back to a full
  * pull and records it. Rows fetched per run are recorded: this is the true-incremental proof.
@@ -103,7 +120,9 @@ export const runCojAddresses: TrackRunner = async (ctx, source) => {
     sourceSystem: source.sourceSystem, sourceUrl: COJ_ADDRESSES_URL, sourceArtifact: `coj_addresses/${mode}`, sourceSha256: null,
     fetchedAt: new Date().toISOString(), runId: ctx.runId,
   });
-  result.merge = await mergeStaging(ctx.conn, { target: "address_points", staging: hashed, keys: ["address_id"] });
+  const authoritativeScope = addressPointsScope({ mode, lastEdit, partial: maxPages !== undefined || res.errors.length > 0 });
+  result.notes.authoritativeScope = authoritativeScope ?? "whole table (complete snapshot, sole writer)";
+  result.merge = await mergeStaging(ctx.conn, { target: "address_points", staging: hashed, keys: ["address_id"], authoritativeScope });
   const maxEdit = await scalar<string | null>(ctx.conn, "SELECT strftime(max(edit_date), '%Y-%m-%dT%H:%M:%S') FROM address_points");
   if (maxEdit) await setTrackState(ctx.conn, source.track, STATE_KEY_LAST_EDIT, maxEdit, ctx.runId);
   result.notes.lastEditDate = maxEdit;

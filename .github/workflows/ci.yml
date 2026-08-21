@@ -1,0 +1,114 @@
+name: ci
+
+# Tests for the whole repository, on every push and pull request.
+#
+# Before this existed, CI ran `pnpm test` for pipeline/ only, inside the 40-minute ingestion
+# workflow. ui/ has its own unit suite and a Playwright smoke suite, and neither had ever run in CI,
+# so a UI regression could only be found by a human loading the deployed site. Typechecking was in
+# the same position: both packages have the script, nothing invoked it.
+#
+# The two packages have separate lockfiles and no workspace root, so they are separate jobs and each
+# installs from its own directory.
+on:
+  push:
+    branches: ["**"]
+    paths-ignore:
+      - "runs/**"
+      - "**/*.md"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pipeline:
+    name: pipeline (typecheck + unit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: pipeline
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: pipeline/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pipeline/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm exec tsc --noEmit
+      - name: Unit tests
+        run: pnpm test
+
+  ui:
+    name: ui (typecheck + unit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: ui/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        # Called directly rather than through a script name, so this keeps working whether the
+        # package calls it `lint` or `typecheck`.
+        run: pnpm exec tsc --noEmit
+      - name: Unit tests
+        run: pnpm test
+
+  ui-e2e:
+    name: ui (playwright smoke)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Reported, never blocking. The smoke suite drives a real production build with DuckDB-WASM and
+    # a 33 MB module download, so it is the flakiest thing in the repository, and specs for it are
+    # being repaired in parallel with this workflow landing. Turn this into a required check once
+    # the suite has been green for a few consecutive runs.
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: ui/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Install the browser
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Build
+        run: pnpm run build
+      - name: Smoke suite
+        run: pnpm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-${{ github.run_id }}
+          path: |
+            ui/playwright-report/
+            ui/test-results/
+          if-no-files-found: ignore
+          retention-days: 7

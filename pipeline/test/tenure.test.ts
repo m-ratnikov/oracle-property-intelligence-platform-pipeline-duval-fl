@@ -41,13 +41,20 @@ describe("tenure, transit, starbucks and water features", () => {
     const rows = await all<Record<string, unknown>>(db.conn, "SELECT * FROM derived.properties_features ORDER BY property_id");
     const [a, b, c, d] = rows as [Record<string, unknown>, Record<string, unknown>, Record<string, unknown>, Record<string, unknown>];
 
-    expect(a).toMatchObject({ last_sale_date: "2012-05-01", last_sale_date_any: "2012-05-01", tenure_basis: "FDOR_SALE", no_sale_10y_flag: true, fld_zone: "X", zoning: "RLD-60", coj_last_sale_date: "2004-06-15" });
+    expect(a).toMatchObject({ last_sale_date: "2012-05-01", last_sale_date_any: "2012-05-01", tenure_basis: "FDOR_SALE", tenure_source: "duval_appraiser", has_sale_on_record: true, no_sale_10y_flag: true, fld_zone: "X", zoning: "RLD-60", coj_last_sale_date: "2004-06-15" });
     expect(Number(a.years_since_last_sale)).toBe(14);
-    expect(b).toMatchObject({ last_sale_date: null, last_sale_date_any: "2020-01-10", tenure_basis: "COJ_SALESL", no_sale_10y_flag: false, fld_zone: "AE" });
+    expect(b).toMatchObject({ last_sale_date: null, last_sale_date_any: "2020-01-10", tenure_basis: "COJ_SALESL", tenure_source: "duval_appraiser", has_sale_on_record: true, no_sale_10y_flag: false, fld_zone: "AE" });
     expect(Number(b.years_since_last_sale)).toBe(6);
-    expect(c).toMatchObject({ last_sale_date_any: null, tenure_basis: null, no_sale_10y_flag: null, years_since_last_sale: null, fld_zone: null });
-    expect(d).toMatchObject({ tenure_basis: "FDOR_SALE", no_sale_10y_flag: false });
+    // no transfer in any source: tenure_basis says so out loud instead of going NULL, and
+    // has_sale_on_record makes "no sale on record" filterable apart from "held a long time"
+    expect(c).toMatchObject({ last_sale_date_any: null, tenure_basis: "NO_SALE_ON_RECORD", tenure_source: null, has_sale_on_record: false, no_sale_10y_flag: null, years_since_last_sale: null, fld_zone: null });
+    expect(d).toMatchObject({ tenure_basis: "FDOR_SALE", has_sale_on_record: true, no_sale_10y_flag: false });
     expect(Number(d.years_since_last_sale)).toBe(0);
+    // tenure_basis always names a column in the same row that holds the date it was computed from
+    for (const row of rows) {
+      const expected = row.tenure_basis === "FDOR_SALE" ? row.last_sale_date : row.tenure_basis === "COJ_SALESL" ? row.coj_last_sale_date : null;
+      expect(row.last_sale_date_any).toBe(expected);
+    }
 
     // proximity + water
     expect(a).toMatchObject({ nearest_transit_stop_m: 120, near_transit_800m: true, nearest_transit_route_types: "3", nearest_starbucks_m: 400, near_starbucks_800m: true, water_view_flag: true, water_view_major_flag: true, water_dist_m: 90, water_body_name: "St. Johns River" });

@@ -1,7 +1,8 @@
 import type { DuckDBConnection } from "@duckdb/node-api";
 import { COUNTY } from "../config.js";
-import { count, q, tableExists } from "../db.js";
-import { DOR_USE_CODES, dorUseGroupSql, ownerRegionSql, yearsSinceSql } from "./rules.js";
+import { count, one, q, tableExists } from "../db.js";
+import { SOURCES, type TrackName } from "../sources.js";
+import { DOR_USE_CODES, dorUseGroupSql, hasAdditionalOwnersSql, ownerRegionSql, yearsSinceSql } from "./rules.js";
 
 export interface FeatureBuildStats {
   rows: number;
@@ -18,8 +19,209 @@ export interface FeatureBuildStats {
 export const WALK_M = 800;
 
 /**
+ * A group of query-table columns that all come from one source system.
+ *
+ * WHY THIS EXISTS. `source_system` is one of the 37 canonical Elephant columns and it is a single
+ * scalar per row, so it can only ever name one system. This table joins twelve of them: the FDOR
+ * NAL roll is the spine, but roughly forty of the published columns come from the FDOR SDF sales
+ * file, the FDOR PAR shapefile, the Duval PA detail pages, JaxEPICS permits, Sunbiz, DBPR, JTA
+ * GTFS, Overture places, COJ/NHD hydrography, the COJ parcel layer and the COJ address points.
+ * Emitting `duval_appraiser` on every row and calling that "provenance on every row" is false for
+ * every one of those columns.
+ *
+ * WHAT WE PUBLISH INSTEAD. `source_system` stays exactly as the canonical contract expects, but it
+ * is now scoped honestly: it names the source of the appraisal-roll spine the row is keyed on, and
+ * nothing else (`appraisal_source` carries the identical value, which makes that scope visible in
+ * the data itself). Each family below then publishes its own `<key>_source` / `<key>_fetched_at`
+ * pair, NULL on any row the family contributed nothing to, and `source_systems` lists every system
+ * that did contribute to the row. The column-to-family map travels with the parquet in its
+ * key-value metadata (see features/export.ts), so a consumer holding only the file can resolve any
+ * column to the system and fetch time behind it.
+ *
+ * TRUTHFUL PR SENTENCE (the one claim this design supports, quoted in the report):
+ *   "Every row of the query table carries provenance per column family, not just per parcel:
+ *    `source_system` names the source of the appraisal-roll spine the row is keyed on,
+ *    `source_systems` lists every system that contributed a value to that row, and a
+ *    `<family>_source` / `<family>_fetched_at` pair names the system and fetch time behind each
+ *    group of columns, with the column-to-family map published inside the parquet metadata."
+ */
+export interface ColumnFamily {
+  /** Column-name prefix: the family publishes `<key>_source` and `<key>_fetched_at`. */
+  key: string;
+  label: string;
+  /**
+   * The `SOURCES` track that fetched the family, or null for families computed from more than one
+   * source (`derived`), produced by the pipeline itself (`pipeline`), or present only as a
+   * canonical placeholder the sources never fill (`placeholder`). Only families with a track emit
+   * a `<key>_source` / `<key>_fetched_at` pair.
+   */
+  track: TrackName | null;
+  /** Every column of derived.properties_features belongs to exactly one family. */
+  columns: readonly string[];
+  /** Anything a reader has to know before trusting the family's columns. */
+  note?: string;
+}
+
+export const COLUMN_FAMILIES: readonly ColumnFamily[] = [
+  {
+    key: "appraisal",
+    label: "FDOR NAL tax roll (Duval property appraiser)",
+    track: "appraisal",
+    note:
+      "The spine: one row per folio. `source_system` names this family and only this family. " +
+      "OWN_NAME is truncated to 30 characters by the roll and there is no co-owner column, which " +
+      "is why owner_count is NULL and has_additional_owners carries the ET AL / ET UX marker.",
+    columns: [
+      "property_id", "request_identifier", "parcel_identifier", "source_system", "county_name", "state_code",
+      "address_street", "address_city", "address_zip", "lot_size_acre", "lot_area_sqft", "property_type",
+      "property_usage_type", "built_year", "livable_floor_area", "assessed_value", "market_value", "land_value",
+      "owner_name", "owners_text", "owner_count", "owner_occupied", "has_additional_owners", "dor_uc", "pa_uc",
+      "eff_year_built", "taxable_value", "assessed_value_school", "homestead_flag", "building_count",
+      "residential_units", "legal_description", "neighborhood_code", "census_block", "owner_mailing_address",
+      "owner_mailing_city", "owner_mailing_state", "owner_mailing_zip", "owner_region_class",
+      "source_artifact", "source_sha256", "source_fetched_at", "source_run_id", "source_url", "fetched_at",
+    ],
+  },
+  {
+    key: "sales",
+    label: "FDOR SDF sales data file (plus the roll's own SALE_*1/2 columns)",
+    track: "sales",
+    note: "Covers the 2025-2026 transfers only; sale dates carry year and month, stored as the first of the month.",
+    columns: [
+      "last_sale_date", "last_sale_price", "last_sale_source", "last_sale_qual_cd", "last_sale_or_book",
+      "last_sale_or_page", "sale_count",
+    ],
+  },
+  {
+    key: "geometry",
+    label: "FDOR PAR parcel shapefile",
+    track: "geometry",
+    note: "Centroids computed from parcel polygons, not rooftop points.",
+    columns: ["latitude", "longitude", "coordinates_source"],
+  },
+  {
+    key: "structure",
+    label: "Duval Property Appraiser Detail pages (vendored Elephant lexicon transform)",
+    track: "pa_detail",
+    note: "Slow, US-egress-only source pulled in bounded windows, so these columns cover only the parcels visited so far.",
+    columns: [
+      "exterior_wall_material", "roof_covering_material", "total_area", "roof_structure", "pa_actual_year_built",
+      "pa_building_count",
+    ],
+  },
+  {
+    key: "permit",
+    label: "City of Jacksonville JaxEPICS permits",
+    track: "permits",
+    columns: [
+      "has_permits", "permit_count", "roof_permit_count", "last_roof_permit_year", "last_roof_permit_date",
+      "last_permit_date",
+    ],
+  },
+  {
+    key: "business",
+    label: "Florida Division of Corporations (Sunbiz)",
+    track: "businesses",
+    note: "Linked to the parcel by normalized situs address plus ZIP5 (entity_links), not by a county key.",
+    columns: ["has_sunbiz_tenant", "sunbiz_business_count"],
+  },
+  {
+    key: "contractor",
+    label: "Florida DBPR CILB licensees",
+    track: "contractors",
+    note: "has_bbb_contractor is never populated: BBB terms forbid aggregation and DBPR carries no per-parcel link.",
+    columns: ["has_bbb_contractor"],
+  },
+  {
+    key: "transit",
+    label: "JTA GTFS static feed",
+    track: "transit",
+    note: "Straight-line (haversine) distance from the parcel centroid, not network walking distance.",
+    columns: [
+      "nearest_transit_stop_m", "nearest_transit_stop_id", "nearest_transit_stop_name",
+      "nearest_transit_route_types", "nearest_transit_routes", "near_transit_800m",
+    ],
+  },
+  {
+    key: "places",
+    label: "Overture Maps places",
+    track: "places",
+    columns: ["nearest_starbucks_m", "nearest_starbucks_id", "nearest_starbucks_name", "near_starbucks_800m"],
+  },
+  {
+    key: "water",
+    label: "COJ river polygons and USGS NHD hydrography",
+    track: "water",
+    note: "Proximity proxy, not a sightline analysis; water_basis states the method per row.",
+    columns: ["water_view_flag", "water_view_major_flag", "water_dist_m", "water_body_name", "water_body_type", "water_basis"],
+  },
+  {
+    key: "parcel_layer",
+    label: "COJ parcel layer (CityBiz/Parcels)",
+    track: "coj_parcels",
+    note:
+      "fld_zone and zoning fall back to the COJ address-point layer when the parcel layer has not been " +
+      "loaded; on those rows parcel_layer_source is NULL and address_source carries the system instead.",
+    columns: ["fld_zone", "zoning", "coj_last_sale_date"],
+  },
+  {
+    key: "address",
+    label: "COJ address points (ERAT)",
+    track: "coj_addresses",
+    columns: ["subdivision", "address_point_count"],
+  },
+  {
+    key: "derived",
+    label: "Computed by this pipeline from more than one of the families above",
+    track: null,
+    note: "Each of these names its own evidence in a sibling column (roof_age_basis, tenure_basis, water_basis).",
+    columns: [
+      "source_systems", "roof_year_est", "roof_age_basis", "roof_age_years",
+      "last_sale_date_any", "tenure_basis", "tenure_source", "has_sale_on_record", "years_since_last_sale",
+      "no_sale_10y_flag",
+    ],
+  },
+  {
+    key: "pipeline",
+    label: "Pipeline run bookkeeping",
+    track: null,
+    columns: ["property_cid", "features_run_id", "features_as_of", "run_id"],
+  },
+  {
+    key: "placeholder",
+    label: "Canonical Elephant columns no Duval source publishes",
+    track: null,
+    note: "Held NULL on purpose so the canonical column list stays complete; never defaulted to a value.",
+    columns: ["avm_value", "hoa_flag"],
+  },
+];
+
+/** Families that publish a `<key>_source` / `<key>_fetched_at` pair, in column order. */
+export const SOURCE_FAMILIES: readonly ColumnFamily[] = COLUMN_FAMILIES.filter((f) => f.track !== null);
+
+/** The provenance columns the families add, in the order buildFeatures emits them. */
+export const FAMILY_PROVENANCE_COLUMNS: readonly string[] = [
+  ...SOURCE_FAMILIES.flatMap((f) => [`${f.key}_source`, `${f.key}_fetched_at`]),
+  "source_systems",
+];
+
+/** Latest fetch of a whole-feed source (GTFS, Overture, hydrography): one fetch covers every row. */
+async function feedProvenance(
+  conn: DuckDBConnection,
+  table: string,
+): Promise<{ system: string; fetchedAt: string } | null> {
+  const r = await one<{ s: string | null; f: string | null }>(
+    conn,
+    `SELECT any_value(source_system) AS s, max(fetched_at)::VARCHAR AS f FROM ${table}`,
+  );
+  if (r.s === null || r.s === undefined) return null;
+  return { system: r.s, fetchedAt: r.f ?? "" };
+}
+
+/**
  * Build derived.properties_features: one row per parcel, the 37 canonical query-table columns first
- * (order from elephant-query-db run-query-table-export.ts) followed by the Duval extras.
+ * (order from elephant-query-db run-query-table-export.ts) followed by the Duval extras and the
+ * per-family provenance pairs described on {@link ColumnFamily}.
  * Columns whose source is not loaded yet are NULL, never defaulted to false/0.
  */
 export async function buildFeatures(
@@ -33,6 +235,7 @@ export async function buildFeatures(
   const waterLoaded = (await count(conn, "water_bodies")) > 0 && (await tableExists(conn, "derived", "water_distance"));
   const cojParcelsLoaded = (await count(conn, "coj_parcels")) > 0;
   const addressesLoaded = (await count(conn, "address_points")) > 0;
+  const geometryLoaded = (await count(conn, "parcel_geometry")) > 0;
   const linksLoaded = (await count(conn, "entity_links")) > 0;
   const cidLoaded = (await tableExists(conn, "main", "consolidation_state")) && (await count(conn, "consolidation_state")) > 0;
   const paLoaded = (await tableExists(conn, "main", "pa_detail_buildings")) && (await count(conn, "pa_detail_buildings")) > 0;
@@ -41,9 +244,11 @@ export async function buildFeatures(
     ? `LEFT JOIN (SELECT parcel_id, min(roofing_cover) FILTER (WHERE roofing_cover IS NOT NULL) AS roofing_cover,
                         min(roof_structure) FILTER (WHERE roof_structure IS NOT NULL) AS roof_structure,
                         min(exterior_wall) FILTER (WHERE exterior_wall IS NOT NULL) AS exterior_wall,
-                        max(actual_year_built) AS pa_year_built, sum(heated_area_sqft) AS pa_heated_area, sum(gross_area_sqft) AS pa_gross_area, count(*) AS pa_buildings
+                        max(actual_year_built) AS pa_year_built, sum(heated_area_sqft) AS pa_heated_area, sum(gross_area_sqft) AS pa_gross_area, count(*) AS pa_buildings,
+                        any_value(source_system) AS src_system, max(fetched_at)::VARCHAR AS src_fetched_at
                  FROM pa_detail_buildings GROUP BY parcel_id) pa ON pa.parcel_id = p.parcel_id`
     : "";
+  const geomJoin = geometryLoaded ? "LEFT JOIN parcel_geometry pg ON pg.parcel_id = p.parcel_id" : "";
 
   await conn.run("CREATE OR REPLACE TABLE derived.dor_use_codes (code VARCHAR, description VARCHAR)");
   const values = Object.entries(DOR_USE_CODES)
@@ -53,8 +258,10 @@ export async function buildFeatures(
 
   // has_sunbiz_tenant: a business linked to the parcel by situs address (entity_links), NULL until Sunbiz loads
   const sunbizJoin = businessesLoaded && linksLoaded
-    ? `LEFT JOIN (SELECT to_id AS parcel_id, count(*) AS n, count(*) FILTER (WHERE match_method = 'situs_address_match') AS n_situs
-                  FROM entity_links WHERE link_type = 'business_parcel' GROUP BY to_id) bz ON bz.parcel_id = p.parcel_id`
+    ? `LEFT JOIN (SELECT l.to_id AS parcel_id, count(*) AS n, count(*) FILTER (WHERE l.match_method = 'situs_address_match') AS n_situs,
+                        any_value(b.source_system) AS src_system, max(b.fetched_at)::VARCHAR AS src_fetched_at
+                  FROM entity_links l LEFT JOIN businesses b ON b.doc_number = l.from_id
+                  WHERE l.link_type = 'business_parcel' GROUP BY l.to_id) bz ON bz.parcel_id = p.parcel_id`
     : "";
   const hasSunbizExpr = businessesLoaded && linksLoaded ? "coalesce(bz.n_situs, 0) > 0" : "NULL::BOOLEAN";
   const sunbizCountExpr = businessesLoaded && linksLoaded ? "coalesce(bz.n, 0)::BIGINT" : "NULL::BIGINT";
@@ -65,7 +272,8 @@ export async function buildFeatures(
                 count(*) FILTER (WHERE is_roof_permit) AS roof_permit_count,
                 max(CASE WHEN is_roof_permit THEN year(coalesce(issue_date, applied_date)) END) AS last_roof_permit_year,
                 max(CASE WHEN is_roof_permit THEN coalesce(issue_date, applied_date) END) AS last_roof_permit_date,
-                max(coalesce(issue_date, applied_date)) AS last_permit_date
+                max(coalesce(issue_date, applied_date)) AS last_permit_date,
+                any_value(source_system) AS src_system, max(fetched_at)::VARCHAR AS src_fetched_at
          FROM permits WHERE parcel_id IS NOT NULL GROUP BY parcel_id) pm ON pm.parcel_id = p.parcel_id`
     : "";
   const hasPermitsExpr = permitsLoaded ? "coalesce(pm.permit_count, 0) > 0" : "NULL::BOOLEAN";
@@ -80,20 +288,95 @@ export async function buildFeatures(
   const waterJoin = waterLoaded ? "LEFT JOIN derived.water_distance wd ON wd.parcel_id = p.parcel_id" : "";
   const cojJoin = cojParcelsLoaded ? "LEFT JOIN (SELECT * FROM coj_parcels QUALIFY row_number() OVER (PARTITION BY parcel_id ORDER BY last_sale_date DESC NULLS LAST) = 1) cj ON cj.parcel_id = p.parcel_id" : "";
   const addrJoin = addressesLoaded
-    ? `LEFT JOIN (SELECT parcel_id, any_value(floodzone) AS floodzone, any_value(zoning) AS zoning, any_value(subdivision) AS subdivision, count(*) AS address_point_count
+    ? `LEFT JOIN (SELECT parcel_id, any_value(floodzone) AS floodzone, any_value(zoning) AS zoning, any_value(subdivision) AS subdivision, count(*) AS address_point_count,
+                         any_value(source_system) AS src_system, max(fetched_at)::VARCHAR AS src_fetched_at
                   FROM address_points WHERE parcel_id IS NOT NULL GROUP BY parcel_id) ap ON ap.parcel_id = p.parcel_id`
     : "";
 
   const nn = (loaded: boolean, expr: string) => (loaded ? expr : "NULL");
+
+  // Whole-feed sources: nn_transit / nn_starbucks / water_distance are derived tables that carry no
+  // provenance of their own, so the feed's own source system and fetch time stand in for every row
+  // they cover. One fetch produced all of them, so this is the literal truth, not an approximation.
+  const transitFeed = transitLoaded ? await feedProvenance(conn, "transit_stops") : null;
+  const placesFeed = placesLoaded ? await feedProvenance(conn, "places") : null;
+  const waterFeed = waterLoaded ? await feedProvenance(conn, "water_bodies") : null;
+  // Permits and Sunbiz answer for every parcel once loaded, including the negative answers
+  // (has_permits false, has_sunbiz_tenant false), so their family covers every row and the
+  // feed-level fetch time stands in where the parcel itself has no matched record.
+  const permitFeed = permitsLoaded ? await feedProvenance(conn, "permits") : null;
+  const businessFeed = businessesLoaded && linksLoaded ? await feedProvenance(conn, "businesses") : null;
+
+  /** `<key>_source` / `<key>_fetched_at` expression pair per family, NULL where the family gave nothing. */
+  const famWhen = (guard: string | null, system: string, fetchedAt: string): { src: string; at: string } =>
+    guard === null
+      ? { src: "NULL::VARCHAR", at: "NULL::VARCHAR" }
+      : { src: `CASE WHEN ${guard} THEN ${system} END`, at: `CASE WHEN ${guard} THEN ${fetchedAt} END` };
+  const feedFamily = (feed: { system: string; fetchedAt: string } | null, guard: string) =>
+    feed === null ? famWhen(null, "", "") : famWhen(guard, q(feed.system), q(feed.fetchedAt));
+
+  const familyProvenance: Record<string, { src: string; at: string }> = {
+    // the spine is present on every row by construction
+    appraisal: { src: `${q(SOURCES.appraisal.sourceSystem)}::VARCHAR`, at: "p.fetched_at::VARCHAR" },
+    sales: famWhen("ls.parcel_id IS NOT NULL", "ls.source_system", "ls.fetched_at::VARCHAR"),
+    geometry: geometryLoaded
+      ? famWhen(
+          "p.latitude IS NOT NULL",
+          "coalesce(pg.source_system, p.geometry_source)",
+          "coalesce(pg.fetched_at::VARCHAR, p.fetched_at::VARCHAR)",
+        )
+      : famWhen("p.latitude IS NOT NULL AND p.geometry_source IS NOT NULL", "p.geometry_source", "p.fetched_at::VARCHAR"),
+    structure: paLoaded ? famWhen("pa.parcel_id IS NOT NULL", "pa.src_system", "pa.src_fetched_at") : famWhen(null, "", ""),
+    permit: permitFeed === null
+      ? famWhen(null, "", "")
+      : famWhen("TRUE", `coalesce(pm.src_system, ${q(permitFeed.system)})`, `coalesce(pm.src_fetched_at, ${q(permitFeed.fetchedAt)})`),
+    business: businessFeed === null
+      ? famWhen(null, "", "")
+      : famWhen("TRUE", `coalesce(bz.src_system, ${q(businessFeed.system)})`, `coalesce(bz.src_fetched_at, ${q(businessFeed.fetchedAt)})`),
+    // has_bbb_contractor is a documented gap: no contractor source resolves to a parcel
+    contractor: famWhen(null, "", ""),
+    transit: feedFamily(transitFeed, "tr.parcel_id IS NOT NULL"),
+    places: feedFamily(placesFeed, "sb.parcel_id IS NOT NULL"),
+    water: feedFamily(waterFeed, "p.latitude IS NOT NULL"),
+    parcel_layer: cojParcelsLoaded
+      ? famWhen("cj.parcel_id IS NOT NULL", "cj.source_system", "cj.fetched_at::VARCHAR")
+      : famWhen(null, "", ""),
+    address: addressesLoaded ? famWhen("ap.parcel_id IS NOT NULL", "ap.src_system", "ap.src_fetched_at") : famWhen(null, "", ""),
+  };
+
+  const familySql = SOURCE_FAMILIES.flatMap((f) => {
+    const pair = familyProvenance[f.key];
+    if (pair === undefined) throw new Error(`no provenance expression for column family "${f.key}"`);
+    return [`(${pair.src}) AS ${f.key}_source`, `(${pair.at}) AS ${f.key}_fetched_at`];
+  }).join(",\n      ");
+  // Row-level roll-up: every distinct source system that put a value in this row, sorted, comma joined.
+  const sourceSystemsSql = `array_to_string(list_sort(list_distinct(list_filter([${SOURCE_FAMILIES.map(
+    (f) => `(${familyProvenance[f.key]?.src ?? "NULL::VARCHAR"})`,
+  ).join(", ")}], x -> x IS NOT NULL))), ',')`;
+
   // tenure: latest of the roll/SDF sale and the COJ last-sale date
   const rollSale = "ls.sale_date";
   const cojSale = cojParcelsLoaded ? "cj.last_sale_date" : "NULL::DATE";
   const anySale = `greatest(coalesce(${rollSale}, DATE '0001-01-01'), coalesce(${cojSale}, DATE '0001-01-01'))`;
   const anySaleExpr = `CASE WHEN ${rollSale} IS NULL AND ${cojSale} IS NULL THEN NULL ELSE ${anySale} END`;
+  /**
+   * tenure_basis names the column `last_sale_date_any` was taken from, and therefore the column
+   * `years_since_last_sale` and `no_sale_10y_flag` were computed from:
+   *   FDOR_SALE          -> last_sale_date       (FDOR SDF / NAL roll sale, 12.8% of Duval rows)
+   *   COJ_SALESL         -> coj_last_sale_date   (COJ parcel layer SALESL, 99.4% of Duval rows)
+   *   NO_SALE_ON_RECORD  -> no sale in any source; last_sale_date_any, years_since_last_sale and
+   *                         no_sale_10y_flag are all NULL and MUST NOT be read as a long hold.
+   * The value is never NULL, so "no transfer on record" and "a transfer we could not date" can
+   * never be confused with each other, and has_sale_on_record makes the same split filterable.
+   */
   const tenureBasis = `CASE
       WHEN ${rollSale} IS NOT NULL AND (${cojSale} IS NULL OR ${rollSale} >= ${cojSale}) THEN 'FDOR_SALE'
       WHEN ${cojSale} IS NOT NULL THEN 'COJ_SALESL'
-      ELSE NULL END`;
+      ELSE 'NO_SALE_ON_RECORD' END`;
+  const tenureSource = `CASE
+      WHEN ${rollSale} IS NOT NULL AND (${cojSale} IS NULL OR ${rollSale} >= ${cojSale}) THEN ls.source_system
+      WHEN ${cojSale} IS NOT NULL THEN ${cojParcelsLoaded ? "cj.source_system" : "NULL::VARCHAR"}
+      END`;
 
   const ownerRegion = ownerRegionSql("p");
   const yearsSince = yearsSinceSql(`(${anySaleExpr})`, opts.asOf);
@@ -102,6 +385,7 @@ export async function buildFeatures(
     CREATE OR REPLACE TABLE derived.properties_features AS
     WITH last_sale AS (
       SELECT parcel_id, sale_date, sale_price, sale_source, qual_cd, or_book, or_page,
+             source_system, fetched_at,
              count(*) OVER (PARTITION BY parcel_id) AS sale_count
       FROM sales_history
       WHERE sale_date IS NOT NULL
@@ -113,6 +397,9 @@ export async function buildFeatures(
       ${cidLoaded ? "cs.cid" : "NULL::VARCHAR"}        AS property_cid,
       p.parcel_id                                   AS request_identifier,
       p.parcel_id                                   AS parcel_identifier,
+      -- Canonical Elephant column, deliberately narrow: it names the source of the appraisal-roll
+      -- spine this row is keyed on and NOTHING else. Enrichment columns carry their own
+      -- <family>_source; source_systems lists every system that contributed to the row.
       ${q(COUNTY.sourceSystem)}                     AS source_system,
       ${q(COUNTY.name)}                             AS county_name,
       ${q(COUNTY.stateCode)}                        AS state_code,
@@ -137,7 +424,14 @@ export async function buildFeatures(
       NULL::DOUBLE                                  AS avm_value,
       p.own_name                                    AS owner_name,
       NULLIF(concat_ws('; ', p.own_name, CASE WHEN p.fidu_name IS NOT NULL THEN 'c/o ' || p.fidu_name END), '') AS owners_text,
-      CASE WHEN p.own_name IS NOT NULL THEN 1 END::BIGINT AS owner_count,
+      -- owner_count is NULL on purpose. FDOR NAL publishes one 30-character OWN_NAME per parcel and
+      -- no co-owner column (FIDU_NAME is a fiduciary and is empty for all 404,023 Duval parcels), so
+      -- the number of owners is not in the source. It used to emit a literal 1, which is a constant
+      -- dressed up as a count. Splitting the name on "&"/" AND " is not honest either: the 30-char
+      -- truncation strips entity suffixes, so "SOUTHERN BELL TELEPHONE AND TE" is indistinguishable
+      -- from two co-owners. has_additional_owners below publishes the one multi-owner signal the
+      -- roll does carry.
+      NULL::BIGINT                                  AS owner_count,
       CASE WHEN p.own_addr1 IS NULL OR p.phy_addr1 IS NULL THEN NULL
            ELSE upper(trim(p.own_addr1)) = upper(trim(p.phy_addr1))
             AND left(regexp_replace(coalesce(p.own_zipcd, ''), '[^0-9]', '', 'g'), 5) = left(regexp_replace(coalesce(p.phy_zipcd, ''), '[^0-9]', '', 'g'), 5) END AS owner_occupied,
@@ -167,13 +461,19 @@ export async function buildFeatures(
       CASE WHEN length(regexp_replace(coalesce(p.own_zipcd, ''), '[^0-9]', '', 'g')) >= 5
            THEN left(regexp_replace(p.own_zipcd, '[^0-9]', '', 'g'), 5) END AS owner_mailing_zip,
       ${ownerRegion}                                AS owner_region_class,
+      -- the roll's ET AL / ET UX marker: more owners exist than the one OWN_NAME names
+      ${hasAdditionalOwnersSql("p.own_name")}       AS has_additional_owners,
       ls.sale_source                                AS last_sale_source,
       ls.qual_cd                                    AS last_sale_qual_cd,
       ls.or_book                                    AS last_sale_or_book,
       ls.or_page                                    AS last_sale_or_page,
       ls.sale_count::BIGINT                         AS sale_count,
+      -- the date years_since_last_sale and no_sale_10y_flag are computed from; tenure_basis says
+      -- which column it was taken from and tenure_source which system published it
       (${anySaleExpr})::VARCHAR                     AS last_sale_date_any,
       ${tenureBasis}                                AS tenure_basis,
+      ${tenureSource}                               AS tenure_source,
+      ((${anySaleExpr}) IS NOT NULL)                AS has_sale_on_record,
       ${yearsSince}                                 AS years_since_last_sale,
       CASE WHEN (${anySaleExpr}) IS NULL THEN NULL
            ELSE (${anySaleExpr}) <= DATE '${opts.asOf}' - INTERVAL 10 YEAR END AS no_sale_10y_flag,
@@ -224,6 +524,10 @@ export async function buildFeatures(
       p.run_id                                      AS source_run_id,
       ${q(opts.runId)}                              AS features_run_id,
       DATE '${opts.asOf}'::VARCHAR                  AS features_as_of,
+      -- per-family provenance (see ColumnFamily above): <family>_source / <family>_fetched_at is
+      -- NULL on any row the family contributed nothing to
+      ${familySql},
+      NULLIF(${sourceSystemsSql}, '')               AS source_systems,
       -- UI provenance contract (ui/lib/sql.ts): primary source URL, fetch time, run id
       p.source_url                                  AS source_url,
       p.fetched_at                                  AS fetched_at,
@@ -240,6 +544,7 @@ export async function buildFeatures(
     ${addrJoin}
     ${cidJoin}
     ${paJoin}
+    ${geomJoin}
   `);
 
   const rows = await count(conn, "derived.properties_features");
