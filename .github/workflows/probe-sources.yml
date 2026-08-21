@@ -4,6 +4,8 @@ on:
 jobs:
   probe:
     runs-on: ubuntu-latest
+    env:
+      UA: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36"
     steps:
       - name: Egress + reachability
         run: |
@@ -11,45 +13,51 @@ jobs:
           for u in \
             "https://paopropertysearch.coj.net/Basic/Search.aspx" \
             "https://maps.coj.net/coj/rest/services/CityBiz/Parcels/MapServer/0?f=pjson" \
-            "https://maps.coj.net/coj/rest/services/ERAT/EratDashboard_3000/MapServer/41?f=pjson" \
-            "https://www.jacksonville.gov/departments/property-appraiser/data-offerings" \
             "https://jaxepics.coj.net/Permit/View/B-25-279425.000" \
-            "https://www2.myfloridalicense.com/sto/file_download/extracts/cilb_certified.csv" \
-            "https://floridarevenue.com/property/Pages/DataPortal.aspx" ; do
-            curl -s -o /dev/null -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36" -w "%{http_code} %{time_total}s %{size_download}B $u\n" --max-time 25 "$u" || echo "ERR $u"
+            "https://www2.myfloridalicense.com/sto/file_download/extracts/cilb_certified.csv" ; do
+            curl -s -o /dev/null -A "$UA" -w "%{http_code} %{time_total}s %{size_download}B $u" --max-time 25 "$u" || echo "ERR $u"; echo
           done
-      - name: Sample PA detail page (roof fields?)
-        run: |
-          mkdir -p out
-          curl -s -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36" --max-time 30 "https://paopropertysearch.coj.net/Basic/Detail.aspx?RE=0000010005R" -o out/detail_0000010005R.html -w "detail %{http_code} %{size_download}B\n"
-          curl -s -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36" --max-time 30 "https://paopropertysearch.coj.net/Basic/Detail.aspx?RE=0604480000" -o out/detail_0604480000.html -w "detail2 %{http_code} %{size_download}B\n"
-          python3 - <<'PY'
-          import re,glob
-          for f in glob.glob('out/*.html'):
-              h=open(f,encoding='utf-8',errors='ignore').read()
-              txt=re.sub(r'<[^>]+>',' ',h); txt=re.sub(r'\s+',' ',txt)
-              print('==',f,len(h))
-              for kw in ['Roof','Year Built','Effective','Sale','Owner','Mailing','Heating','Stories','Baths','Exterior Wall','Element','Building']:
-                  for m in list(re.finditer(kw,txt))[:2]:
-                      print('  ',kw,'->',txt[max(0,m.start()-40):m.start()+140])
-          PY
       - name: JaxEPICS bundle API discovery
         run: |
-          UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36"
           mkdir -p out
-          curl -s -A "$UA" --max-time 30 "https://jaxepics.coj.net/" -o out/jaxepics_index.html -w "index %{http_code} %{size_download}B\n"
-          for js in $(grep -oE 'src="[^"]+\.js"' out/jaxepics_index.html | sed -E 's/src="//;s/"//' ); do
-            case "$js" in http*) u="$js";; /*) u="https://jaxepics.coj.net$js";; *) u="https://jaxepics.coj.net/$js";; esac
-            n=$(basename "$js"); curl -s -A "$UA" --max-time 60 "$u" -o "out/$n" -w "$n %{http_code} %{size_download}B\n"
-          done
-          echo "--- api literals ---"
-          cat out/*.js 2>/dev/null | grep -oE '(https?://[a-z0-9.-]*coj\.net[^"'"'"' ]{0,80}|/api/[A-Za-z0-9_/{}.-]{2,80}|api/[A-Za-z]+/[A-Za-z0-9_/{}.-]{2,60})' | sort | uniq -c | sort -rn | head -80
-          echo "--- candidate endpoints ---"
-          for u in "https://jaxepicsapi.coj.net/api/Permit/View/B-25-279425.000" "https://jaxepicsapi.coj.net/api/permit/B-25-279425.000" "https://jaxepicsapi.coj.net/api/Permit/B-25-279425.000" "https://jaxepicsapi.coj.net/api/Permit/GetPermit?permitNumber=B-25-279425.000" "https://jaxepicsapi.coj.net/api/Permits/B-25-279425.000" "https://jaxepicsapi.coj.net/api/Permit/Search?permitNumber=B-25-279425.000"; do
-            curl -s -A "$UA" --max-time 20 -o out/resp.json -w "%{http_code} %{size_download}B $u
-" "$u"; head -c 300 out/resp.json; echo
+          curl -s -A "$UA" --max-time 30 "https://jaxepics.coj.net/" -o out/jaxepics_index.html
+          echo "index bytes: $(wc -c < out/jaxepics_index.html)"
+          grep -oE 'src="[^"]+\.js"' out/jaxepics_index.html | sed -E 's/src="//;s/"//' > out/js_list.txt
+          cat out/js_list.txt
+          while read -r js; do
+            case "$js" in
+              http*) u="$js";;
+              /*) u="https://jaxepics.coj.net$js";;
+              *) u="https://jaxepics.coj.net/$js";;
+            esac
+            n=$(basename "$js")
+            curl -s -A "$UA" --max-time 90 "$u" -o "out/$n"
+            echo "$n bytes: $(wc -c < "out/$n")"
+          done < out/js_list.txt
+          echo "--- host literals ---"
+          cat out/*.js | grep -oE 'https?://[a-zA-Z0-9.-]*coj\.net[^"'"'"' ]{0,120}' | sort | uniq -c | sort -rn | head -40
+          echo "--- api path literals ---"
+          cat out/*.js | grep -oE '(/api/[A-Za-z0-9_/{}.$-]{2,100}|api/[A-Za-z][A-Za-z0-9_/{}.$-]{2,100})' | sort | uniq -c | sort -rn | head -120
+          echo "--- permit-ish literals ---"
+          cat out/*.js | grep -oiE '[a-z0-9_/{}.$-]{0,40}permit[a-z0-9_/{}.$-]{0,60}' | sort | uniq -c | sort -rn | head -60
+      - name: Candidate endpoints
+        run: |
+          mkdir -p out
+          for u in \
+            "https://jaxepicsapi.coj.net/api/Permit/View/B-25-279425.000" \
+            "https://jaxepicsapi.coj.net/api/permit/B-25-279425.000" \
+            "https://jaxepicsapi.coj.net/api/Permit/B-25-279425.000" \
+            "https://jaxepicsapi.coj.net/api/Permit/GetPermit?permitNumber=B-25-279425.000" \
+            "https://jaxepicsapi.coj.net/api/Permits/B-25-279425.000" \
+            "https://jaxepicsapi.coj.net/api/Permit/Search?permitNumber=B-25-279425.000" \
+            "https://jaxepicsapi.coj.net/api/Permit/View/3ee90c" \
+            "https://jaxepicsapi.coj.net/swagger/v1/swagger.json" \
+            "https://jaxepicsapi.coj.net/swagger/index.html" ; do
+            code=$(curl -s -A "$UA" --max-time 20 -o out/resp.bin -w "%{http_code}" "$u")
+            echo "$code $(wc -c < out/resp.bin)B $u"
+            head -c 300 out/resp.bin; echo
           done
       - uses: actions/upload-artifact@v4
         with:
-          name: pa-detail-sample
+          name: jaxepics-probe
           path: out/
