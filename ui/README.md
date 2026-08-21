@@ -273,8 +273,9 @@ the settings UI so the two can never disagree about what is supported:
 
 | Provider | Free tier, read from the provider's own page on 2026-08-21 | Models here |
 |---|---|---|
+| OpenRouter | Yes, and the only genuinely $0.00 per token open weight option. `:free` variants cost nothing, capped at 50 requests/day, or 1,000/day once $10 of credits has ever been bought ([limits](https://openrouter.ai/docs/api-reference/limits)). Free models route only to providers that may train on the prompt, so prompt training must be enabled in account settings | `z-ai/glm-5.2:free`, `nvidia/nemotron-3-super-120b-a12b:free`, `openai/gpt-oss-20b:free`, `google/gemma-4-31b-it:free` |
 | Google AI Studio | Yes, and no card. New accounts start on the free tier and Gemini Flash tokens are listed as free of charge ([pricing](https://ai.google.dev/gemini-api/docs/pricing), [billing](https://ai.google.dev/gemini-api/docs/billing)) | `gemini-3.7-flash`, `gemini-3.5-flash`, `gemini-2.5-flash`, `gemini-2.5-pro` |
-| Groq | Yes. 30 req/min, 1,000 req/day, 8,000 tokens/min ([rate limits](https://console.groq.com/docs/rate-limits)). The tokens per minute cap is the binding one for a tool loop | `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `qwen/qwen3.6-27b` |
+| Groq | Yes on paper, no in practice. 30 req/min, 1,000 req/day, 8,000 tokens/min ([rate limits](https://console.groq.com/docs/rate-limits)), and one mid conversation request here is about 8,300 tokens, so the free tier cannot finish most answers. Fine on a paid tier | `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `qwen/qwen3.6-27b` |
 | Cerebras | $5 of one time signup credit, not a recurring allowance ([pricing](https://www.cerebras.ai/pricing)) | `gpt-oss-120b`, `gemma-4-31b` |
 | Hugging Face | $0.10 of routed inference credit a month, no card, refreshing ([pricing](https://huggingface.co/docs/inference-providers/pricing)). Nothing on the router is priced at zero, so the credit is the whole free tier: about 60 questions on gpt-oss-120b | `openai/gpt-oss-120b`, `deepseek-ai/DeepSeek-V4-Flash`, `Qwen/Qwen3-235B-A22B-Instruct-2507`, `Qwen/Qwen3-4B-Instruct-2507` |
 | Vercel AI Gateway | $5 monthly credit per team, but only on a subset of the catalog ([pricing](https://vercel.com/docs/ai-gateway/pricing)). That subset holds exactly one tool calling chat model | `poolside/laguna-s-2.1-free` (free), `anthropic/claude-opus-5`, `google/gemini-3.7-flash` |
@@ -284,7 +285,14 @@ the settings UI so the two can never disagree about what is supported:
 Those numbers move monthly. Each claim carries the source URL and the date it was read, in the
 registry and on the settings page, so a stale one is visible rather than implied.
 
-Hugging Face is reached through `@ai-sdk/openai-compatible` against
+**What one answer actually costs.** `tests/agent-prompt-budget.test.ts` runs a real three step answer
+against a real DuckDB with the model mocked and measures each request: about 1,900 tokens on step
+one, 5,000 on step two, 8,300 on step three, roughly 15,200 cumulative. The system prompt and all
+five tool schemas are resent every step and the tool results accumulate on top, which is why the
+per minute ceilings matter more than the per day ones. That measurement is what disqualified the
+Groq free tier, and the test fails if the prompt grows enough to invalidate the other claims.
+
+OpenRouter and Hugging Face are reached through `@ai-sdk/openai-compatible` against
 `https://router.huggingface.co/v1`, not through the official `@ai-sdk/huggingface` package. That
 package is responses-API only, while the tool support this agent depends on is what the router
 publishes per model at `https://router.huggingface.co/v1/models` as `supports_tools`, which
@@ -325,7 +333,7 @@ tool agent, and the settings page shows those two results separately.
 
 | Variable | Required | Notes |
 |---|---|---|
-| provider key | no | One of `GOOGLE_GENERATIVE_AI_API_KEY`, `GROQ_API_KEY`, `CEREBRAS_API_KEY`, `HF_TOKEN`, `AI_GATEWAY_API_KEY`, `ANTHROPIC_API_KEY`, `AWS_BEARER_TOKEN_BEDROCK`. **This deployment sets none of them.** Setting one turns the server side default on. |
+| provider key | no | One of `OPENROUTER_API_KEY` (recommended for a free default), `GOOGLE_GENERATIVE_AI_API_KEY`, `GROQ_API_KEY`, `CEREBRAS_API_KEY`, `HF_TOKEN`, `AI_GATEWAY_API_KEY`, `ANTHROPIC_API_KEY`, `AWS_BEARER_TOKEN_BEDROCK`. **This deployment sets none of them.** Setting one turns the server side default on. |
 | `AGENT_PROVIDER` | no | One of the registry ids. When unset, the first provider with a key present wins. Naming a provider with no key reports "not configured" rather than falling through to another provider's key. |
 | `AGENT_MODEL` | no | Must be a model the registry lists for that provider. An id belonging to another provider is ignored and the provider's default free model is used. |
 | `QUERY_TABLE_URL` | no | Server side parquet URL (IPNS root or direct object). Falls back to `NEXT_PUBLIC_QUERY_TABLE_URL`, then to `public/sample/query-table.parquet`. |

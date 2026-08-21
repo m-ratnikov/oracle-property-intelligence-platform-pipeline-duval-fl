@@ -85,6 +85,26 @@ export function isAgentError(error: unknown): error is AgentError {
 }
 
 /**
+ * Provider specific gotchas that a generic "the call failed" hint cannot fix.
+ *
+ * There is exactly one so far and it is worth the special case, because it is
+ * the single most likely way a visitor's first OpenRouter attempt fails and the
+ * raw message does not tell them what to do. OpenRouter routes free models only
+ * to providers that may train on the prompt, and an account that has not opted
+ * into that gets "No endpoints found matching your data policy" on every call,
+ * which reads like a broken model id rather than a setting.
+ *
+ * Returns null when nothing specific applies, so the caller falls back to its
+ * normal hint.
+ */
+export function providerSpecificHint(safeText: string): string | null {
+  if (/data policy|no endpoints found/i.test(safeText)) {
+    return "OpenRouter routes its free models only to providers that may train on your prompt, so a free model needs prompt training enabled at openrouter.ai/settings/privacy. Turn it on, or pick a provider whose free tier does not have that condition.";
+  }
+  return null;
+}
+
+/**
  * Classify a raw provider failure.
  *
  * The AI SDK surfaces provider HTTP failures as errors carrying `statusCode`,

@@ -16,6 +16,7 @@
  */
 
 export type AgentProvider =
+  | "openrouter"
   | "google"
   | "groq"
   | "cerebras"
@@ -68,6 +69,51 @@ export interface ProviderDefinition {
 export const FREE_TIER_VERIFIED_ON = "2026-08-21";
 
 export const PROVIDERS: readonly ProviderDefinition[] = [
+  {
+    id: "openrouter",
+    label: "OpenRouter",
+    envKeys: ["OPENROUTER_API_KEY"],
+    models: [
+      {
+        id: "z-ai/glm-5.2:free",
+        label: "GLM 5.2 (free)",
+        free: true,
+        notes:
+          "Open weight, 256k context, priced at $0.00 per token on OpenRouter with tool calling declared. The default here because it is the strongest free tool caller of the set on paper. Quality on this five tool loop is unverified.",
+      },
+      {
+        id: "nvidia/nemotron-3-super-120b-a12b:free",
+        label: "Nemotron 3 Super 120B (free)",
+        free: true,
+        notes: "NVIDIA open weight, 262k context, $0.00 per token with tool calling declared. Bigger and slower than GLM.",
+      },
+      {
+        id: "openai/gpt-oss-20b:free",
+        label: "GPT-OSS 20B (free)",
+        free: true,
+        notes:
+          "Apache 2.0, the most genuinely open licensed model here, 131k context, $0.00 per token. Smallest of the four, so weakest at planning a multi step loop.",
+      },
+      {
+        id: "google/gemma-4-31b-it:free",
+        label: "Gemma 4 31B (free)",
+        free: true,
+        notes: "Google open weight under the Gemma license, 262k context, $0.00 per token with tool calling declared.",
+      },
+    ],
+    docsUrl: "https://openrouter.ai/docs/api-reference/limits",
+    keyUrl: "https://openrouter.ai/settings/keys",
+    acceptsUserKey: true,
+    keyHint:
+      "An OpenRouter key. Starts with sk-or-v1-. Free models also need prompt training enabled at openrouter.ai/settings/privacy, otherwise every call fails with \"No endpoints found matching your data policy\".",
+    freeTier: {
+      available: true,
+      summary:
+        "The :free model variants cost $0.00 per token, capped at 50 requests a day, or 1,000 a day once $10 of credits has ever been purchased. This agent spends 3 to 6 model calls per question, so that is roughly 12 questions a day free, or 250 after the one time $10. Free models route only to providers that may train on the prompt, which has to be enabled in account settings.",
+      source: "https://openrouter.ai/docs/api-reference/limits",
+      readOn: FREE_TIER_VERIFIED_ON,
+    },
+  },
   {
     id: "google",
     label: "Google AI Studio (Gemini)",
@@ -122,7 +168,7 @@ export const PROVIDERS: readonly ProviderDefinition[] = [
         label: "GPT-OSS 120B",
         free: true,
         notes:
-          "Free tier published as 30 requests/min, 1,000 requests/day, 8,000 tokens/min, 200,000 tokens/day. The tokens per minute cap is the binding one for this agent, whose system prompt plus tool schemas are large.",
+          "Free tier published as 30 requests/min, 1,000 requests/day, 8,000 tokens/min, 200,000 tokens/day. MEASURED PROBLEM: by the third step of a typical answer this agent sends about 8,300 input tokens in a single request, which is already over the 8,000 per minute free tier ceiling, so a free Groq key cannot finish most questions. Usable on a paid Groq tier, not on the free one.",
       },
       {
         id: "openai/gpt-oss-20b",
@@ -144,7 +190,7 @@ export const PROVIDERS: readonly ProviderDefinition[] = [
     freeTier: {
       available: true,
       summary:
-        "Free tier with published per model rate limits. The 8,000 tokens/min ceiling throttles a tool loop with a large system prompt well before the daily cap.",
+        "Free tier with published per model rate limits. The 8,000 tokens/min ceiling is below what one mid conversation request of this agent needs, so the free tier cannot complete most answers. See the model notes.",
       source: "https://console.groq.com/docs/rate-limits",
       readOn: FREE_TIER_VERIFIED_ON,
     },

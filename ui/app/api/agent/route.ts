@@ -3,7 +3,12 @@ import { serverSelection, AgentNotConfiguredError } from "@/lib/agent/model";
 import { runAgent } from "@/lib/agent/run";
 import { logAgent } from "@/lib/agent/log";
 import { readUserCredential, KEY_HEADER, PROVIDER_HEADER, MODEL_HEADER } from "@/lib/agent/credentials";
-import { isAgentError, AgentBadRequestError, AgentRateLimitError } from "@/lib/agent/errors";
+import {
+  isAgentError,
+  providerSpecificHint,
+  AgentBadRequestError,
+  AgentRateLimitError,
+} from "@/lib/agent/errors";
 import { AGENT_RATE_LIMIT, clientAddress } from "@/lib/agent/ratelimit";
 import { safeMessage } from "@/lib/agent/redact";
 import { PROVIDERS } from "@/lib/agent/providers";
@@ -73,7 +78,8 @@ function toErrorResponse(
 
   if (isAgentError(error)) {
     const hint =
-      error.name === "AgentCredentialError"
+      providerSpecificHint(error.message) ??
+      (error.name === "AgentCredentialError"
         ? credentialSource === "server"
           ? "The provider rejected this deployment's own key, so there is nothing to fix on your side. Add your own key on the settings page to keep going, or let the operator know the server credential needs attention."
           : "The provider rejected that credential. Check the key on the settings page, confirm it belongs to the provider you selected, and test it there before asking again."
@@ -81,7 +87,7 @@ function toErrorResponse(
           ? "This is a public endpoint, so it is capped per address. Wait for the window to roll over, or supply your own key to keep your questions independent of everyone else's."
           : error.name === "AgentBadRequestError"
             ? "Fix the request headers and try again. GET /api/agent lists every provider and model this build supports."
-            : "The model provider failed the call. Nothing was fabricated. Retrying, or picking a different model on the settings page, is usually enough.";
+            : "The model provider failed the call. Nothing was fabricated. Retrying, or picking a different model on the settings page, is usually enough.");
 
     const headers: Record<string, string> = {};
     if (error instanceof AgentRateLimitError) headers["retry-after"] = String(error.retryAfterSeconds);

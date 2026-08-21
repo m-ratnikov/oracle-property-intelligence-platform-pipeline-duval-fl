@@ -21,7 +21,8 @@
  *                         wins, in registry order.
  *        AGENT_MODEL      model id, optional. Must be listed for the provider.
  *        <provider key>   GOOGLE_GENERATIVE_AI_API_KEY, GROQ_API_KEY,
- *                         CEREBRAS_API_KEY, HF_TOKEN, AI_GATEWAY_API_KEY,
+ *                         OPENROUTER_API_KEY, CEREBRAS_API_KEY, HF_TOKEN,
+ *                         AI_GATEWAY_API_KEY,
  *                         ANTHROPIC_API_KEY, AWS_BEARER_TOKEN_BEDROCK, ...
  *
  * This deployment ships with NO server key set, on purpose: a public,
@@ -72,7 +73,7 @@ export interface ServerSelection {
  * Reported by GET /api/agent when nothing at all is configured, so the label
  * has something truthful to say about what the server would run.
  */
-export const FALLBACK_PROVIDER: AgentProvider = "google";
+export const FALLBACK_PROVIDER: AgentProvider = "openrouter";
 
 /** Kept for callers that only want a provider id. */
 export const DEFAULT_ANTHROPIC_MODEL = "claude-opus-5";
@@ -173,6 +174,26 @@ async function createProviderModel(
     case "cerebras": {
       const { createCerebras } = await import("@ai-sdk/cerebras");
       return createCerebras({ apiKey })(modelId);
+    }
+    case "openrouter": {
+      // OpenAI compatible, same reasoning as Hugging Face below: OpenRouter's
+      // own API is the OpenAI chat completions shape, and the per model
+      // `supported_parameters` list it publishes at
+      // https://openrouter.ai/api/v1/models describes that surface. There is a
+      // third party @openrouter/ai-sdk-provider, but it is not an @ai-sdk/*
+      // package, and this needs nothing it adds.
+      const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible");
+      return createOpenAICompatible({
+        name: "openrouter",
+        baseURL: "https://openrouter.ai/api/v1",
+        apiKey,
+        // OpenRouter attributes traffic by these two headers and surfaces the
+        // app name on its dashboards. Neither carries anything sensitive.
+        headers: {
+          "HTTP-Referer": "https://duval-oracle-ui.vercel.app",
+          "X-Title": "Duval County property intelligence",
+        },
+      })(modelId);
     }
     case "huggingface": {
       // Deliberately the OpenAI compatible client against the router's chat

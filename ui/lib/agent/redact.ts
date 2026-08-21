@@ -34,6 +34,7 @@ const KEY_PATTERNS: readonly RegExp[] = [
   /csk-[A-Za-z0-9-]{20,}/g, // Cerebras
   /vck_[A-Za-z0-9]{20,}/g, // Vercel AI Gateway
   /hf_[A-Za-z0-9]{20,}/g, // Hugging Face user access token
+  /sk-or-v1-[A-Za-z0-9]{20,}/g, // OpenRouter
   /ABSK[A-Za-z0-9+/=]{20,}/g, // Bedrock bearer token
   /\bAKIA[0-9A-Z]{16}\b/g, // AWS access key id
 ];

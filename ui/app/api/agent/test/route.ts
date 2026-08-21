@@ -3,7 +3,12 @@ import { z } from "zod";
 import { generateText, stepCountIs, tool } from "ai";
 import { resolveModel } from "@/lib/agent/model";
 import { readUserCredential } from "@/lib/agent/credentials";
-import { classifyProviderError, isAgentError, AgentBadRequestError } from "@/lib/agent/errors";
+import {
+  classifyProviderError,
+  isAgentError,
+  providerSpecificHint,
+  AgentBadRequestError,
+} from "@/lib/agent/errors";
 import { TEST_RATE_LIMIT, clientAddress } from "@/lib/agent/ratelimit";
 import { safeMessage } from "@/lib/agent/redact";
 import { logAgent } from "@/lib/agent/log";
@@ -168,9 +173,10 @@ export async function POST(request: Request): Promise<NextResponse<TestResult>> 
         error: typed.message,
         error_kind: typed.name,
         hint:
-          typed.name === "AgentCredentialError"
+          providerSpecificHint(typed.message) ??
+          (typed.name === "AgentCredentialError"
             ? "The provider rejected this credential. Check that the key belongs to the provider you selected and has not been revoked."
-            : "The provider was reached but the call failed. The model id may not be enabled on this account.",
+            : "The provider was reached but the call failed. The model id may not be enabled on this account."),
       },
       { status: typed.status },
     );

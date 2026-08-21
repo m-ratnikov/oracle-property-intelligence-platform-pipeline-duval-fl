@@ -187,7 +187,7 @@ test.describe("model settings", () => {
     await page.goto("/settings");
 
     // The registry drives the UI, so every provider the server supports is here.
-    for (const label of ["Google AI Studio (Gemini)", "Groq", "Cerebras", "Hugging Face", "Vercel AI Gateway", "Anthropic", "Amazon Bedrock"]) {
+    for (const label of ["OpenRouter", "Google AI Studio (Gemini)", "Groq", "Cerebras", "Hugging Face", "Vercel AI Gateway", "Anthropic", "Amazon Bedrock"]) {
       await expect(page.getByText(label).first()).toBeVisible();
     }
     await expect(page.getByText("nothing configured", { exact: true })).toBeVisible();
@@ -206,7 +206,7 @@ test.describe("model settings", () => {
 
     // The agent page reads the same store and names the model that will answer.
     await page.goto("/agent");
-    await expect(page.getByText("google:gemini-3.7-flash", { exact: true })).toBeVisible();
+    await expect(page.getByText("openrouter:z-ai/glm-5.2:free", { exact: true })).toBeVisible();
 
     await page.goto("/settings");
     await page.getByRole("button", { name: "clear stored key" }).click();
