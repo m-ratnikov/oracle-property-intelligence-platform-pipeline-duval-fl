@@ -33,6 +33,24 @@ jobs:
                   for m in list(re.finditer(kw,txt))[:2]:
                       print('  ',kw,'->',txt[max(0,m.start()-40):m.start()+140])
           PY
+      - name: JaxEPICS bundle API discovery
+        run: |
+          UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36"
+          mkdir -p out
+          curl -s -A "$UA" --max-time 30 "https://jaxepics.coj.net/" -o out/jaxepics_index.html -w "index %{http_code} %{size_download}B
+"
+          for js in $(grep -oE 'src="[^"]+\.js"' out/jaxepics_index.html | sed -E 's/src="//;s/"//' ); do
+            case "$js" in http*) u="$js";; /*) u="https://jaxepics.coj.net$js";; *) u="https://jaxepics.coj.net/$js";; esac
+            n=$(basename "$js"); curl -s -A "$UA" --max-time 60 "$u" -o "out/$n" -w "$n %{http_code} %{size_download}B
+"
+          done
+          echo "--- api literals ---"
+          cat out/*.js 2>/dev/null | grep -oE '(https?://[a-z0-9.-]*coj\.net[^"'"'"' ]{0,80}|/api/[A-Za-z0-9_/{}.-]{2,80}|api/[A-Za-z]+/[A-Za-z0-9_/{}.-]{2,60})' | sort | uniq -c | sort -rn | head -80
+          echo "--- candidate endpoints ---"
+          for u in "https://jaxepicsapi.coj.net/api/Permit/View/B-25-279425.000" "https://jaxepicsapi.coj.net/api/permit/B-25-279425.000" "https://jaxepicsapi.coj.net/api/Permit/B-25-279425.000" "https://jaxepicsapi.coj.net/api/Permit/GetPermit?permitNumber=B-25-279425.000" "https://jaxepicsapi.coj.net/api/Permits/B-25-279425.000" "https://jaxepicsapi.coj.net/api/Permit/Search?permitNumber=B-25-279425.000"; do
+            curl -s -A "$UA" --max-time 20 -o out/resp.json -w "%{http_code} %{size_download}B $u
+" "$u"; head -c 300 out/resp.json; echo
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: pa-detail-sample
