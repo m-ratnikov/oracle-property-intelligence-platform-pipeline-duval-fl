@@ -205,6 +205,13 @@ export async function POST(request: Request): Promise<Response> {
           // the reader went away mid turn; the abort signal ends the work
         }
       };
+      // A turn can sit silent for a minute while the model thinks, and an idle connection is what
+      // intermediaries drop first. Every observed POST was reported as net::ERR_ABORTED by the
+      // browser, and an abort that lands before the result line surfaces to the reader as "could
+      // not reach the agent endpoint" - most often on the first question of a session, which has
+      // the longest silence because DuckDB is opening at the same time. A byte every ten seconds
+      // keeps the connection provably alive; the client ignores these lines.
+      const heartbeat = setInterval(() => send({ type: "ping" }), 10_000);
       try {
         const response = await runAgent({
           messages,
@@ -219,6 +226,7 @@ export async function POST(request: Request): Promise<Response> {
         const failed = toErrorResponse(error, secrets, credential ? "user" : "server");
         send({ type: "result", response: await failed.json() });
       } finally {
+        clearInterval(heartbeat);
         controller.close();
       }
     },

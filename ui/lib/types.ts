@@ -170,7 +170,8 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function str(value: unknown): string | null {
   if (typeof value === "string") return value.length > 0 ? value : null;
-  if (typeof value === "number" || typeof value === "bigint") return String(value);
+  if (typeof value === "number" || typeof value === "bigint")
+    return String(value);
   return null;
 }
 
@@ -197,13 +198,18 @@ function numMap(value: unknown): Record<string, number> | null {
 
 function strList(value: unknown): string[] {
   if (Array.isArray(value)) {
-    return value.map((item) => str(item)).filter((item): item is string => item !== null);
+    return value
+      .map((item) => str(item))
+      .filter((item): item is string => item !== null);
   }
   const single = str(value);
   return single ? [single] : [];
 }
 
-function rest(value: Record<string, unknown>, known: Set<string>): Record<string, unknown> {
+function rest(
+  value: Record<string, unknown>,
+  known: Set<string>,
+): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
     if (!known.has(key)) out[key] = item;
@@ -290,12 +296,23 @@ function parseArtifacts(input: unknown): RunArtifact[] {
  * same name. Either is enough; both are checked so a run published by an older or newer
  * pipeline still classifies.
  */
-function runKind(trigger: string | null, tracks: string[], sources: RunSource[]): RunKind {
+function runKind(
+  trigger: string | null,
+  tracks: string[],
+  sources: RunSource[],
+): RunKind {
   if (trigger === CONSOLIDATION_TRACK) return "consolidation";
-  if (tracks.length > 0 && tracks.every((track) => track === CONSOLIDATION_TRACK)) {
+  if (
+    tracks.length > 0 &&
+    tracks.every((track) => track === CONSOLIDATION_TRACK)
+  ) {
     return "consolidation";
   }
-  if (tracks.length === 0 && sources.length > 0 && sources.every((s) => s.source === CONSOLIDATION_TRACK)) {
+  if (
+    tracks.length === 0 &&
+    sources.length > 0 &&
+    sources.every((s) => s.source === CONSOLIDATION_TRACK)
+  ) {
     return "consolidation";
   }
   return "ingestion";
@@ -317,7 +334,11 @@ export function parseRunHistory(input: unknown): RunHistory {
     const sources: RunSource[] = (Array.isArray(run.sources) ? run.sources : [])
       .filter(isRecord)
       .map((source) => ({
-        source: str(source.track) ?? str(source.source) ?? str(source.source_system) ?? "unknown",
+        source:
+          str(source.track) ??
+          str(source.source) ??
+          str(source.source_system) ??
+          "unknown",
         status: str(source.status),
         rows_fetched: num(source.rows_staged) ?? num(source.rows_fetched),
         inserted: num(source.inserted),
@@ -336,7 +357,8 @@ export function parseRunHistory(input: unknown): RunHistory {
             : addOrNull(num(source.inserted), num(source.updated)),
         target_table: str(source.target_table),
         table_total_after: num(source.table_total_after),
-        artifact_sha256: str(source.source_sha256) ?? str(source.artifact_sha256),
+        artifact_sha256:
+          str(source.source_sha256) ?? str(source.artifact_sha256),
         source_url: str(source.source_url),
         limitations: strList(source.limitations),
       }));
@@ -420,7 +442,8 @@ const KNOWN_COUNTY_KEYS = new Set([
 ]);
 
 export function parseCatalog(input: unknown): PublishedCatalog {
-  if (!isRecord(input)) return { schemaVersion: null, generatedAt: null, counties: [] };
+  if (!isRecord(input))
+    return { schemaVersion: null, generatedAt: null, counties: [] };
   const counties = (Array.isArray(input.counties) ? input.counties : [])
     .filter(isRecord)
     .map((county) => ({
@@ -443,19 +466,45 @@ export function parseCatalog(input: unknown): PublishedCatalog {
   };
 }
 
+/**
+ * A content-addressed object on the public gateway.
+ *
+ * Kept here rather than imported from lib/openData so this module stays free of
+ * a client-only dependency; the two agree on the shape, which is the one the
+ * pipeline publishes: no extension, because `/ipfs/<cid>.json` is a different
+ * path and answers 400.
+ */
+function ipfsObjectUrl(cid: string): string {
+  const gateway = (
+    process.env.NEXT_PUBLIC_IPFS_GATEWAY ?? "https://ipfs.filebase.io"
+  ).replace(/\/+$/, "");
+  return `${gateway}/ipfs/${cid}`;
+}
+
 export function parseOpenDataIndex(input: unknown): OpenDataIndex {
   if (!isRecord(input)) {
-    return { county: null, generatedAt: null, totalProperties: null, shards: [], properties: {} };
+    return {
+      county: null,
+      generatedAt: null,
+      totalProperties: null,
+      shards: [],
+      properties: {},
+    };
   }
   const shards = (Array.isArray(input.shards) ? input.shards : [])
     .map((shard): OpenDataShard | null => {
       if (typeof shard === "string") return { shard };
       if (isRecord(shard)) {
+        // The published index identifies a shard by CID rather than by
+        // filename, because the objects are content-addressed and there is no
+        // directory to name a file inside. A bucket-style publish names files.
+        // Accept both: the CID becomes a gateway URL, the name a path.
+        const cid = str(shard.shardCid) ?? str(shard.cid);
         const name = str(shard.shard) ?? str(shard.name) ?? str(shard.file);
-        if (!name) return null;
+        if (!name && !cid) return null;
         return {
-          shard: name,
-          url: str(shard.url) ?? undefined,
+          shard: name ?? `${cid}`,
+          url: str(shard.url) ?? (cid ? ipfsObjectUrl(cid) : undefined),
           count: num(shard.count) ?? undefined,
         };
       }
@@ -482,7 +531,9 @@ export function parseOpenDataIndex(input: unknown): OpenDataIndex {
 
 /** Latest run first. */
 export function sortRunsDesc(runs: PipelineRun[]): PipelineRun[] {
-  return [...runs].sort((a, b) => (b.started_at ?? "").localeCompare(a.started_at ?? ""));
+  return [...runs].sort((a, b) =>
+    (b.started_at ?? "").localeCompare(a.started_at ?? ""),
+  );
 }
 
 /**
@@ -499,7 +550,9 @@ export function latestIngestionRun(runs: PipelineRun[]): PipelineRun | null {
 }
 
 /** The newest consolidation pass, whose artifacts are the published open-data index. */
-export function latestConsolidationRun(runs: PipelineRun[]): PipelineRun | null {
+export function latestConsolidationRun(
+  runs: PipelineRun[],
+): PipelineRun | null {
   return sortRunsDesc(runs).find((run) => run.kind === "consolidation") ?? null;
 }
 
@@ -522,17 +575,24 @@ export function ingestionSourceNames(runs: PipelineRun[]): string[] {
  * run, so one standing constraint observed across fourteen runs read as fourteen problems.
  * A limitation is a property of a source, not an event.
  */
-export function distinctLimitations(runs: PipelineRun[]): { source: string; limitation: string }[] {
+export function distinctLimitations(
+  runs: PipelineRun[],
+): { source: string; limitation: string }[] {
   const seen = new Map<string, { source: string; limitation: string }>();
   for (const run of runs) {
     for (const source of run.sources) {
       for (const limitation of source.limitations) {
-        seen.set(`${source.source}\u0000${limitation}`, { source: source.source, limitation });
+        seen.set(`${source.source}\u0000${limitation}`, {
+          source: source.source,
+          limitation,
+        });
       }
     }
   }
   return [...seen.values()].sort(
-    (a, b) => a.source.localeCompare(b.source) || a.limitation.localeCompare(b.limitation),
+    (a, b) =>
+      a.source.localeCompare(b.source) ||
+      a.limitation.localeCompare(b.limitation),
   );
 }
 
@@ -565,7 +625,9 @@ export interface RunSummary {
 
 function sumOrNull(values: (number | null)[]): number | null {
   const present = values.filter((value): value is number => value !== null);
-  return present.length === 0 ? null : present.reduce((sum, value) => sum + value, 0);
+  return present.length === 0
+    ? null
+    : present.reduce((sum, value) => sum + value, 0);
 }
 
 /**
@@ -578,13 +640,18 @@ function sumOrNull(values: (number | null)[]): number | null {
  * which is the case most runs in the published history are in.
  */
 function runTableDelta(sources: RunSource[]): number | null {
-  const unknown = sources.some((s) => s.delta_vs_previous === null && s.table_total_after !== null);
+  const unknown = sources.some(
+    (s) => s.delta_vs_previous === null && s.table_total_after !== null,
+  );
   return unknown ? null : sumOrNull(sources.map((s) => s.delta_vs_previous));
 }
 
 export function summariseRun(run: PipelineRun): RunSummary {
   const started = parseTimestamp(run.started_at);
-  const rowsInserted = run.sources.reduce((sum, s) => sum + (s.inserted ?? 0), 0);
+  const rowsInserted = run.sources.reduce(
+    (sum, s) => sum + (s.inserted ?? 0),
+    0,
+  );
   const rowsUpdated = run.sources.reduce((sum, s) => sum + (s.updated ?? 0), 0);
   const statusOf = (source: RunSource) => source.status ?? "completed";
   return {
@@ -594,16 +661,23 @@ export function summariseRun(run: PipelineRun): RunSummary {
     startedMs: started === null ? null : started.getTime(),
     durationMs: durationMs(run.started_at, run.finished_at),
     trackCount: run.tracks.length > 0 ? run.tracks.length : run.sources.length,
-    sourcesCompleted: run.sources.filter((s) => statusOf(s) === "completed").length,
+    sourcesCompleted: run.sources.filter((s) => statusOf(s) === "completed")
+      .length,
     sourcesSkipped: run.sources.filter((s) => statusOf(s) === "skipped").length,
     sourcesFailed: run.sources.filter((s) => statusOf(s) === "failed").length,
-    rowsVerified: run.sources.reduce((sum, s) => sum + (s.rows_fetched ?? 0), 0),
+    rowsVerified: run.sources.reduce(
+      (sum, s) => sum + (s.rows_fetched ?? 0),
+      0,
+    ),
     rowsInserted,
     rowsUpdated,
     rowsWritten: rowsInserted + rowsUpdated,
     tableDelta: runTableDelta(run.sources),
     artifactCount: run.artifacts.length,
-    limitationCount: run.sources.reduce((sum, s) => sum + s.limitations.length, 0),
+    limitationCount: run.sources.reduce(
+      (sum, s) => sum + s.limitations.length,
+      0,
+    ),
   };
 }
 

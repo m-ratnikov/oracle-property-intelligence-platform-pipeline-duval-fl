@@ -19,6 +19,7 @@ import {
   propertyJsonUrl,
   propertyJsonUrls,
 } from "@/lib/openData";
+import { parseOpenDataIndex } from "@/lib/types";
 
 const CID = "QmYLf9jRCnPwEE23EYJi2B9YjXN97LyLMPzYuP9m2EgCSS";
 
@@ -86,5 +87,44 @@ describe("openDataBaseUrl", () => {
 
   it("is null when nothing is configured", () => {
     expect(openDataBaseUrl(null)).toBeNull();
+  });
+});
+
+describe("parseOpenDataIndex", () => {
+  it("resolves a shard identified by CID to a gateway URL", () => {
+    // The shape the pipeline actually publishes. Before this, the walk built
+    // `<base>/shards/undefined` because it only looked for a filename.
+    const index = parseOpenDataIndex({
+      county: "duval",
+      propertyCount: 404023,
+      shards: [
+        {
+          shardIndex: 0,
+          fromParcel: "0000010005R",
+          toParcel: "0024012310R",
+          count: 10000,
+          shardCid: "QmeQ2ZJqsa2M7F8br6pb6yGL1CEkeLef6xVbymcPB7JcJS",
+        },
+      ],
+    });
+
+    expect(index.shards).toHaveLength(1);
+    expect(index.shards[0]?.url).toBe(
+      "https://ipfs.filebase.io/ipfs/QmeQ2ZJqsa2M7F8br6pb6yGL1CEkeLef6xVbymcPB7JcJS",
+    );
+  });
+
+  it("still accepts a shard identified by filename", () => {
+    const index = parseOpenDataIndex({
+      shards: [{ shard: "shard-0000.json", count: 10 }],
+    });
+    expect(index.shards[0]?.shard).toBe("shard-0000.json");
+    expect(index.shards[0]?.url).toBeUndefined();
+  });
+
+  it("drops a shard that identifies itself neither way", () => {
+    expect(parseOpenDataIndex({ shards: [{ count: 10 }] }).shards).toHaveLength(
+      0,
+    );
   });
 });

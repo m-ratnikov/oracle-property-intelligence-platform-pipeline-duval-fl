@@ -155,6 +155,14 @@ function EvidenceTable({ rows }: { rows: AgentEvidenceRow[] }) {
   );
 }
 
+/** The stream ended before the answer line arrived. Recoverable: ask again without streaming. */
+class StreamDropped extends Error {
+  constructor() {
+    super("The connection closed before the answer arrived.");
+    this.name = "StreamDropped";
+  }
+}
+
 interface ProgressEvent {
   phase: "started" | "finished";
   label: string;
@@ -193,12 +201,22 @@ async function readAgentStream(
     } catch {
       return; // a truncated line is not worth failing the whole answer over
     }
+    // "ping" is the keepalive that stops an idle stream being dropped mid turn; it carries nothing.
+    if (parsed.type === "ping") return;
     if (parsed.type === "progress") onProgress(parsed);
     else if (parsed.type === "result" && parsed.response) result = parsed.response;
   };
 
   for (;;) {
-    const { done, value } = await reader.read();
+    let chunk;
+    try {
+      chunk = await reader.read();
+    } catch {
+      // The connection died mid turn. Distinguished from every other failure so the caller can
+      // retry without streaming rather than telling the reader the endpoint is unreachable.
+      throw new StreamDropped();
+    }
+    const { done, value } = chunk;
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split("\n");
@@ -207,7 +225,7 @@ async function readAgentStream(
   }
   handle(buffer);
 
-  if (!result) throw new Error("The server closed the connection before sending an answer.");
+  if (!result) throw new StreamDropped();
   return result;
 }
 
@@ -299,8 +317,10 @@ export default function AgentPage() {
     setInput("");
     setPending(true);
 
-    try {
-      const response = await fetch("/api/agent", {
+    // One request builder, used twice: once asking for the progress stream, and again as plain
+    // JSON if that stream is cut off before the answer arrives.
+    const ask = (accept: string) =>
+      fetch("/api/agent", {
         method: "POST",
         // The credential rides on this one request and is not persisted server
         // side. With nothing stored, credentialHeaders is empty and the server
@@ -309,8 +329,7 @@ export default function AgentPage() {
         // hand-written header cannot point this deployment's key at a model it does not offer.
         headers: {
           "content-type": "application/json",
-          // opt in to the progress stream; the last line is the same payload the JSON path returns
-          accept: "application/x-ndjson",
+          accept,
           ...(model ? { "x-llm-model": model } : {}),
         },
         body: JSON.stringify({
@@ -320,7 +339,7 @@ export default function AgentPage() {
         }),
       });
 
-      const payload = await readAgentStream(response, (event) => {
+    const onProgressEvent = (event: ProgressEvent) => {
         setProgress((current) => {
           if (event.phase === "started") {
             return [...current, { label: event.label, done: false, detail: null }];
@@ -343,9 +362,25 @@ export default function AgentPage() {
             i === at ? { label: event.label, done: true, detail: detail || null } : entry,
           );
         });
-      });
-      const notImplemented = payload.status === "not_implemented" || response.status === 501;
-      const failed = payload.status === "error" || (!response.ok && !notImplemented);
+    };
+
+    try {
+      let payload: AgentResponse;
+      try {
+        payload = await readAgentStream(await ask("application/x-ndjson"), onProgressEvent);
+      } catch (streamError: unknown) {
+        // The stream was cut before the answer. That is a transport failure, not a failed answer,
+        // and telling the reader the endpoint is unreachable when it is not would be wrong. Ask once
+        // more without streaming, which is a single response with nothing to keep alive.
+        if (!(streamError instanceof StreamDropped)) throw streamError;
+        setProgress((current) => [
+          ...current.map((entry) => ({ ...entry, done: true })),
+          { label: "Connection dropped, asking again without the live log", done: false, detail: null },
+        ]);
+        payload = (await (await ask("application/json")).json()) as AgentResponse;
+      }
+      const notImplemented = payload.status === "not_implemented";
+      const failed = payload.status === "error";
 
       setToolCalls(payload.toolCalls ?? payload.tool_calls ?? []);
       setEvidence(payload.evidence ?? []);
