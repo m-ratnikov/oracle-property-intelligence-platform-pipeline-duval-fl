@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { all, openDb } from "../src/db.js";
-import { contractorSelectSql, dbprReadCsv, readCsvHeader } from "../src/tracks/contractors.js";
+import { contractorSelectSql, dbprReadCsv } from "../src/tracks/contractors.js";
 
 /**
  * The DBPR extracts contain both a newline inside a quoted field and ragged rows. DuckDB's parallel
@@ -21,8 +21,8 @@ import { contractorSelectSql, dbprReadCsv, readCsvHeader } from "../src/tracks/c
 const dir = mkdtempSync(join(tmpdir(), "duval-dbpr-qnl-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-const HEADER =
-  "Board Number,Occupation Code,Licensee Name,DBA Name,Class,Address,City,State,Zip,County Code,License Number,Status,Primary Status,Original Licensure Date,Effective Date,Expiration Date";
+/** The real layout: headerless, twelve quoted fields, one row per course completion. */
+const row = (...f: string[]) => f.map((v) => `"${v}"`).join(",");
 
 describe("DBPR extract with newlines inside quoted fields", () => {
   it("parses quoted newlines and ragged rows without losing a row", async () => {
@@ -30,22 +30,20 @@ describe("DBPR extract with newlines inside quoted fields", () => {
     writeFileSync(
       csv,
       [
-        HEADER,
-        "06,CCC,PLAIN ROOFING CO,,CERT,1 MAIN ST,JACKSONVILLE,FL,32205,16,CCC1000001,Current,Active,01/01/2020,09/01/2024,08/31/2026",
+        row("CCC", "Cert Roofing", "CCC1000001", "PLAIN ROOFING CO", "1 MAIN ST", "", "JACKSONVILLE, FL  32205", "08/31/2026", "1", "LIEN LAW", "1", "01/01/2020"),
         // a newline inside a quoted address: legal CSV, and fatal to the parallel scanner
-        '06,CCC,"MULTILINE ROOFING",,CERT,"2 OCEAN DR\nSUITE 400",JACKSONVILLE,FL,32250,16,CCC1000002,Current,Active,01/01/2020,09/01/2024,08/31/2026',
+        row("CCC", "Cert Roofing", "CCC1000002", "MULTILINE ROOFING", "2 OCEAN DR\nSUITE 400", "", "JACKSONVILLE, FL  32250", "08/31/2026", "1", "LIEN LAW", "1", "01/01/2020"),
         // a ragged row, which is what null_padding is there to tolerate
-        "06,RC,SHORT ROW ROOFING,,REG,3 ELM ST,JACKSONVILLE,FL,32205,16,RC1000003,Current",
-        "06,CCC,LAST ROOFING CO,,CERT,4 OAK ST,JACKSONVILLE,FL,32205,16,CCC1000004,Current,Active,01/01/2020,09/01/2024,08/31/2026",
+        row("RC", "Reg Roofing", "RC1000003", "SHORT ROW ROOFING", "3 ELM ST", "", "JACKSONVILLE, FL  32205"),
+        row("CCC", "Cert Roofing", "CCC1000004", "LAST ROOFING CO", "4 OAK ST", "", "JACKSONVILLE, FL  32205", "08/31/2026", "1", "LIEN LAW", "1", "01/01/2020"),
       ].join("\n"),
     );
 
     const db = await openDb(":memory:");
     await db.conn.run("CREATE SCHEMA staging");
-    const cols = readCsvHeader(csv);
 
     // the reader itself must not throw on this file
-    await db.conn.run(`CREATE TABLE staging.c AS ${contractorSelectSql(cols, csv, "cilb_certified")}`);
+    await db.conn.run(`CREATE TABLE staging.c AS ${contractorSelectSql(csv, "cilb_certified")}`);
     const rows = await all<Record<string, unknown>>(db.conn, "SELECT * FROM staging.c ORDER BY license_no");
 
     // all four rows survive: the quoted newline is one row, not two, and the ragged row is padded
@@ -55,11 +53,12 @@ describe("DBPR extract with newlines inside quoted fields", () => {
     expect(String(rows[1]?.address)).toContain("SUITE 400");
     // the ragged row kept its data and was padded, not dropped
     expect(rows[3]?.name).toBe("SHORT ROW ROOFING");
+    expect(rows[3]?.expiration_date).toBeNull();
     await db.close();
   });
 
   it("pins parallel = false in the generated reader", () => {
     // an accidental removal reintroduces a failure that only appears on the full 754 MB extract
-    expect(dbprReadCsv(join(dir, "x.csv"), ["a"])).toContain("parallel = false");
+    expect(dbprReadCsv(join(dir, "x.csv"))).toContain("parallel = false");
   });
 });

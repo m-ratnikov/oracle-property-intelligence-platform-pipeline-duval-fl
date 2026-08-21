@@ -11,3 +11,10 @@ playwright-report/
 # generated from node_modules by scripts/copy-duckdb.mjs
 public/duckdb/
 public/real/
+
+# added by the Vercel CLI on `vercel link`
+.vercel
+# local env files carry real keys and the Vercel OIDC token; .env.example is documentation and stays
+.env
+.env.local
+.env.*.local
