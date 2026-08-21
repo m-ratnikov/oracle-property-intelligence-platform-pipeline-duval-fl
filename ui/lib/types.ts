@@ -23,6 +23,11 @@ export interface RunSource {
    * track inserting anything.
    */
   delta_vs_previous: number | null;
+  /**
+   * The table this track merges into, as the run record names it (`sales` -> `sales_history`).
+   * Used to guard the join to the coverage snapshot's per table writer list; see lib/writers.ts.
+   */
+  target_table: string | null;
   /** Rows in the target table after this run's merge, which is the real table total. */
   table_total_after: number | null;
   artifact_sha256: string | null;
@@ -87,6 +92,15 @@ export interface RunHistory {
 export interface CoverageDataset {
   county: string | null;
   source: string;
+  /**
+   * The pipeline track that owns this dataset. Not always the same string as `source`: the
+   * snapshot publishes `{ source: "hydrography", track: "water" }`, and a run record names its
+   * sources by TRACK. Joining the two artifacts on `source` alone silently misses four of the
+   * thirteen datasets.
+   */
+  track: string | null;
+  /** The target table this dataset lands in. The published snapshot names it `table`. */
+  table: string | null;
   ingested_count: number | null;
   expected_count: number | null;
   first_loaded_at: string | null;
@@ -313,6 +327,7 @@ export function parseRunHistory(input: unknown): RunHistory {
           num(source.delta_vs_prev_total) ??
           num(source.delta_vs_previous) ??
           addOrNull(num(source.inserted), num(source.updated)),
+        target_table: str(source.target_table),
         table_total_after: num(source.table_total_after),
         artifact_sha256: str(source.source_sha256) ?? str(source.artifact_sha256),
         source_url: str(source.source_url),
@@ -344,6 +359,8 @@ export function parseRunHistory(input: unknown): RunHistory {
 const KNOWN_DATASET_KEYS = new Set([
   "county",
   "source",
+  "track",
+  "table",
   "ingested_count",
   "expected_count",
   "first_loaded_at",
@@ -362,6 +379,8 @@ export function parseCoverage(input: unknown): CoverageSnapshot {
     .map((dataset) => ({
       county: str(dataset.county),
       source: str(dataset.source) ?? "unknown",
+      track: str(dataset.track),
+      table: str(dataset.table) ?? str(dataset.target_table),
       ingested_count: num(dataset.ingested_count),
       expected_count: num(dataset.expected_count),
       first_loaded_at: str(dataset.first_loaded_at),

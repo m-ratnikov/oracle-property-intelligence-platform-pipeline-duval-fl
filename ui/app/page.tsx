@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo } from "react";
 import { config, ZERO_COST_LINE } from "@/lib/config";
 import { publicationLookup, parseArtifactsIndex } from "@/lib/artifacts";
+import { tableDeltaNoteLookup } from "@/lib/writers";
 import { useEngine, useJson } from "@/lib/hooks";
 import {
   latestConsolidationRun,
@@ -19,11 +20,11 @@ import {
   formatInt,
   formatTimestamp,
   relativeTime,
-  signedDelta,
 } from "@/lib/format";
 import { PageHeader, Section, Stat, Callout, Spinner, ErrorBox } from "@/components/ui";
 import { EngineStatus } from "@/components/EngineStatus";
 import { ArtifactCard } from "@/components/ArtifactCard";
+import { TableDelta } from "@/components/TableDelta";
 import { SampleBadge } from "@/components/SampleBanner";
 
 export default function OverviewPage() {
@@ -46,6 +47,12 @@ export default function OverviewPage() {
     () => publicationLookup(artifactsIndex.data, runs),
     [artifactsIndex.data, runs],
   );
+  /*
+   * Built once from the coverage snapshot this page already fetches, not once per row. It answers
+   * "who moved the table" for a source whose own inserts and updates do not account for the
+   * delta beside them.
+   */
+  const deltaNoteFor = useMemo(() => tableDeltaNoteLookup(coverage.data), [coverage.data]);
 
   /*
    * "The latest run" on this page means the latest run that actually ingested sources.
@@ -192,13 +199,7 @@ export default function OverviewPage() {
                       <td className="num">{formatInt(source.updated)}</td>
                       <td className="num">{formatInt(source.unchanged)}</td>
                       <td className="num">
-                        <span
-                          className={
-                            (source.delta_vs_previous ?? 0) > 0 ? "text-good" : "text-muted"
-                          }
-                        >
-                          {signedDelta(source.delta_vs_previous)}
-                        </span>
+                        <TableDelta source={source} note={deltaNoteFor(source)} />
                       </td>
                       <td style={{ whiteSpace: "normal", maxWidth: 420 }}>
                         {source.limitations.length === 0 ? (

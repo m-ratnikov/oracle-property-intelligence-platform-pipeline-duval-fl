@@ -2,11 +2,13 @@
 
 import { useMemo, useState } from "react";
 import { config } from "@/lib/config";
+import { tableDeltaNoteLookup } from "@/lib/writers";
 import { publicationLookup, parseArtifactsIndex, type ArtifactPublication } from "@/lib/artifacts";
 import { useJson } from "@/lib/hooks";
 import {
   distinctLimitations,
   ingestionSourceNames,
+  parseCoverage,
   parseRunHistory,
   summariseRuns,
 } from "@/lib/types";
@@ -23,6 +25,7 @@ import { PageHeader, Section, Callout, Spinner, ErrorBox, Stat, IdWithCopy } fro
 import { RunCadence, VerifiedAgainstWritten } from "@/components/RunCharts";
 import { SampleBadge } from "@/components/SampleBanner";
 import { ArtifactCard } from "@/components/ArtifactCard";
+import { TableDelta } from "@/components/TableDelta";
 
 function StatusBadge({ status }: { status: string | null }) {
   if (!status) return <span className="badge badge-neutral">unknown</span>;
@@ -51,9 +54,11 @@ function KindBadge({ kind }: { kind: RunSummary["kind"] }) {
 function RunDetail({
   run,
   publicationOf,
+  deltaNoteFor,
 }: {
   run: PipelineRun;
   publicationOf: (artifact: PipelineRun["artifacts"][number], run: PipelineRun) => ArtifactPublication;
+  deltaNoteFor: (source: PipelineRun["sources"][number]) => string | null;
 }) {
   const limitations = run.sources.flatMap((source) =>
     source.limitations.map((limitation) => ({ source: source.source, limitation })),
@@ -95,9 +100,7 @@ function RunDetail({
                 <td className="num">{formatInt(source.unchanged)}</td>
                 <td className="num">{formatInt(source.table_total_after)}</td>
                 <td className="num">
-                  <span className={(source.delta_vs_previous ?? 0) > 0 ? "text-good" : "text-muted"}>
-                    {signedDelta(source.delta_vs_previous)}
-                  </span>
+                  <TableDelta source={source} note={deltaNoteFor(source)} />
                 </td>
                 <td>
                   <IdWithCopy value={source.artifact_sha256} head={10} tail={6} />
@@ -166,11 +169,13 @@ function RunRow({
   open,
   onToggle,
   publicationOf,
+  deltaNoteFor,
 }: {
   summary: RunSummary;
   open: boolean;
   onToggle: () => void;
   publicationOf: (artifact: PipelineRun["artifacts"][number], run: PipelineRun) => ArtifactPublication;
+  deltaNoteFor: (source: PipelineRun["sources"][number]) => string | null;
 }) {
   const run = summary.run;
   const sourceCounts = [
@@ -241,7 +246,7 @@ function RunRow({
       {open ? (
         <tr>
           <td colSpan={12} style={{ padding: 0 }}>
-            <RunDetail run={run} publicationOf={publicationOf} />
+            <RunDetail run={run} publicationOf={publicationOf} deltaNoteFor={deltaNoteFor} />
           </td>
         </tr>
       ) : null}
@@ -256,6 +261,11 @@ export default function RunsPage() {
    * carry CIDs only; the gateway URL and the IPNS name come from this published index.
    */
   const artifactsIndex = useJson(config.artifactsIndexUrl, parseArtifactsIndex);
+  /*
+   * One coverage fetch for the page, shared by every source row in every expanded run. It is what
+   * turns "table delta +1,782 with nothing inserted" into a row that says who moved the table.
+   */
+  const coverage = useJson(config.coverageUrl, parseCoverage);
   const [openRun, setOpenRun] = useState<string | null>(null);
 
   const runs = useMemo(() => history.data?.runs ?? [], [history.data]);
@@ -264,6 +274,7 @@ export default function RunsPage() {
     () => publicationLookup(artifactsIndex.data, runs),
     [artifactsIndex.data, runs],
   );
+  const deltaNoteFor = useMemo(() => tableDeltaNoteLookup(coverage.data), [coverage.data]);
   const summaries = useMemo(() => summariseRuns(runs), [runs]);
   const ingestion = useMemo(() => summaries.filter((s) => s.kind === "ingestion"), [summaries]);
   const consolidation = useMemo(
@@ -378,6 +389,7 @@ export default function RunsPage() {
                         setOpenRun(openRun === summary.run_id ? null : summary.run_id)
                       }
                       publicationOf={publicationOf}
+                      deltaNoteFor={deltaNoteFor}
                     />
                   ))}
                 </tbody>
