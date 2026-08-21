@@ -331,3 +331,30 @@ function loggerCalls(source: string): string[] {
   }
   return out;
 }
+
+describe("a 429 says whose limit was hit", () => {
+  // Conflating the two tells the caller something false. Our own per-address cap rolls over on its
+  // own; a provider quota does not, and the visitor can route around it with their own key.
+  it("marks a provider 429 as provider scope", () => {
+    const err = classifyProviderError({ statusCode: 429 }, "slow down", "user");
+    expect(err).toBeInstanceOf(AgentRateLimitError);
+    expect((err as AgentRateLimitError).scope).toBe("provider");
+    expect((err as AgentRateLimitError).perDay).toBe(false);
+  });
+
+  it("recognises a per-day quota and does not promise it reopens in seconds", () => {
+    // the exact text OpenRouter returned when the deployment's free quota ran out
+    const err = classifyProviderError(
+      { statusCode: 429 },
+      "Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day",
+      "server",
+    ) as AgentRateLimitError;
+    expect(err.scope).toBe("provider");
+    expect(err.perDay).toBe(true);
+    expect(err.retryAfterSeconds).toBeGreaterThan(60);
+  });
+
+  it("defaults to local scope, which is what this route's own limiter raises", () => {
+    expect(new AgentRateLimitError("capped", 30).scope).toBe("local");
+  });
+});

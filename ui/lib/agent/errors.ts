@@ -43,13 +43,23 @@ export class AgentCredentialError extends Error {
   }
 }
 
-/** The per IP budget for this public route is spent. */
+/**
+ * A 429. `scope` says WHOSE limit was hit, because the two need different advice and conflating
+ * them tells the caller something false: "local" is this route's per address budget, which rolls
+ * over on its own; "provider" is the model provider refusing, which no amount of waiting here
+ * fixes and which the visitor can route around with their own key.
+ */
+export type RateLimitScope = "local" | "provider";
+
 export class AgentRateLimitError extends Error {
   readonly status = 429 as const;
   constructor(
     message: string,
     /** Seconds until the window rolls over, for the Retry-After header. */
     readonly retryAfterSeconds: number,
+    readonly scope: RateLimitScope = "local",
+    /** True when the provider named a per-day quota, which will not roll over in seconds. */
+    readonly perDay: boolean = false,
   ) {
     super(message);
     this.name = "AgentRateLimitError";
@@ -133,7 +143,10 @@ export function classifyProviderError(error: unknown, safeText: string, source: 
   // text is checked too. A shared pool 429 from OpenRouter arrives as a generic
   // "Provider returned error" with the real reason in the response body.
   if (status === 429 || /rate[\s-]?limit|too many requests|quota exceeded|\b429\b/i.test(safeText)) {
-    return new AgentRateLimitError(safeText, 30);
+    // A daily quota does not reopen in thirty seconds; saying it does sends the caller back to
+    // retry all day. OpenRouter phrases it "free-models-per-day"; others say "per day" or "daily".
+    const perDay = /per[\s-]?day|daily/i.test(safeText);
+    return new AgentRateLimitError(safeText, perDay ? 3600 : 30, "provider", perDay);
   }
   return new AgentProviderError(safeText);
 }

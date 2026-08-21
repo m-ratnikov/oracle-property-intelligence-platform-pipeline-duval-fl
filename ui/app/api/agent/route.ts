@@ -83,8 +83,12 @@ function toErrorResponse(
         ? credentialSource === "server"
           ? "The provider rejected this deployment's own key, so there is nothing to fix on your side. Add your own key on the settings page to keep going, or let the operator know the server credential needs attention."
           : "The provider rejected that credential. Check the key on the settings page, confirm it belongs to the provider you selected, and test it there before asking again."
-        : error.name === "AgentRateLimitError"
-          ? "This is a public endpoint, so it is capped per address. Wait for the window to roll over, or supply your own key to keep your questions independent of everyone else's."
+        : error instanceof AgentRateLimitError
+          ? error.scope === "provider"
+            ? error.perDay
+              ? "This deployment's model provider has hit its quota for the day, so waiting will not clear it. Add your own key on the settings page to keep going; the operator needs to raise the provider's limit."
+              : "The model provider is throttling this deployment's key, not you. Try again shortly, or add your own key on the settings page to be independent of it."
+            : "This is a public endpoint, so it is capped per address. Wait for the window to roll over, or supply your own key to keep your questions independent of everyone else's."
           : error.name === "AgentBadRequestError"
             ? "Fix the request headers and try again. GET /api/agent lists every provider and model this build supports."
             : "The model provider failed the call. Nothing was fabricated. Retrying, or picking a different model on the settings page, is usually enough.");
