@@ -1,0 +1,32 @@
+import type { NextConfig } from "next";
+
+/**
+ * DuckDB-WASM notes (see ui/README.md "Constraints hit"):
+ * - We ship the `eh` (exception handling, single threaded) bundle, NOT the `coi`
+ *   bundle, so the app does NOT need COOP/COEP cross origin isolation headers.
+ *   Cross origin isolation would break the OpenStreetMap tile thumbnails and the
+ *   IPFS gateway range reads unless every remote host sent CORP headers.
+ * - The wasm + worker files are copied out of node_modules into `public/duckdb`
+ *   by `scripts/copy-duckdb.mjs` (runs on predev / prebuild) so the runtime is
+ *   self hosted and does not depend on a CDN.
+ */
+const nextConfig: NextConfig = {
+  reactStrictMode: true,
+  // @duckdb/duckdb-wasm is browser only. Nothing should try to bundle it on the
+  // server, but keeping it external stops the Next server compiler from tracing
+  // the .wasm assets into the serverless output.
+  serverExternalPackages: ["@duckdb/duckdb-wasm"],
+  async headers() {
+    return [
+      {
+        // The worker + wasm are immutable per release; let the browser keep them.
+        source: "/duckdb/:path*",
+        headers: [
+          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+        ],
+      },
+    ];
+  },
+};
+
+export default nextConfig;

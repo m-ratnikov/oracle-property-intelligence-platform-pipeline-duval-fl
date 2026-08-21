@@ -1,0 +1,12 @@
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+.env
+.env.local
+.vercel/
+test-results/
+playwright-report/
+# generated from node_modules by scripts/copy-duckdb.mjs
+public/duckdb/
