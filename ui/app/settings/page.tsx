@@ -14,7 +14,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader, Callout, Section } from "@/components/ui";
-import { PROVIDERS, findProvider, type AgentProvider } from "@/lib/agent/providers";
+import { PROVIDERS, defaultModelFor, findProvider, type AgentProvider } from "@/lib/agent/providers";
 import { KEY_HEADER, MODEL_HEADER, PROVIDER_HEADER } from "@/lib/agent/credentials";
 import {
   clearSettings,
@@ -42,8 +42,11 @@ interface TestOutcome {
 export default function SettingsPage() {
   const { settings, loaded, refresh } = useAgentSettings();
 
-  const [provider, setProvider] = useState<AgentProvider>("google");
-  const [modelId, setModelId] = useState<string>("gemini-3.7-flash");
+  // Derived from the registry rather than hard coded, so the form opens on
+  // whatever the registry lists first (the recommended free default) and cannot
+  // drift out of step with it.
+  const [provider, setProvider] = useState<AgentProvider>(PROVIDERS[0].id);
+  const [modelId, setModelId] = useState<string>(defaultModelFor(PROVIDERS[0].id));
   const [apiKey, setApiKey] = useState("");
   const [reveal, setReveal] = useState(false);
   const [testing, setTesting] = useState(false);
