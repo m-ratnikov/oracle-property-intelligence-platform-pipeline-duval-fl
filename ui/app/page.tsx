@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo } from "react";
 import { config, ZERO_COST_LINE } from "@/lib/config";
+import { publicationLookup, parseArtifactsIndex } from "@/lib/artifacts";
 import { useEngine, useJson } from "@/lib/hooks";
 import {
   latestConsolidationRun,
@@ -30,6 +31,15 @@ export default function OverviewPage() {
   const history = useJson(config.runHistoryUrl, parseRunHistory);
   const coverage = useJson(config.coverageUrl, parseCoverage);
   const catalog = useJson(config.catalogUrl, parseCatalog);
+  /*
+   * One fetch for the whole page. Every artifact card on it, in both sections, resolves its
+   * gateway URL and IPNS name out of this single index rather than fetching anything itself.
+   */
+  const artifactsIndex = useJson(config.artifactsIndexUrl, parseArtifactsIndex);
+  const publicationOf = useMemo(
+    () => publicationLookup(artifactsIndex.data),
+    [artifactsIndex.data],
+  );
 
   const runs = useMemo(() => sortRunsDesc(history.data?.runs ?? []), [history.data]);
 
@@ -212,13 +222,17 @@ export default function OverviewPage() {
 
         <Section
           title="Published Elephant IPFS artifacts"
-          description="Every artifact the latest ingestion run published, with its content identifier, its stable IPNS pointer and the gateway URL an MCP client or DuckDB opens directly."
+          description="Every artifact the latest ingestion run published, with its content identifier, its stable IPNS pointer and the gateway URL an MCP client or DuckDB opens directly. The URLs and IPNS names are read from the published artifacts index, not assembled here."
           right={<SampleBadge />}
         >
           {latest && latest.artifacts.length > 0 ? (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {latest.artifacts.map((artifact) => (
-                <ArtifactCard key={`${artifact.name}-${artifact.cid}`} artifact={artifact} />
+                <ArtifactCard
+                  key={`${artifact.name}-${artifact.cid}`}
+                  artifact={artifact}
+                  publication={publicationOf(artifact)}
+                />
               ))}
             </div>
           ) : history.loading ? (
@@ -263,6 +277,7 @@ export default function OverviewPage() {
                   <ArtifactCard
                     key={`${consolidation.run_id}-${artifact.name}`}
                     artifact={artifact}
+                    publication={publicationOf(artifact)}
                   />
                 ))}
               </div>

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { config } from "@/lib/config";
+import { publicationLookup, parseArtifactsIndex, type ArtifactPublication } from "@/lib/artifacts";
 import { useJson } from "@/lib/hooks";
 import {
   distinctLimitations,
@@ -47,7 +48,13 @@ function KindBadge({ kind }: { kind: RunSummary["kind"] }) {
 }
 
 /** The per source detail that used to be an always open card, now folded into its row. */
-function RunDetail({ run }: { run: PipelineRun }) {
+function RunDetail({
+  run,
+  publicationOf,
+}: {
+  run: PipelineRun;
+  publicationOf: (artifact: PipelineRun["artifacts"][number]) => ArtifactPublication;
+}) {
   const limitations = run.sources.flatMap((source) =>
     source.limitations.map((limitation) => ({ source: source.source, limitation })),
   );
@@ -132,7 +139,11 @@ function RunDetail({ run }: { run: PipelineRun }) {
           </div>
           <div className="mt-2 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {run.artifacts.map((artifact) => (
-              <ArtifactCard key={`${run.run_id}-${artifact.name}`} artifact={artifact} />
+              <ArtifactCard
+                key={`${run.run_id}-${artifact.name}`}
+                artifact={artifact}
+                publication={publicationOf(artifact)}
+              />
             ))}
           </div>
         </div>
@@ -154,10 +165,12 @@ function RunRow({
   summary,
   open,
   onToggle,
+  publicationOf,
 }: {
   summary: RunSummary;
   open: boolean;
   onToggle: () => void;
+  publicationOf: (artifact: PipelineRun["artifacts"][number]) => ArtifactPublication;
 }) {
   const run = summary.run;
   const sourceCounts = [
@@ -228,7 +241,7 @@ function RunRow({
       {open ? (
         <tr>
           <td colSpan={12} style={{ padding: 0 }}>
-            <RunDetail run={run} />
+            <RunDetail run={run} publicationOf={publicationOf} />
           </td>
         </tr>
       ) : null}
@@ -238,7 +251,17 @@ function RunRow({
 
 export default function RunsPage() {
   const history = useJson(config.runHistoryUrl, parseRunHistory);
+  /*
+   * One fetch for the page, shared by every artifact card in every expanded run. Run records
+   * carry CIDs only; the gateway URL and the IPNS name come from this published index.
+   */
+  const artifactsIndex = useJson(config.artifactsIndexUrl, parseArtifactsIndex);
   const [openRun, setOpenRun] = useState<string | null>(null);
+
+  const publicationOf = useMemo(
+    () => publicationLookup(artifactsIndex.data),
+    [artifactsIndex.data],
+  );
 
   const runs = useMemo(() => history.data?.runs ?? [], [history.data]);
   const summaries = useMemo(() => summariseRuns(runs), [runs]);
@@ -354,6 +377,7 @@ export default function RunsPage() {
                       onToggle={() =>
                         setOpenRun(openRun === summary.run_id ? null : summary.run_id)
                       }
+                      publicationOf={publicationOf}
                     />
                   ))}
                 </tbody>

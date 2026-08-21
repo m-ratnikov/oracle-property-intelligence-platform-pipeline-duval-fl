@@ -32,6 +32,18 @@ export interface RunSource {
 
 export interface RunArtifact {
   name: string;
+  /**
+   * The published object name, exactly as the publish step names it: `query-table.parquet`,
+   * `dataset-coverage.json`, `tables/parcels.parquet`. A run record carries it as `path`.
+   *
+   * This is the only field a run record and the published artifacts index have in common, so it
+   * is the join key between the two. `name` above cannot be: for the object form it is the key
+   * the run record filed the artifact under (`queryTable`, `tables.parcels`), which appears
+   * nowhere in the index. Null when the run recorded an artifact with no path, which is how the
+   * consolidation pass records its open data index; such an artifact simply has no join key and
+   * is never reported as unpublished on that basis.
+   */
+  path: string | null;
   cid: string | null;
   ipns_label: string | null;
   ipns_name: string | null;
@@ -135,7 +147,7 @@ export interface OpenDataIndex {
 
 /* ---------------------------------------------------------------- helpers */
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -212,6 +224,7 @@ function artifactFrom(name: string, value: unknown): RunArtifact | null {
   if (cid === null && gateway === null && ipnsName === null) return null;
   return {
     name,
+    path: str(value.path),
     cid,
     ipns_label: str(value.ipns_label) ?? str(value.ipnsLabel),
     ipns_name: ipnsName,
@@ -223,8 +236,11 @@ function artifactFrom(name: string, value: unknown): RunArtifact | null {
 
 function parseArtifacts(input: unknown): RunArtifact[] {
   if (Array.isArray(input)) {
+    // In the array form the entry is already named by its published object name, so that name
+    // doubles as the join key when the publisher did not also record an explicit path.
     return input.filter(isRecord).map((artifact) => ({
       name: str(artifact.name) ?? "artifact",
+      path: str(artifact.path) ?? str(artifact.name),
       cid: str(artifact.cid),
       ipns_label: str(artifact.ipns_label),
       ipns_name: str(artifact.ipns_name),

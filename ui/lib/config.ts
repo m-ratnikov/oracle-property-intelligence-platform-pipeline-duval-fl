@@ -16,6 +16,7 @@ export const SAMPLE_PATHS = {
   coverage: "/sample/dataset-coverage.json",
   catalog: "/sample/catalog.json",
   openDataIndex: "/sample/open-data/index.json",
+  artifactsIndex: "/sample/artifacts-index.json",
 } as const;
 
 function pick(value: string | undefined, fallback: string) {
@@ -28,6 +29,7 @@ const runHistoryEnv = process.env.NEXT_PUBLIC_RUN_HISTORY_URL;
 const coverageEnv = process.env.NEXT_PUBLIC_COVERAGE_URL;
 const catalogEnv = process.env.NEXT_PUBLIC_CATALOG_URL;
 const openDataEnv = process.env.NEXT_PUBLIC_OPEN_DATA_INDEX_URL;
+const artifactsIndexEnv = process.env.NEXT_PUBLIC_ARTIFACTS_INDEX_URL;
 const mcpEnv = process.env.NEXT_PUBLIC_MCP_URL;
 
 export interface AppConfig {
@@ -39,6 +41,12 @@ export interface AppConfig {
   coverageUrl: string;
   catalogUrl: string;
   openDataIndexUrl: string | null;
+  /**
+   * The published artifacts index: every uploaded object with its gateway URL and, where the
+   * artifact has one, its IPNS name. Artifact cards join run records to it so they can show a
+   * real link instead of "not available" twice.
+   */
+  artifactsIndexUrl: string;
   mcpUrl: string | null;
   /** True when at least one artifact URL fell back to public/sample. */
   isSample: boolean;
@@ -51,6 +59,14 @@ if (!queryTableEnv?.trim()) sampleArtifacts.push("query-table.parquet");
 if (!runHistoryEnv?.trim()) sampleArtifacts.push("run-history.json");
 if (!coverageEnv?.trim()) sampleArtifacts.push("dataset-coverage.json");
 if (!catalogEnv?.trim()) sampleArtifacts.push("catalog.json");
+/*
+ * NEXT_PUBLIC_ARTIFACTS_INDEX_URL is deliberately NOT in the list above, and neither are the
+ * open data index or the MCP base URL. This list is what flips the whole runtime to SAMPLE, and
+ * it must hold exactly the artifacts the pages are about: the query table, the run history, the
+ * coverage snapshot and the catalog. The artifacts index only decorates cards whose CIDs come
+ * from the run history, so a deployment that has not set it is still serving published data and
+ * must not be branded SAMPLE for it. Adding a fifth entry here would do exactly that.
+ */
 
 export const config: AppConfig = {
   countyKey: pick(process.env.NEXT_PUBLIC_COUNTY_KEY, "duval"),
@@ -62,6 +78,7 @@ export const config: AppConfig = {
   coverageUrl: pick(coverageEnv, SAMPLE_PATHS.coverage),
   catalogUrl: pick(catalogEnv, SAMPLE_PATHS.catalog),
   openDataIndexUrl: pick(openDataEnv, SAMPLE_PATHS.openDataIndex),
+  artifactsIndexUrl: pick(artifactsIndexEnv, SAMPLE_PATHS.artifactsIndex),
   mcpUrl: mcpEnv?.trim() ? mcpEnv.trim() : null,
   isSample: sampleArtifacts.length > 0,
   sampleArtifacts,

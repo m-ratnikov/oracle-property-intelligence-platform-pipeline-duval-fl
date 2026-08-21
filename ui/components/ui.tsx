@@ -129,7 +129,7 @@ export function IdWithCopy({
   return (
     <span className="inline-flex items-center gap-1.5">
       {href ? (
-        <a className="mono" href={href} target="_blank" rel="noreferrer" title={value}>
+        <a className="mono" href={href} target="_blank" rel="noopener noreferrer" title={value}>
           {shown}
         </a>
       ) : (

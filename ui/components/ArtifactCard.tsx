@@ -1,6 +1,7 @@
 "use client";
 
-import { formatInt } from "@/lib/format";
+import { formatInt, shortenId } from "@/lib/format";
+import { UNKNOWN_PUBLICATION, type ArtifactPublication } from "@/lib/artifacts";
 import type { RunArtifact } from "@/lib/types";
 import { CopyButton, IdWithCopy, NotAvailable } from "./ui";
 
@@ -15,23 +16,48 @@ function scale(artifact: RunArtifact): string | null {
   return parts.length === 0 ? null : parts.join(", ");
 }
 
+/** Why there is no gateway URL, in the card's own words. */
+function gatewayReason(publication: ArtifactPublication): string {
+  switch (publication.status) {
+    case "replaced":
+      return "the artifacts index publishes a different CID under this name";
+    case "unlisted":
+      return "this object is not in the published artifacts index";
+    default:
+      return "no gateway url published for this artifact";
+  }
+}
+
 /**
- * One published artifact: its CID, its IPNS label and name, and the gateway URL
- * an MCP client or DuckDB would actually open. The demo transcript asks for all
- * three, with copy buttons, so they can be pasted into a client on the spot.
+ * One published artifact: its CID, its IPNS label and name, and the gateway URL an MCP client or
+ * DuckDB would actually open. The demo transcript asks for all three, with copy buttons, so they
+ * can be pasted into a client on the spot.
+ *
+ * A run record only ever carries the CID, so the URL and the IPNS name come from `publication`,
+ * which is this artifact's entry in the published artifacts index (see lib/artifacts.ts). Every
+ * URL rendered here was published by the pipeline; none is assembled from a gateway and a CID.
+ * When the index has nothing to say the card falls back to what the run record itself recorded,
+ * and then to "not available" with the reason.
  */
-export function ArtifactCard({ artifact }: { artifact: RunArtifact }) {
-  const gateway =
-    artifact.gateway_url ??
-    (artifact.ipns_name ? `https://ipfs.filebase.io/ipns/${artifact.ipns_name}` : null);
+export function ArtifactCard({
+  artifact,
+  publication = UNKNOWN_PUBLICATION,
+}: {
+  artifact: RunArtifact;
+  publication?: ArtifactPublication;
+}) {
+  const gateway = artifact.gateway_url ?? publication.url;
+  const ipnsName = publication.ipnsName ?? artifact.ipns_name;
+  // Only the index publishes a resolvable IPNS URL. A name the run record carried on its own
+  // gets shown and copied, but not linked, because no published URL backs it.
+  const ipnsHref = publication.ipnsName !== null ? publication.ipnsUrl : null;
+  const label = publication.ipnsLabel ?? artifact.ipns_label;
 
   return (
     <div className="card card-pad">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="mono text-[13px] font-semibold">{artifact.name}</span>
-        {artifact.ipns_label ? (
-          <span className="badge badge-accent">{artifact.ipns_label}</span>
-        ) : null}
+        {label ? <span className="badge badge-accent">{label}</span> : null}
       </div>
       {scale(artifact) ? (
         <div className="mt-0.5 text-[11.5px] text-faint">{scale(artifact)}</div>
@@ -44,34 +70,62 @@ export function ArtifactCard({ artifact }: { artifact: RunArtifact }) {
             value={artifact.cid}
             head={14}
             tail={8}
-            href={artifact.cid ? `https://ipfs.filebase.io/ipfs/${artifact.cid}` : null}
+            href={publication.url}
           />
         </dd>
 
         <dt>IPNS name</dt>
         <dd>
-          <IdWithCopy
-            value={artifact.ipns_name}
-            head={14}
-            tail={8}
-            href={artifact.ipns_name ? `https://ipfs.filebase.io/ipns/${artifact.ipns_name}` : null}
-          />
+          {ipnsName ? (
+            <IdWithCopy value={ipnsName} head={14} tail={8} href={ipnsHref} />
+          ) : (
+            // Kept short on purpose: it repeats on every entity table card, and where the index
+            // said nothing at all the row degrades to exactly what it said before.
+            <NotAvailable
+              why={
+                publication.status === "published"
+                  ? "CID addressed; no IPNS name minted"
+                  : undefined
+              }
+            />
+          )}
         </dd>
 
         <dt>Gateway URL</dt>
         <dd>
           {gateway ? (
             <span className="inline-flex flex-wrap items-center gap-1.5">
-              <a className="mono break-all" href={gateway} target="_blank" rel="noreferrer">
+              <a
+                className="mono break-all"
+                href={gateway}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 {gateway}
               </a>
               <CopyButton text={gateway} />
             </span>
           ) : (
-            <NotAvailable why="no gateway url published for this artifact" />
+            <NotAvailable why={gatewayReason(publication)} />
           )}
         </dd>
       </dl>
+
+      {publication.status === "replaced" && publication.indexCid ? (
+        <p className="mt-2 text-[11.5px] text-warn">
+          A later publish replaced this object: the artifacts index lists{" "}
+          <span className="mono">{shortenId(publication.indexCid, 10, 6)}</span> under{" "}
+          <span className="mono">{artifact.path}</span>, so this run&apos;s copy is not what the
+          gateway serves.
+        </p>
+      ) : null}
+
+      {publication.status === "unlisted" ? (
+        <p className="mt-2 text-[11.5px] text-warn">
+          <span className="mono">{artifact.path}</span> is absent from the published artifacts
+          index, so this run&apos;s copy of it was never published.
+        </p>
+      ) : null}
     </div>
   );
 }

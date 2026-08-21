@@ -8,6 +8,7 @@
  *   public/sample/run-history.json        four runs with per source deltas and limitations
  *   public/sample/dataset-coverage.json   coverage snapshot
  *   public/sample/catalog.json            published counties catalog
+ *   public/sample/artifacts-index.json    published artifacts index (CIDs, URLs, IPNS names)
  *   public/sample/open-data/index.json    sharded per property JSON index
  *   public/sample/open-data/shards/*.json
  *   public/sample/open-data/<cid>.json
@@ -578,6 +579,53 @@ function buildCatalog(runHistory) {
   };
 }
 
+/**
+ * The published artifacts index, in the shape pipeline/src/publish/index.ts writes it: one entry
+ * per published object, keyed by the object name the run records carry as `path`, carrying the
+ * gateway URL and the IPNS name the publish step produced. The UI joins run artifacts to this so
+ * the cards can show a URL instead of "not available".
+ *
+ * Derived from the sample run history rather than generated fresh, so the CIDs and IPNS names on
+ * both sides agree and the join actually matches in the sample runtime, exactly as it does
+ * against the published index.
+ */
+function buildArtifactsIndex(runHistory) {
+  const artifacts = runHistory.runs[runHistory.runs.length - 1].artifacts;
+  return {
+    county: "duval",
+    generatedAt: NOW.toISOString(),
+    mode: "published",
+    note: SAMPLE_NOTE,
+    gateway: "https://ipfs.filebase.io",
+    artifacts: artifacts.map((artifact) => ({
+      name: artifact.name,
+      key: `sample/duval/${artifact.name}`,
+      contentType: artifact.name.endsWith(".parquet")
+        ? "application/vnd.apache.parquet"
+        : "application/json",
+      bytes: null,
+      sha256: null,
+      cid: artifact.cid,
+      cidV1: artifact.cid,
+      url: `https://ipfs.filebase.io/ipfs/${artifact.cid}`,
+      ipnsLabel: artifact.ipns_label,
+      ipnsName: artifact.ipns_name,
+      ipnsUrl: `https://ipfs.filebase.io/ipns/${artifact.ipns_name}`,
+    })),
+    ipns: Object.fromEntries(
+      artifacts.map((artifact) => [
+        artifact.ipns_label,
+        {
+          label: artifact.ipns_label,
+          networkKey: artifact.ipns_name,
+          cid: artifact.cid,
+          gatewayUrl: `https://ipfs.filebase.io/ipns/${artifact.ipns_name}`,
+        },
+      ]),
+    ),
+  };
+}
+
 async function writeOpenData(rows) {
   await mkdir(join(OPEN_DATA_DIR, "shards"), { recursive: true });
 
@@ -693,10 +741,16 @@ const parquet = await writeParquet(rows);
 const runHistory = buildRunHistory();
 const coverage = buildCoverage(runHistory, parquet.rows);
 const catalog = buildCatalog(runHistory);
+const artifactsIndex = buildArtifactsIndex(runHistory);
 
 await writeFile(join(OUT_DIR, "run-history.json"), JSON.stringify(runHistory, null, 2), "utf8");
 await writeFile(join(OUT_DIR, "dataset-coverage.json"), JSON.stringify(coverage, null, 2), "utf8");
 await writeFile(join(OUT_DIR, "catalog.json"), JSON.stringify(catalog, null, 2), "utf8");
+await writeFile(
+  join(OUT_DIR, "artifacts-index.json"),
+  JSON.stringify(artifactsIndex, null, 2),
+  "utf8",
+);
 const openData = await writeOpenData(rows);
 
 console.log(
@@ -705,6 +759,7 @@ console.log(
     `[sample] run-history.json     ${runHistory.runs.length} runs x ${SOURCE_DEFS.length} sources`,
     `[sample] dataset-coverage.json ${coverage.datasets.length} datasets`,
     `[sample] catalog.json          ${catalog.counties.length} county`,
+    `[sample] artifacts-index.json  ${artifactsIndex.artifacts.length} published objects`,
     `[sample] open-data             ${openData.properties} properties in ${openData.shards} shards`,
   ].join("\n"),
 );
