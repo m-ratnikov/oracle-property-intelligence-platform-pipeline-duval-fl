@@ -9,7 +9,17 @@ import {
   parseRunHistory,
   sortRunsDesc,
 } from "@/lib/types";
-import { formatMetres, formatUsd, shortenId, signedDelta, toCsv, toPlain } from "@/lib/format";
+import {
+  displayCell,
+  displayCellForColumn,
+  formatMetres,
+  formatUsd,
+  isPlainIntegerColumn,
+  shortenId,
+  signedDelta,
+  toCsv,
+  toPlain,
+} from "@/lib/format";
 import { haversineMetres, isPlausibleDuvalPoint, latLonToTile, tileUrl } from "@/lib/geo";
 
 describe("workbench guard", () => {
@@ -290,5 +300,34 @@ describe("run history field names match what the pipeline emits", () => {
       runs: [{ run_id: "r", sources: [{ source: "legacy", rows_fetched: 7, limitations: [] }] }],
     });
     expect(parsed.runs[0]!.sources[0]).toMatchObject({ source: "legacy", rows_fetched: 7 });
+  });
+});
+
+describe("column aware cell formatting", () => {
+  it("renders calendar years and identifiers without a thousands separator", () => {
+    expect(displayCellForColumn("built_year", 1954)).toBe("1954");
+    expect(displayCellForColumn("roof_year_est", 2012)).toBe("2012");
+    expect(displayCellForColumn("address_zip", 32259)).toBe("32259");
+    expect(displayCellForColumn("county_fips", 12031)).toBe("12031");
+  });
+
+  it("still groups genuine quantities", () => {
+    expect(displayCellForColumn("market_value", 538342999)).toBe("538,342,999");
+    expect(displayCellForColumn("permit_count", 1200)).toBe("1,200");
+    expect(displayCellForColumn("total_area", 12500)).toBe("12,500");
+  });
+
+  it("recognises aliases a reviewer may type in the workbench", () => {
+    expect(isPlainIntegerColumn("sale_year")).toBe(true);
+    expect(isPlainIntegerColumn("zip")).toBe(true);
+    expect(isPlainIntegerColumn("years_since_last_sale")).toBe(false);
+    expect(displayCellForColumn("sale_year", 1998)).toBe("1998");
+  });
+
+  it("falls through to displayCell for every other shape", () => {
+    expect(displayCellForColumn("owner_name", "ACME LLC")).toBe("ACME LLC");
+    expect(displayCellForColumn("built_year", null)).toBe(displayCell(null));
+    expect(displayCellForColumn("hoa_flag", true)).toBe("yes");
+    expect(displayCellForColumn("lot_size_acre", 0.2534)).toBe("0.2534");
   });
 });

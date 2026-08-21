@@ -125,6 +125,33 @@ export function displayCell(value: unknown): string {
   return plain;
 }
 
+/**
+ * Integers that are calendar years or identifiers. A thousands separator turns
+ * built_year 1954 into "1,954", so these render as plain digits. The regex also
+ * catches ad hoc aliases a reviewer types in the workbench, such as
+ * "SELECT built_year AS sale_year".
+ */
+const PLAIN_INTEGER_COLUMNS = new Set([
+  "built_year",
+  "roof_year_est",
+  "address_zip",
+  "county_fips",
+  "state_fips",
+]);
+
+export function isPlainIntegerColumn(column: string): boolean {
+  return PLAIN_INTEGER_COLUMNS.has(column) || /(^|_)(year|zip|fips)$/.test(column);
+}
+
+/** displayCell, but aware of which columns must not be group separated. */
+export function displayCellForColumn(column: string, value: unknown): string {
+  const plain = toPlain(value);
+  if (typeof plain === "number" && Number.isInteger(plain) && isPlainIntegerColumn(column)) {
+    return String(plain);
+  }
+  return displayCell(value);
+}
+
 /** RFC 4180 flavoured CSV. */
 export function toCsv(columns: string[], rows: Record<string, unknown>[]): string {
   const escape = (value: unknown): string => {

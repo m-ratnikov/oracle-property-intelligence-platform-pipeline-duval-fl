@@ -55,11 +55,14 @@ export function Stat({
   value,
   hint,
   tone = "neutral",
+  loading = false,
 }: {
   label: string;
   value: React.ReactNode;
   hint?: React.ReactNode;
   tone?: "neutral" | "good" | "warn" | "bad";
+  /** Reserves the value and hint boxes so the card does not resize on arrival. */
+  loading?: boolean;
 }) {
   const toneClass =
     tone === "good"
@@ -72,8 +75,24 @@ export function Stat({
   return (
     <div className="card card-pad">
       <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</div>
-      <div className={`mt-1 text-[22px] font-semibold leading-tight ${toneClass}`}>{value}</div>
-      {hint ? <div className="mt-1 text-[12px] text-faint">{hint}</div> : null}
+      <div className={`mt-1 text-[22px] font-semibold leading-tight ${toneClass}`}>
+        {loading ? (
+          <span
+            className="skeleton block h-[27px] w-24"
+            role="status"
+            aria-label={`${label}, loading`}
+          />
+        ) : (
+          value
+        )}
+      </div>
+      {/*
+        The hint box holds its height whether or not there is a hint yet. The
+        engine status message that lands here is two lines and the value that
+        replaces it is one, so without this the card shrinks on arrival and
+        shifts every section below it.
+      */}
+      <div className="mt-1 line-clamp-2 min-h-[36px] text-[12px] text-faint">{hint}</div>
     </div>
   );
 }

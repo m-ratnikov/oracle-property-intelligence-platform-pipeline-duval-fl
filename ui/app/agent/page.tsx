@@ -443,6 +443,7 @@ export default function AgentPage() {
             >
               <input
                 className="field flex-1"
+                aria-label="Ask a property intelligence question"
                 placeholder="Ask about roofs, water views, ownership age, owners, transit or Starbucks"
                 value={input}
                 onChange={(event) => setInput(event.target.value)}

@@ -61,9 +61,19 @@ function isRawHttpResponse(v: unknown): v is RawHttpResponse {
   return typeof v === "object" && v !== null && "headers" in v && typeof (v as RawHttpResponse).headers === "object";
 }
 
-/** PUT one object; returns the CID Filebase reports in x-amz-meta-cid (if any). */
+/**
+ * PUT one object; returns the CID Filebase reports in x-amz-meta-cid (if any).
+ *
+ * The response-capturing middleware goes on the COMMAND, not the client. Putting it on the client
+ * mutates state shared by every in-flight call: with uploads running 64 at a time, the second
+ * caller to add a middleware the first had not yet removed got "Duplicate middleware name
+ * 'captureFilebaseCid'". That failed 17,640 of 77,000 uploads in Actions run 32475509467, and
+ * because each failure then burned six backoff retries it also dragged the average PUT out to
+ * about seven seconds. A command carries its own stack, so concurrent calls cannot collide and
+ * nothing has to be removed afterwards.
+ */
 export async function putObject(
-  client: Pick<S3Client, "send" | "middlewareStack">,
+  client: Pick<S3Client, "send">,
   params: { bucket: string; key: string; body: Buffer; contentType: string },
 ): Promise<string | undefined> {
   let captured: Record<string, string> | undefined;
@@ -74,14 +84,9 @@ export async function putObject(
       if (isRawHttpResponse(result.response)) captured = result.response.headers;
       return result;
     };
-  client.middlewareStack.add(middleware, { step: "deserialize", name: "captureFilebaseCid", priority: "low" });
-  try {
-    await client.send(
-      new PutObjectCommand({ Bucket: params.bucket, Key: params.key, Body: params.body, ContentType: params.contentType }),
-    );
-  } finally {
-    client.middlewareStack.remove("captureFilebaseCid");
-  }
+  const command = new PutObjectCommand({ Bucket: params.bucket, Key: params.key, Body: params.body, ContentType: params.contentType });
+  command.middlewareStack.add(middleware as never, { step: "deserialize", name: "captureFilebaseCid", priority: "low" });
+  await client.send(command);
   return captured?.["x-amz-meta-cid"];
 }
 

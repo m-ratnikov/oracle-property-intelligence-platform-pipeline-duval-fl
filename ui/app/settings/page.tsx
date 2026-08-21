@@ -258,6 +258,7 @@ export default function SettingsPage() {
                 <input
                   className="field mono flex-1"
                   type={reveal ? "text" : "password"}
+                  aria-label="Model provider API key"
                   autoComplete="off"
                   spellCheck={false}
                   placeholder={settings ? "leave blank to keep the stored key" : "paste your API key"}

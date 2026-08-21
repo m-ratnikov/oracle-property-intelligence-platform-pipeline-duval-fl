@@ -12,7 +12,8 @@
   --color-border-strong: #b9b9b0;
   --color-text: #17170f;
   --color-muted: #5f5f57;
-  --color-faint: #8a8a80;
+  /* 4.7:1 on --color-bg and 5.1:1 on --color-surface, so captions and links clear WCAG AA. */
+  --color-faint: #6f6f67;
   --color-accent: #1a5c9a;
   --color-accent-soft: #e2edf7;
   --color-good: #1f6b3d;
@@ -37,7 +38,8 @@
     --color-border-strong: #4a4a54;
     --color-text: #ececea;
     --color-muted: #a7a7a2;
-    --color-faint: #7d7d78;
+    /* 5.1:1 on the dark --color-surface. The light value is too dark to reuse here. */
+    --color-faint: #8d8d87;
     --color-accent: #6fb0ea;
     --color-accent-soft: #1c3345;
     --color-good: #6ed49a;
@@ -195,6 +197,13 @@ a:hover {
 }
 
 table.grid {
+  /*
+   * Tailwind ships a .grid utility whose only declaration is display: grid.
+   * Without an explicit display here it wins, the table becomes a grid
+   * container, thead and tbody get blockified, and each one then sizes the
+   * columns on its own so the headers no longer line up with their data.
+   */
+  display: table;
   border-collapse: separate;
   border-spacing: 0;
   width: 100%;
@@ -246,6 +255,11 @@ table.grid td.num {
   text-align: right;
   font-family: var(--font-mono);
   font-size: 12px;
+}
+
+/* A numeric header follows its column, otherwise it sits left over right aligned figures. */
+table.grid thead th.num {
+  text-align: right;
 }
 
 /* ------------------------------------------------------------------- misc */
@@ -331,4 +345,26 @@ pre.block {
 
 .pulsing {
   animation: pulse-soft 1.4s ease-in-out infinite;
+}
+
+/* Placeholder block that holds a value's box while it loads, so nothing shifts on arrival. */
+.skeleton {
+  border-radius: 4px;
+  background: var(--color-sunken);
+  animation: pulse-soft 1.4s ease-in-out infinite;
+}
+
+/* Quality floor: honour the OS setting rather than animating regardless. */
+@media (prefers-reduced-motion: reduce) {
+  .pulsing,
+  .skeleton {
+    animation: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

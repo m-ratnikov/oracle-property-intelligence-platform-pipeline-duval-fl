@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useMemo } from "react";
 import {
   NOT_AVAILABLE,
-  displayCell,
+  displayCellForColumn,
   formatMetres,
   formatTimestamp,
   formatUsd,
@@ -34,6 +34,28 @@ function cellClass(column: string, value: unknown, isEvidence: boolean): string 
   if (value === null || value === undefined) classes.push("na");
   else if (typeof value === "number" || NUMERIC_HINTS.test(column)) classes.push("num");
   return classes.join(" ");
+}
+
+/**
+ * A header carries the same alignment as its column. The column name decides it
+ * where the name is a known numeric shape, otherwise the first populated value
+ * does, so an arbitrary workbench projection still lines up.
+ */
+function headerClass(
+  column: string,
+  rows: Record<string, unknown>[],
+  isEvidence: boolean,
+): string | undefined {
+  const classes: string[] = [];
+  if (isEvidence) classes.push("evidence");
+  const isNumeric =
+    NUMERIC_HINTS.test(column) ||
+    CURRENCY_COLUMNS.has(column) ||
+    METRE_COLUMNS.has(column) ||
+    typeof rows.find((row) => row[column] !== null && row[column] !== undefined)?.[column] ===
+      "number";
+  if (isNumeric) classes.push("num");
+  return classes.length > 0 ? classes.join(" ") : undefined;
 }
 
 function renderValue(column: string, value: unknown): React.ReactNode {
@@ -68,7 +90,7 @@ function renderValue(column: string, value: unknown): React.ReactNode {
     return <span className="mono">{String(value)}</span>;
   }
 
-  return displayCell(value);
+  return displayCellForColumn(column, value);
 }
 
 /** source_system + source_url + fetched_at rendered as one compact provenance cell. */
@@ -161,7 +183,7 @@ export function DataTable({
           <thead>
             <tr>
               {displayColumns.map((column) => (
-                <th key={column} className={evidenceSet.has(column) ? "evidence" : undefined}>
+                <th key={column} className={headerClass(column, rows, evidenceSet.has(column))}>
                   {column}
                 </th>
               ))}

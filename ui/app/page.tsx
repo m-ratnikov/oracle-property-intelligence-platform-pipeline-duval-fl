@@ -63,7 +63,8 @@ export default function OverviewPage() {
       <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat
           label="Parcels in query table"
-          value={engine.stage === "ready" ? formatInt(engine.rowCount) : "..."}
+          loading={engine.stage !== "ready"}
+          value={formatInt(engine.rowCount)}
           hint={
             engine.stage === "ready"
               ? `${engine.columns.length} published columns`
@@ -72,12 +73,14 @@ export default function OverviewPage() {
         />
         <Stat
           label="Rows ingested, latest run"
-          value={totalRowsLatest === null ? "..." : formatInt(totalRowsLatest)}
+          loading={totalRowsLatest === null}
+          value={formatInt(totalRowsLatest)}
           hint={latest ? `across ${latest.sources.length} sources` : undefined}
         />
         <Stat
           label="New rows, latest run"
-          value={totalInsertedLatest === null ? "..." : formatInt(totalInsertedLatest)}
+          loading={totalInsertedLatest === null}
+          value={formatInt(totalInsertedLatest)}
           hint={
             totalUpdatedLatest === null
               ? undefined
@@ -87,7 +90,8 @@ export default function OverviewPage() {
         />
         <Stat
           label="Runs on record"
-          value={history.loading ? "..." : formatInt(runs.length)}
+          loading={history.loading}
+          value={formatInt(runs.length)}
           hint={
             previous
               ? `previous run ${relativeTime(previous.started_at)}`

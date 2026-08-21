@@ -193,6 +193,7 @@ export default function QueryPage() {
               </div>
               <input
                 className="field mt-2 w-full"
+                aria-label="Filter schema columns"
                 placeholder="filter columns"
                 value={filter}
                 onChange={(event) => setFilter(event.target.value)}

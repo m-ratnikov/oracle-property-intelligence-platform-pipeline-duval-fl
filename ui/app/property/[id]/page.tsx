@@ -10,7 +10,7 @@ import { propertyByIdSql } from "@/lib/sql";
 import { COLUMN_GROUPS, CURRENCY_COLUMNS, METRE_COLUMNS, ungroupedColumns } from "@/lib/columns";
 import {
   NOT_AVAILABLE,
-  displayCell,
+  displayCellForColumn,
   formatDateOnly,
   formatInt,
   formatMetres,
@@ -52,7 +52,7 @@ function Value({ column, value }: { column: string; value: unknown }) {
   if (typeof value === "boolean") {
     return <span className={value ? "badge badge-good" : "badge badge-neutral"}>{value ? "yes" : "no"}</span>;
   }
-  return <span>{displayCell(value)}</span>;
+  return <span>{displayCellForColumn(column, value)}</span>;
 }
 
 function readArray(document: Record<string, unknown> | null, key: string): Record<string, unknown>[] {
@@ -308,7 +308,7 @@ export default function PropertyPage() {
                           <td key={key} className={sale[key] === null ? "na" : undefined}>
                             {key.includes("price") || key.includes("amount")
                               ? formatUsd(Number(sale[key]))
-                              : displayCell(sale[key])}
+                              : displayCellForColumn(key, sale[key])}
                           </td>
                         ))}
                       </tr>
@@ -338,7 +338,7 @@ export default function PropertyPage() {
                       <tr key={index}>
                         {Object.keys(permits[0]).map((key) => (
                           <td key={key} style={{ whiteSpace: "normal" }}>
-                            {displayCell(permit[key])}
+                            {displayCellForColumn(key, permit[key])}
                           </td>
                         ))}
                       </tr>
