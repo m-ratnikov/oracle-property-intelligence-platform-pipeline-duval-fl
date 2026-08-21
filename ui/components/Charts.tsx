@@ -1,6 +1,5 @@
 "use client";
 
-import { useId } from "react";
 import { formatInt } from "@/lib/format";
 
 /**
@@ -9,137 +8,152 @@ import { formatInt } from "@/lib/format";
  * a runtime theme provider, so they use currentColor and CSS variables.
  */
 
-const PALETTE = [
-  "#1a5c9a",
-  "#1f6b3d",
-  "#8a5a00",
-  "#97231f",
-  "#5a3d8a",
-  "#0f6f75",
-  "#8a4a1f",
-  "#3f5a1f",
-  "#7a2a5a",
-];
-
-export interface Series {
+export interface SourceTrend {
   name: string;
-  points: { label: string; value: number }[];
+  /** Cumulative rows after each run, oldest first. */
+  totals: number[];
 }
 
-export function LineChart({
-  series,
-  height = 220,
-  yLabel,
+/**
+ * One sparkline per source rather than thirteen lines sharing an axis.
+ *
+ * The single chart this replaces put every source on one linear scale, where the
+ * largest source is nine hundred times the smallest, so ten of the thirteen lines
+ * were pinned to the baseline on top of each other. It also needed thirteen
+ * categorical colours, which is past the point where any palette stays separable,
+ * and the run identifiers along the bottom overlapped into an unreadable band.
+ *
+ * Faceting solves all three at once: every source gets its own vertical scale, so
+ * its shape is visible whatever its magnitude; identity comes from the heading
+ * rather than a hue, so the chart needs one colour instead of thirteen; and the
+ * run axis disappears, since the run count is the same for every panel and is
+ * better said once in words.
+ */
+export function SourceTrends({
+  sources,
+  runCount,
 }: {
-  series: Series[];
-  height?: number;
-  yLabel?: string;
+  sources: SourceTrend[];
+  runCount: number;
 }) {
-  const id = useId();
-  const width = 720;
-  const padding = { top: 12, right: 12, bottom: 34, left: 62 };
-  const plotWidth = width - padding.left - padding.right;
-  const plotHeight = height - padding.top - padding.bottom;
-
-  const labels = series[0]?.points.map((point) => point.label) ?? [];
-  const maxValue = Math.max(1, ...series.flatMap((line) => line.points.map((point) => point.value)));
-  const stepX = labels.length > 1 ? plotWidth / (labels.length - 1) : 0;
-
-  const x = (index: number) => padding.left + index * stepX;
-  const y = (value: number) => padding.top + plotHeight - (value / maxValue) * plotHeight;
-
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map((fraction) => fraction * maxValue);
-
-  if (labels.length === 0) {
+  if (sources.length === 0) {
     return <div className="card card-pad text-[13px] text-muted">No runs to chart yet.</div>;
   }
 
+  // Biggest contributor first, so the panels read in the order that matters.
+  const ordered = [...sources].sort(
+    (a, b) => (b.totals[b.totals.length - 1] ?? 0) - (a.totals[a.totals.length - 1] ?? 0),
+  );
+
   return (
-    <div className="card card-pad overflow-x-auto">
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        width="100%"
-        height={height}
-        role="img"
-        aria-label={`Cumulative rows per source across ${labels.length} runs`}
-      >
-        {ticks.map((tick, index) => (
-          <g key={`${id}-tick-${index}`}>
-            <line
-              x1={padding.left}
-              x2={width - padding.right}
-              y1={y(tick)}
-              y2={y(tick)}
-              stroke="var(--color-border)"
-              strokeWidth={1}
-            />
-            <text
-              x={padding.left - 8}
-              y={y(tick) + 3.5}
-              textAnchor="end"
-              fontSize="10"
-              fill="var(--color-faint)"
-            >
-              {formatInt(tick)}
-            </text>
-          </g>
-        ))}
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      {ordered.map((source) => (
+        <SourcePanel key={source.name} source={source} runCount={runCount} />
+      ))}
+    </div>
+  );
+}
 
-        {labels.map((label, index) => (
-          <text
-            key={`${id}-label-${label}-${index}`}
-            x={x(index)}
-            y={height - 12}
-            textAnchor={index === 0 ? "start" : index === labels.length - 1 ? "end" : "middle"}
-            fontSize="10"
-            fill="var(--color-faint)"
-          >
-            {label.length > 14 ? `${label.slice(0, 13)}...` : label}
-          </text>
-        ))}
+function SourcePanel({ source, runCount }: { source: SourceTrend; runCount: number }) {
+  const totals = source.totals;
+  const current = totals[totals.length - 1] ?? 0;
+  const previous = totals.length > 1 ? totals[totals.length - 2] : null;
+  const delta = previous === null ? null : current - previous;
+  const moved = totals.length > 1 && totals.some((value, index) => index > 0 && value !== totals[index - 1]);
 
-        {series.map((line, lineIndex) => {
-          const color = PALETTE[lineIndex % PALETTE.length];
-          const path = line.points
-            .map((point, index) => `${index === 0 ? "M" : "L"} ${x(index)} ${y(point.value)}`)
-            .join(" ");
-          return (
-            <g key={`${id}-series-${line.name}`}>
-              <path d={path} fill="none" stroke={color} strokeWidth={1.8} />
-              {line.points.map((point, index) => (
-                <circle
-                  key={`${id}-${line.name}-${index}`}
-                  cx={x(index)}
-                  cy={y(point.value)}
-                  r={2.6}
-                  fill={color}
-                >
-                  <title>{`${line.name} after ${point.label}: ${formatInt(point.value)}`}</title>
-                </circle>
-              ))}
-            </g>
-          );
-        })}
-
-        {yLabel ? (
-          <text x={4} y={12} fontSize="10" fill="var(--color-faint)">
-            {yLabel}
-          </text>
-        ) : null}
-      </svg>
-
-      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11.5px]">
-        {series.map((line, index) => (
-          <span key={line.name} className="inline-flex items-center gap-1.5">
-            <span
-              className="inline-block h-2 w-2 rounded-sm"
-              style={{ background: PALETTE[index % PALETTE.length] }}
-            />
-            {line.name}
-          </span>
-        ))}
+  return (
+    <div className="card card-pad">
+      <div className="mono truncate text-[12px] font-semibold" title={source.name}>
+        {source.name}
+      </div>
+      <div className="mt-0.5 text-[18px] font-semibold leading-tight">{formatInt(current)}</div>
+      {current === 0 ? (
+        <div className="mt-1.5 h-[34px] text-[11.5px] text-faint">
+          No rows recorded in any of these {runCount} runs. The source limitations
+          below say why.
+        </div>
+      ) : (
+        <Sparkline
+          values={totals}
+          label={`${source.name}: ${formatInt(current)} cumulative rows across ${runCount} runs, ${
+            moved ? "changed during the window" : "unchanged during the window"
+          }`}
+        />
+      )}
+      <div className="mt-1 text-[11.5px]">
+        {current === 0 ? (
+          <span className="text-warn">constrained source</span>
+        ) : delta === null ? (
+          <span className="text-faint">first recorded run</span>
+        ) : delta > 0 ? (
+          <span className="text-good">+{formatInt(delta)} on the latest run</span>
+        ) : (
+          <span className="text-faint">no change on the latest run</span>
+        )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Its own vertical scale, and no axis. A sparkline answers "what shape" and the
+ * number above it answers "how many"; drawing ticks here would repeat the number
+ * in a less readable form.
+ *
+ * The drawing stretches to whatever width the panel has, which distorts shapes but
+ * not stroked paths, so every mark here including the end marker is a stroke.
+ */
+function Sparkline({ values, label }: { values: number[]; label: string }) {
+  const width = 150;
+  const height = 34;
+  const pad = 4;
+
+  if (values.length === 0) return null;
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min;
+  const stepX = values.length > 1 ? (width - pad * 2) / (values.length - 1) : 0;
+  const x = (index: number) => pad + index * stepX;
+  // A source that never moved draws down the middle rather than along an edge,
+  // so flat reads as steady rather than as missing.
+  const y = (value: number) =>
+    span === 0 ? height / 2 : pad + (height - pad * 2) * (1 - (value - min) / span);
+
+  const path = values.map((value, index) => `${index === 0 ? "M" : "L"} ${x(index)} ${y(value)}`).join(" ");
+  const lastIndex = values.length - 1;
+
+  return (
+    <svg
+      className="mt-1.5 block w-full"
+      viewBox={`0 0 ${width} ${height}`}
+      height={height}
+      preserveAspectRatio="none"
+      role="img"
+      aria-label={label}
+    >
+      <path d={path} fill="none" stroke="var(--color-border-strong)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+      {/* The latest run is the part a reader is looking for, so it carries the accent. */}
+      {values.length > 1 ? (
+        <path
+          d={`M ${x(lastIndex - 1)} ${y(values[lastIndex - 1])} L ${x(lastIndex)} ${y(values[lastIndex])}`}
+          fill="none"
+          stroke="var(--color-accent)"
+          strokeWidth={2}
+          vectorEffect="non-scaling-stroke"
+        />
+      ) : null}
+      <line
+        x1={x(lastIndex)}
+        x2={x(lastIndex)}
+        y1={y(values[lastIndex]) - 4}
+        y2={y(values[lastIndex]) + 4}
+        stroke="var(--color-accent)"
+        strokeWidth={2}
+        strokeLinecap="round"
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
   );
 }
 

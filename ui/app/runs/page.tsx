@@ -14,7 +14,7 @@ import {
   signedDelta,
 } from "@/lib/format";
 import { PageHeader, Section, Callout, Spinner, ErrorBox, Stat, IdWithCopy } from "@/components/ui";
-import { LineChart } from "@/components/Charts";
+import { SourceTrends } from "@/components/Charts";
 import { SampleBadge } from "@/components/SampleBanner";
 import { ArtifactCard } from "@/components/ArtifactCard";
 
@@ -141,11 +141,11 @@ export default function RunsPage() {
   const [showAll, setShowAll] = useState(false);
 
   const runsDesc = useMemo(() => sortRunsDesc(history.data?.runs ?? []), [history.data]);
-  const chartSeries = useMemo(() => {
+  const sourceTrends = useMemo(() => {
     const cumulative = cumulativeBySource(history.data?.runs ?? []);
     return cumulative.map((entry) => ({
       name: entry.source,
-      points: entry.points.map((point) => ({ label: point.run_id.slice(0, 9), value: point.total })),
+      totals: entry.points.map((point) => point.total),
     }));
   }, [history.data]);
 
@@ -193,10 +193,10 @@ export default function RunsPage() {
           </div>
 
           <Section
-            title="Cumulative rows per source"
-            description="Each line accumulates the rows a source contributed, run by run. A flat line means that source published nothing new in that run, which is the normal steady state for an incremental pipeline."
+            title="Rows per source, run by run"
+            description={`One panel per source, each on its own scale. The number is the rows that source has contributed in total; the line is how it got there across ${runsDesc.length} runs. Most panels are flat, which is what an incremental pipeline looks like once a source has caught up: it is checked every run and publishes nothing new. The per run figures behind these panels are in the table below.`}
           >
-            <LineChart series={chartSeries} yLabel="cumulative rows" />
+            <SourceTrends sources={sourceTrends} runCount={runsDesc.length} />
           </Section>
 
           <Section
