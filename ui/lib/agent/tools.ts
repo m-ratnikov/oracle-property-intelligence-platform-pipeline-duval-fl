@@ -39,16 +39,50 @@ export interface ToolContext {
   fetchImpl?: typeof fetch;
 }
 
+/**
+ * A progress note, emitted while the turn is still running.
+ *
+ * The route can only answer once, at the end, so without this the page has nothing truthful to
+ * show during a wait that is usually ten seconds and has been seventy. These are the real events
+ * as they happen - never a scripted sequence on a timer, which would keep animating after the work
+ * had stalled and would be a lie exactly when the reader most needs the truth.
+ */
+export interface AgentProgress {
+  /** "started" fires before the work, "finished" after it, so the page can show a live spinner. */
+  phase: "started" | "finished";
+  /** What is happening, in the reader's language rather than the code's. */
+  label: string;
+  tool?: string;
+  elapsed_ms?: number;
+  row_count?: number | null;
+  error?: string | null;
+}
+
 /** Mutable per request record the tools write into. */
 export interface ToolTrace {
   calls: AgentToolCall[];
   evidence: AgentEvidenceRow[];
   assumptions: string[];
   freshness: AgentDataFreshness | null;
+  /** Set by a caller that is streaming; absent for curl, tests and the plain JSON path. */
+  onProgress?: (event: AgentProgress) => void;
 }
 
-export function newTrace(): ToolTrace {
-  return { calls: [], evidence: [], assumptions: [], freshness: null };
+export function newTrace(onProgress?: (event: AgentProgress) => void): ToolTrace {
+  return { calls: [], evidence: [], assumptions: [], freshness: null, onProgress };
+}
+
+/** Human wording for each tool, used in the progress log. */
+const TOOL_LABELS: Record<string, string> = {
+  get_schema: "Reading the published table's columns",
+  preset_question: "Running the question's SQL rule",
+  run_sql: "Running SQL against the published parquet",
+  get_property: "Fetching one parcel's full record",
+  get_run_history: "Checking how fresh the data is",
+};
+
+export function toolLabel(name: string): string {
+  return TOOL_LABELS[name] ?? `Running ${name}`;
 }
 
 function addAssumption(trace: ToolTrace, text: string) {
@@ -147,6 +181,14 @@ function noteDataCaveats(trace: ToolTrace, rows: Row[]) {
 
 function record(trace: ToolTrace, entry: AgentToolCall) {
   trace.calls.push(entry);
+  trace.onProgress?.({
+    phase: "finished",
+    label: toolLabel(entry.name),
+    tool: entry.name,
+    elapsed_ms: entry.elapsed_ms,
+    row_count: entry.row_count ?? null,
+    error: entry.error ?? null,
+  });
   logAgent(entry.error ? "warn" : "info", "tool call", {
     tool: entry.name,
     elapsed_ms: entry.elapsed_ms,

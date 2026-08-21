@@ -13,7 +13,7 @@ import type {
 } from "@/lib/agent/types";
 import { PageHeader, Callout, Spinner } from "@/components/ui";
 import { EngineStatus } from "@/components/EngineStatus";
-import { formatTimestamp, relativeTime } from "@/lib/format";
+import { formatInt, formatTimestamp, relativeTime } from "@/lib/format";
 
 interface ChatMessage {
   id: string;
@@ -155,6 +155,62 @@ function EvidenceTable({ rows }: { rows: AgentEvidenceRow[] }) {
   );
 }
 
+interface ProgressEvent {
+  phase: "started" | "finished";
+  label: string;
+  tool?: string;
+  elapsed_ms?: number;
+  row_count?: number | null;
+  error?: string | null;
+}
+
+/**
+ * Read the NDJSON turn: progress lines while the work happens, then one result line.
+ *
+ * Falls back to parsing the whole body as JSON when the server did not stream, so an older
+ * deployment, a proxy that strips the content type, or the plain JSON path all still work.
+ */
+async function readAgentStream(
+  response: Response,
+  onProgress: (event: ProgressEvent) => void,
+): Promise<AgentResponse> {
+  const body = response.body;
+  if (!body || !(response.headers.get("content-type") ?? "").includes("application/x-ndjson")) {
+    return (await response.json()) as AgentResponse;
+  }
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: AgentResponse | null = null;
+
+  const handle = (line: string) => {
+    const text = line.trim();
+    if (!text) return;
+    let parsed: { type?: string; response?: AgentResponse } & ProgressEvent;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return; // a truncated line is not worth failing the whole answer over
+    }
+    if (parsed.type === "progress") onProgress(parsed);
+    else if (parsed.type === "result" && parsed.response) result = parsed.response;
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) handle(line);
+  }
+  handle(buffer);
+
+  if (!result) throw new Error("The server closed the connection before sending an answer.");
+  return result;
+}
+
 function FreshnessBadge({ freshness }: { freshness: AgentDataFreshness | null }) {
   if (!freshness) return null;
   const label = freshness.finished_at
@@ -191,6 +247,9 @@ export default function AgentPage() {
   const [assumptions, setAssumptions] = useState<string[]>([]);
   const [freshness, setFreshness] = useState<AgentDataFreshness | null>(null);
   const [config, setConfig] = useState<AgentConfig | null>(null);
+  // Real events from the server, appended as they arrive. Never a scripted timer: a fake sequence
+  // would keep animating after the work stalled, which is exactly when it must not.
+  const [progress, setProgress] = useState<{ label: string; done: boolean; detail: string | null }[]>([]);
   const scroller = useRef<HTMLDivElement | null>(null);
   // Which of the offered models answers the next question. Null until the config arrives, then the
   // server's own default, so the dropdown never starts on something the server would not run.
@@ -228,6 +287,8 @@ export default function AgentPage() {
     const trimmed = text.trim();
     if (!trimmed || pending) return;
 
+    setProgress([]);
+
     const outgoing: ChatMessage = {
       id: `u-${Date.now()}`,
       role: "user",
@@ -248,6 +309,8 @@ export default function AgentPage() {
         // hand-written header cannot point this deployment's key at a model it does not offer.
         headers: {
           "content-type": "application/json",
+          // opt in to the progress stream; the last line is the same payload the JSON path returns
+          accept: "application/x-ndjson",
           ...(model ? { "x-llm-model": model } : {}),
         },
         body: JSON.stringify({
@@ -257,7 +320,30 @@ export default function AgentPage() {
         }),
       });
 
-      const payload = (await response.json()) as AgentResponse;
+      const payload = await readAgentStream(response, (event) => {
+        setProgress((current) => {
+          if (event.phase === "started") {
+            return [...current, { label: event.label, done: false, detail: null }];
+          }
+          // close the newest open line, or append if the start was never seen
+          const detail = [
+            event.row_count === null || event.row_count === undefined ? null : `${formatInt(event.row_count)} rows`,
+            event.elapsed_ms === undefined ? null : `${(event.elapsed_ms / 1000).toFixed(1)}s`,
+            event.error ? "failed" : null,
+          ]
+            .filter(Boolean)
+            .join(" · ");
+          // A tool runs INSIDE the model call, so it gets its own finished line and leaves the
+          // "asking the model" line open. Anything else closes the newest open line.
+          if (event.tool) return [...current, { label: event.label, done: true, detail: detail || null }];
+          const index = [...current].reverse().findIndex((entry) => !entry.done);
+          if (index === -1) return [...current, { label: event.label, done: true, detail: detail || null }];
+          const at = current.length - 1 - index;
+          return current.map((entry, i) =>
+            i === at ? { label: event.label, done: true, detail: detail || null } : entry,
+          );
+        });
+      });
       const notImplemented = payload.status === "not_implemented" || response.status === 501;
       const failed = payload.status === "error" || (!response.ok && !notImplemented);
 
@@ -311,32 +397,6 @@ export default function AgentPage() {
         title="Agent"
         lead="The same dataset, asked in plain English. The transcript panel shows every tool call the agent made and the evidence panel shows the rows the answer rests on, so an answer can always be traced back to a county record."
       />
-
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <EngineStatus compact />
-        {choices.length > 0 ? (
-          <label className="flex flex-wrap items-center gap-1.5 text-[11.5px] text-faint">
-            model
-            <select
-              className="field"
-              value={model ?? ""}
-              onChange={(event) => setModel(event.target.value)}
-              disabled={pending}
-              aria-label="Model"
-            >
-              {choices.map((choice) => (
-                <option key={choice.id} value={choice.id}>
-                  {choice.label}
-                </option>
-              ))}
-            </select>
-            {providerLabel ? <span className="mono text-muted">{providerLabel}</span> : null}
-          </label>
-        ) : config && !config.configured ? (
-          <span className="badge badge-warn">no model configured</span>
-        ) : null}
-        <FreshnessBadge freshness={freshness} />
-      </div>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="card flex flex-col" style={{ minHeight: 560 }}>
@@ -426,7 +486,20 @@ export default function AgentPage() {
                 )}
               </div>
             ))}
-            {pending ? <Spinner label="Thinking, running tools" /> : null}
+            {pending ? (
+              <div className="space-y-1.5">
+                {progress.length === 0 ? <Spinner label="Starting" /> : null}
+                {progress.map((step, index) => (
+                  <div key={`${step.label}-${index}`} className="flex items-center gap-2 text-[12px]">
+                    <span className={step.done ? "text-good" : "text-accent"} aria-hidden="true">
+                      {step.done ? "✓" : "…"}
+                    </span>
+                    <span className={step.done ? "text-muted" : "text-text"}>{step.label}</span>
+                    {step.detail ? <span className="mono text-[11px] text-faint">{step.detail}</span> : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           <div className="border-t border-border px-4 py-3">
@@ -465,6 +538,33 @@ export default function AgentPage() {
             </form>
           </div>
         </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-border pt-3">
+        <EngineStatus compact />
+        {choices.length > 0 ? (
+          <label className="flex flex-wrap items-center gap-1.5 text-[11.5px] text-faint">
+            model
+            <select
+              className="field"
+              value={model ?? ""}
+              onChange={(event) => setModel(event.target.value)}
+              disabled={pending}
+              aria-label="Model"
+            >
+              {choices.map((choice) => (
+                <option key={choice.id} value={choice.id}>
+                  {choice.label}
+                </option>
+              ))}
+            </select>
+            {providerLabel ? <span className="mono text-muted">{providerLabel}</span> : null}
+          </label>
+        ) : config && !config.configured ? (
+          <span className="badge badge-warn">no model configured</span>
+        ) : null}
+        <FreshnessBadge freshness={freshness} />
+      </div>
+
 
         <aside className="space-y-4">
           <div className="card">

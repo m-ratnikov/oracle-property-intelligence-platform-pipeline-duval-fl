@@ -16,7 +16,7 @@ import type { UserCredential } from "./credentials";
 import { classifyProviderError } from "./errors";
 import { keyFingerprint, safeMessage } from "./redact";
 import { SYSTEM_PROMPT } from "./prompt";
-import { createAgentTools, newTrace } from "./tools";
+import { createAgentTools, newTrace, type AgentProgress } from "./tools";
 import { logAgent } from "./log";
 import type { AgentChatMessage, AgentResponse, AgentUsage } from "./types";
 
@@ -41,6 +41,8 @@ export interface RunAgentOptions {
   fetchImpl?: typeof fetch;
   maxSteps?: number;
   abortSignal?: AbortSignal;
+  /** Called as the turn progresses, for a caller that is streaming the wait to a reader. */
+  onProgress?: (event: AgentProgress) => void;
 }
 
 export function toModelMessages(messages: AgentChatMessage[]): ModelMessage[] {
@@ -83,12 +85,20 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentResponse>
     throw new Error("messages must contain at least one user message");
   }
 
+  const progress = options.onProgress;
+  // The first wait a reader sees is this one: on a cold instance it downloads the published parquet.
+  progress?.({ phase: "started", label: "Opening the published query table" });
   const [resolved, db] = await Promise.all([
     options.model ? Promise.resolve(options.model) : resolveModel(env, options.credential, options.modelChoice),
     options.db ? Promise.resolve(options.db) : getPropertyDb(),
   ]);
+  progress?.({
+    phase: "finished",
+    label: "Opened the published query table",
+    elapsed_ms: Date.now() - started,
+  });
 
-  const trace = newTrace();
+  const trace = newTrace(progress);
   const tools = createAgentTools({ db, env, fetchImpl: options.fetchImpl }, trace);
 
   const agent = new ToolLoopAgent({
@@ -109,7 +119,10 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentResponse>
   const secrets = [options.credential?.apiKey];
   let result;
   try {
+    progress?.({ phase: "started", label: `Asking ${resolved.modelId} to plan the query` });
     result = await agent.generate({ messages: modelMessages, abortSignal: options.abortSignal });
+    // elapsed here is the whole turn so far, which is what a waiting reader wants to see
+    progress?.({ phase: "finished", label: "Answer written", elapsed_ms: Date.now() - started });
   } catch (error: unknown) {
     const safe = safeMessage(error, secrets);
     const typed = classifyProviderError(error, safe, resolved.source);

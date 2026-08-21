@@ -49,6 +49,9 @@ export const dynamic = "force-dynamic";
 // (default and maximum on that plan), which is the tightest platform we deploy to.
 export const maxDuration = 300;
 
+/** The streaming content type. One JSON object per line: progress events, then the result. */
+const NDJSON = "application/x-ndjson";
+
 export type { AgentResponse, AgentToolCall, AgentEvidenceRow } from "@/lib/agent/types";
 
 const NOT_CONFIGURED_HINT =
@@ -132,7 +135,7 @@ function parseMessages(body: unknown): AgentChatMessage[] | null {
   return null;
 }
 
-export async function POST(request: Request): Promise<NextResponse<AgentResponse>> {
+export async function POST(request: Request): Promise<Response> {
   // Rate limit first, before any work and before touching the credential. A
   // public route on a 300 second function is worth protecting whoever pays.
   const decision = AGENT_RATE_LIMIT.check(clientAddress(request.headers));
@@ -174,17 +177,61 @@ export async function POST(request: Request): Promise<NextResponse<AgentResponse
     );
   }
 
-  try {
-    const response = await runAgent({
-      messages,
-      credential,
-      modelChoice: readModelChoice(request.headers),
-      abortSignal: request.signal,
-    });
-    return NextResponse.json(response);
-  } catch (error: unknown) {
-    return toErrorResponse(error, secrets, credential ? "user" : "server");
+  const modelChoice = readModelChoice(request.headers);
+
+  // Streaming is opt in by Accept header. A turn takes about ten seconds and has taken seventy, and
+  // this route can only answer once, at the end, so a reader watching a spinner has no idea whether
+  // anything is happening. A client that asks for NDJSON gets the real events as they occur and the
+  // identical final payload as the last line; everything else - curl, the tests, any other consumer
+  // - keeps the single JSON object it has always received.
+  const wantsStream = (request.headers.get("accept") ?? "").includes(NDJSON);
+
+  if (!wantsStream) {
+    try {
+      const response = await runAgent({ messages, credential, modelChoice, abortSignal: request.signal });
+      return NextResponse.json(response);
+    } catch (error: unknown) {
+      return toErrorResponse(error, secrets, credential ? "user" : "server");
+    }
   }
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (value: unknown) => {
+        try {
+          controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`));
+        } catch {
+          // the reader went away mid turn; the abort signal ends the work
+        }
+      };
+      try {
+        const response = await runAgent({
+          messages,
+          credential,
+          modelChoice,
+          abortSignal: request.signal,
+          onProgress: (event) => send({ type: "progress", ...event }),
+        });
+        send({ type: "result", response });
+      } catch (error: unknown) {
+        // Same typed shape the JSON path returns, so the client renders one error, not two.
+        const failed = toErrorResponse(error, secrets, credential ? "user" : "server");
+        send({ type: "result", response: await failed.json() });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "content-type": `${NDJSON}; charset=utf-8`,
+      "cache-control": "no-store",
+      // proxies that buffer would defeat the entire point of streaming
+      "x-accel-buffering": "no",
+    },
+  });
 }
 
 /**

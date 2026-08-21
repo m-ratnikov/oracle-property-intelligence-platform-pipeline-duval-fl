@@ -323,10 +323,14 @@ export function parseRunHistory(input: unknown): RunHistory {
         // The pipeline publishes this as `delta_vs_prev_total`. Reading only the name this UI
         // invented meant the column always fell through to inserted + updated, so a header that
         // said "delta vs previous" showed the same number as the two columns beside it.
+        // Presence, not nullishness. A published null is a claim - "this run did not measure a
+        // delta" - and `??` cannot tell it apart from the key being absent, so the fallback used to
+        // overwrite an explicit unknown with inserted + updated, which reads as 0 and asserts the
+        // table did not move. Only a record that never carried either field gets the derived value.
         delta_vs_previous:
-          num(source.delta_vs_prev_total) ??
-          num(source.delta_vs_previous) ??
-          addOrNull(num(source.inserted), num(source.updated)),
+          "delta_vs_prev_total" in source || "delta_vs_previous" in source
+            ? (num(source.delta_vs_prev_total) ?? num(source.delta_vs_previous))
+            : addOrNull(num(source.inserted), num(source.updated)),
         target_table: str(source.target_table),
         table_total_after: num(source.table_total_after),
         artifact_sha256: str(source.source_sha256) ?? str(source.artifact_sha256),
