@@ -15,6 +15,7 @@ import {
   upsertIpnsName,
   type FilebaseEnv,
 } from "./filebase.js";
+import { mergePublishedRunHistory, type MergeResult } from "./runHistory.js";
 
 /**
  * IPNS labels per Elephant conventions (one label per dataset; never reuse).
@@ -81,6 +82,8 @@ export interface PublishManifest {
   missingEnv: string[];
   /** IPNS labels that could not be minted (e.g. free-plan name cap); those artifacts stay CID-addressed. */
   ipnsFailures: IpnsFailure[];
+  /** What happened to the already-published run history on this publish (see publish/runHistory.ts). */
+  runHistory: MergeResult;
 }
 
 const PARQUET = "application/vnd.apache.parquet";
@@ -151,11 +154,25 @@ export async function executePublish(opts: {
     log.warn("publish_requested_but_env_missing", { missing: missingEnv });
   }
   const publishedAt = new Date().toISOString();
-  const planned = await planPublish(opts.paths);
 
   const client = live && fb ? (opts.clientFactory ?? createFilebaseClient)(fb) : null;
   const token = live && fb ? ipnsToken(fb) : null;
   const fetchImpl = opts.fetchImpl ?? fetch;
+
+  // Run history is the one cumulative artifact: fold the copy already at the IPNS name into the local
+  // one BEFORE anything is CID-addressed, so this publish can only grow the history a reader sees.
+  // Every failure mode degrades to publishing exactly what this database knows. See runHistory.ts.
+  const runHistory = await mergePublishedRunHistory({
+    paths: opts.paths,
+    county: COUNTY.key,
+    gateway,
+    ipnsLabel: IPNS_LABELS.runHistory,
+    token,
+    fetchImpl,
+    logger: log,
+  });
+
+  const planned = await planPublish(opts.paths);
 
   const results: PublishedObject[] = [];
   const upload = async (o: PublishObject): Promise<PublishedObject> => {
@@ -282,6 +299,7 @@ export async function executePublish(opts: {
     mcpEnv,
     missingEnv,
     ipnsFailures,
+    runHistory,
   };
   mkdirSync(opts.paths.publishDir, { recursive: true });
   writeFileSync(join(opts.paths.publishDir, "publish-manifest.json"), JSON.stringify(manifest, null, 2));
@@ -295,6 +313,11 @@ export function formatManifest(m: PublishManifest): string {
   lines.push(`county:   ${m.county}`);
   lines.push(`bucket:   ${m.bucket ?? "<unset>"}`);
   if (m.missingEnv.length > 0) lines.push(`missing:  ${m.missingEnv.join(", ")}`);
+  const rh = m.runHistory;
+  lines.push(
+    `history:  ${rh.outcome} (local ${rh.localRuns} + published ${rh.publishedRuns} -> publishing ${rh.mergedRuns} runs)` +
+      (rh.detail === null ? "" : ` [${rh.detail}]`),
+  );
   for (const f of m.ipnsFailures) lines.push(`ipns SKIPPED label=${f.label} -> stays CID-addressed (${f.reason})`);
   const w = Math.max(...m.objects.map((o) => o.name.length));
   for (const o of m.objects) {
