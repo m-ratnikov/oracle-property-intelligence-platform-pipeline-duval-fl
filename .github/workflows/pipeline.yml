@@ -116,10 +116,32 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Typecheck
+      # Verification is REPORTED here and ENFORCED at the publish gate further down, rather than
+      # blocking the ingest steps between the two.
+      #
+      # Ingesting is not publishing. The working set these steps guard is a branch-scoped Actions
+      # cache that nothing outside this runner can read, and the next tick merges on from wherever
+      # this one leaves the cursors, so a bad ingest is recoverable by ingesting again. A publish is
+      # not recoverable in the same way: it re-points IPNS names that the hosted runtime and the MCP
+      # read, so a bad artifact is live until someone notices.
+      #
+      # Ordering the suite in front of ingestion cost a whole tick of county data at
+      # 2026-08-22T00:28Z: test/run-log-rehydrate.test.ts failed 16 seconds in, and a test about how
+      # run records are rehydrated skipped 42 minutes of source downloads, the consolidation export
+      # and the publish. Nothing about county data was broken that night.
+      #
+      # Running them first anyway, with the failure carried forward, keeps the fail-fast signal: the
+      # annotation is on screen two minutes into the tick, while the data still lands behind it.
+      # ci.yml runs the same suite plus the linter on every push, so this is the second reading of
+      # it, not the only one.
+      - name: Typecheck (reported now, enforced at the publish gate)
+        id: typecheck
+        continue-on-error: true
         run: pnpm run typecheck
 
-      - name: Unit tests
+      - name: Unit tests (reported now, enforced at the publish gate)
+        id: unit
+        continue-on-error: true
         run: pnpm test
 
       - name: Egress check (COJ / DBPR / JaxEPICS answer only from US IPs; FDOR, JTA, NHD, Overture, Sunbiz do not care)
@@ -144,6 +166,16 @@ jobs:
           else
             pnpm run pipeline -- $ARGS
           fi
+
+      # The enforcement half of the two steps above. It only exists when it has something to say, so
+      # everything after it is skipped by ordinary step semantics and needs no condition of its own.
+      # Failing here still leaves the county data ingested and cached, the run recorded, and the
+      # IPNS names resolving to the last artifact that passed.
+      - name: Publish gate (a build that failed verification does not publish)
+        if: ${{ steps.typecheck.outcome != 'success' || steps.unit.outcome != 'success' }}
+        run: |
+          echo "::error title=Verification failed, publish withheld::typecheck=${{ steps.typecheck.outcome }} unit=${{ steps.unit.outcome }}. This tick's county data is ingested and saved to the cache, and the published artifacts are untouched. Fix the build, then dispatch this workflow on the default branch to publish."
+          exit 1
 
       - name: Export open-data consolidation (changed properties only; rebuilds shards/index/manifest)
         # This pass rewrites query-table.parquet, so it applies the SAME validation gate as the run
@@ -286,9 +318,12 @@ jobs:
             echo "re-dispatch the workflow once it is fixed."
             echo ""
             echo "Common causes, in the order they have actually happened here:"
-            echo "1. the validation or high-water gate stopped the run because it started from a cold cache;"
-            echo "2. a county portal blocked the runner (anti-bot or geo-block) and a track failed;"
-            echo "3. an IPNS name did not move and the publish command exited non-zero."
+            echo "1. typecheck or the unit suite failed, so the publish gate withheld the publish."
+            echo "   This tick's county data IS ingested and cached and the previously published"
+            echo "   artifacts are untouched, so the cost is one skipped publish, not a lost tick;"
+            echo "2. the validation or high-water gate stopped the run because it started from a cold cache;"
+            echo "3. a county portal blocked the runner (anti-bot or geo-block) and a track failed;"
+            echo "4. an IPNS name did not move and the publish command exited non-zero."
           } > alert-body.md
           gh label create pipeline-failure --color B60205 --description "A scheduled pipeline run failed" >/dev/null 2>&1 || true
           EXISTING="$(gh issue list --state open --label pipeline-failure --limit 1 --json number --jq '.[0].number' 2>/dev/null || true)"

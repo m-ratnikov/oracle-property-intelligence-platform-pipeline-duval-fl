@@ -9,6 +9,10 @@ name: ci
 #
 # The two packages have separate lockfiles and no workspace root, so they are separate jobs and each
 # installs from its own directory.
+#
+# Required checks are pipeline (typecheck + unit), ui (typecheck + unit) and ui (build). The
+# Playwright smoke job is reported and does not block; the reasoning, and what would retire it, is
+# on the job itself.
 on:
   push:
     branches: ["**"]
@@ -76,14 +80,51 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
+  # The production build is its own check, because it is the one thing here that says "this code
+  # compiles" and it must be able to turn CI red. It used to run only inside the smoke job below,
+  # which carries continue-on-error, so a `next build` that did not compile could not fail CI at
+  # all. Blocking on the build and not blocking on a browser suite are two different decisions and
+  # they now live in two different jobs.
+  ui-build:
+    name: ui (build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: ui/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Build
+        # `build` also runs the assets script that copies the DuckDB-WASM bundles into public/, so a
+        # missing or renamed asset fails here rather than in a browser.
+        run: pnpm run build
+
   ui-e2e:
     name: ui (playwright smoke)
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Reported, never blocking. The smoke suite drives a real production build with DuckDB-WASM and
-    # a 33 MB module download, so it is the flakiest thing in the repository, and specs for it are
-    # being repaired in parallel with this workflow landing. Turn this into a required check once
-    # the suite has been green for a few consecutive runs.
+    # Only worth a browser download once the build is known to compile, and skipped outright when it
+    # does not, which is also what stops this job from reporting a build failure as a suite failure.
+    needs: ui-build
+    # Reported, never blocking, and this is now the ONLY thing the exemption covers. The suite
+    # drives a real production build with a 33 MB DuckDB-WASM download over the network, which is
+    # the flakiness this was granted for.
+    #
+    # It has since been green in every CI run that reached it (18 specs, about 50 seconds), so the
+    # exemption is now unearned rather than justified. Before removing it: ten consecutive green
+    # runs across more than one day, and no test passing on its retry in any of them, which the
+    # uploaded HTML report marks as flaky. `retries: 1` in playwright.config.ts absorbs exactly the
+    # single-attempt flake this exemption exists for, so that count has to come from the report and
+    # not from the job conclusion.
     continue-on-error: true
     defaults:
       run:
@@ -102,6 +143,9 @@ jobs:
       - name: Install the browser
         run: pnpm exec playwright install --with-deps chromium
       - name: Build
+        # Built again rather than carried over from ui-build: playwright.config.ts starts the suite
+        # with `next start`, which needs .next on this runner, and a Next build output is larger and
+        # slower to move between jobs than it is to produce.
         run: pnpm run build
       - name: Smoke suite
         run: pnpm run test:e2e
