@@ -4,8 +4,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Paths } from "../src/config.js";
 import { createLogger } from "../src/log.js";
+import { computeFileCid } from "../src/publish/cid.js";
 import { executePublish, IPNS_LABELS } from "../src/publish/index.js";
 import {
+  assertRunHistoryDescribesQueryTable,
+  findRunForQueryTable,
   mergePublishedRunHistory,
   mergeRunHistories,
   parsePublishedRunHistory,
@@ -79,6 +82,21 @@ function writeLocal(paths: Paths, runs: RunHistoryEntry[]): string {
   const file = join(paths.publishDir, "run-history.json");
   writeFileSync(file, JSON.stringify(doc(runs), null, 2));
   return file;
+}
+
+/**
+ * Write the fixture parquet and hand back the artifact block a real run record carries for it.
+ *
+ * The publish refuses to ship a history in which no run records the parquet being uploaded, which
+ * is the whole point of that gate: the document and the data have to describe the same run. So the
+ * fixture states the identity the same way the pipeline does, by content hash rather than by
+ * agreement between two literals.
+ */
+async function writeQueryTable(paths: Paths): Promise<Record<string, unknown>> {
+  const file = join(paths.publishDir, "query-table.parquet");
+  writeFileSync(file, Buffer.from("PAR1-fixture-query-table"));
+  const cid = await computeFileCid(file);
+  return { queryTable: { path: "query-table.parquet", rows: 404_023, cid: cid.cid, cidV1: cid.cidV1 } };
 }
 
 type StubResponse = { ok: boolean; status: number; statusText: string; text(): Promise<string>; json(): Promise<unknown> };
@@ -380,7 +398,7 @@ describe("run history merge: every degradation publishes what this database know
 describe("publish: the cold-cache run cannot shrink the published history", () => {
   it("uploads 29 published runs plus the 3 a cold database knows, not 3", async () => {
     const paths = makePaths();
-    writeFileSync(join(paths.publishDir, "query-table.parquet"), Buffer.from("PAR1-fixture-query-table"));
+    const artifacts = await writeQueryTable(paths);
     writeFileSync(join(paths.publishDir, "dataset-coverage.json"), JSON.stringify({ county: COUNTY, datasets: [] }));
     // Exactly the shape of Actions run 32513420281: a cold DuckDB that knows only its own three runs,
     // one of which (the consolidation pass) is already in the published copy.
@@ -389,7 +407,7 @@ describe("publish: the cold-cache run cannot shrink the published history", () =
     if (shared === undefined) throw new Error("fixture");
     const local = [
       run("01M0J9VD2ACF", "2026-08-21T13:58:30.000Z"),
-      run("01M0JS84VW9D", "2026-08-21T18:27:36.000Z", { totals: { inserted: 1_412_096 } }),
+      run("01M0JS84VW9D", "2026-08-21T18:27:36.000Z", { totals: { inserted: 1_412_096 }, artifacts }),
       { ...shared, status: "ok", git_sha: "repaired-by-the-cold-run" },
     ];
     writeLocal(paths, local);
@@ -442,8 +460,8 @@ describe("publish: the cold-cache run cannot shrink the published history", () =
 
   it("still publishes the cold run's own history when the gateway is down", async () => {
     const paths = makePaths();
-    writeFileSync(join(paths.publishDir, "query-table.parquet"), Buffer.from("PAR1-fixture-query-table"));
-    writeLocal(paths, [run("01M0JS84VW9D", "2026-08-21T18:27:36.000Z")]);
+    const artifacts = await writeQueryTable(paths);
+    writeLocal(paths, [run("01M0JS84VW9D", "2026-08-21T18:27:36.000Z", { artifacts })]);
     const uploaded = new Map<string, Buffer>();
     const client = {
       send: async (cmd: { input?: { Key?: string; Body?: Buffer } }) => {
@@ -473,5 +491,94 @@ describe("publish: the cold-cache run cannot shrink the published history", () =
     const shipped = JSON.parse((uploaded.get(RUN_HISTORY_KEY) as Buffer).toString("utf8")) as RunHistoryDoc;
     expect(shipped.runs).toHaveLength(1);
     expect(manifest.runHistory.outcome).toBe("published_unreachable");
+  });
+});
+
+
+/**
+ * The second half of the same promise. The merge stops the published history from SHRINKING; this
+ * stops it from being one run behind the data beside it.
+ *
+ * The runs page is the evidence that ingestion is continuous, and the reader arrives there from a
+ * page rendered out of query-table.parquet. If the history published next to that parquet does not
+ * contain the run that built it, the page shows a run list that stops just short of the data the
+ * reader is looking at, every single time. The identity is checked by content hash, not by
+ * ordering: the run record carries the CID of the query table it exported, and the publisher
+ * computes the CID of the file it is about to upload.
+ */
+describe("publish: the history has to describe the data published with it", () => {
+  const withQueryTable = (id: string, cid: string, cidV1: string): RunHistoryEntry =>
+    run(id, "2026-08-21T23:43:16.590Z", { artifacts: { queryTable: { path: "query-table.parquet", cid, cidV1 } } });
+
+  it("finds the run that exported this parquet, by v0 or by v1 CID", () => {
+    const runs = [run("OTHER", "2026-08-21T12:00:00.000Z"), withQueryTable("MINE", "QmV7vi", "bafybeidex")];
+    expect(findRunForQueryTable(runs, "QmV7vi", "bafyOTHER")?.run_id).toBe("MINE");
+    expect(findRunForQueryTable(runs, "QmOTHER", "bafybeidex")?.run_id).toBe("MINE");
+    expect(findRunForQueryTable(runs, "QmNOBODY", "bafyNOBODY")).toBeNull();
+  });
+
+  it("ignores a run whose artifacts block is missing or the wrong shape", () => {
+    const runs = [run("NO-ARTIFACTS", "2026-08-21T12:00:00.000Z"), run("STRING", "2026-08-21T12:00:00.000Z", { artifacts: "queryTable" })];
+    expect(findRunForQueryTable(runs, "QmV7vi", "bafybeidex")).toBeNull();
+  });
+
+  it("names the run that produced the parquet, so the manifest can be read as provenance", async () => {
+    const paths = makePaths();
+    const artifacts = await writeQueryTable(paths);
+    const qt = (artifacts.queryTable as { cid: string; cidV1: string });
+    writeLocal(paths, [run("01M0KBA53DPMHRGXV66NQ0GRY5", "2026-08-21T23:43:16.590Z", { artifacts })]);
+
+    const provenance = assertRunHistoryDescribesQueryTable({ paths, cid: qt.cid, cidV1: qt.cidV1, logger: log });
+    expect(provenance).toMatchObject({ runId: "01M0KBA53DPMHRGXV66NQ0GRY5", cid: qt.cid, historyRuns: 1 });
+  });
+
+  it("makes no claim when there is no history to publish at all", async () => {
+    const paths = makePaths();
+    const qt = (await writeQueryTable(paths)).queryTable as { cid: string; cidV1: string };
+    expect(assertRunHistoryDescribesQueryTable({ paths, cid: qt.cid, cidV1: qt.cidV1, logger: log })).toBeNull();
+  });
+
+  it("refuses a history that describes a different parquet, and uploads nothing at all", async () => {
+    const paths = makePaths();
+    await writeQueryTable(paths);
+    writeFileSync(join(paths.publishDir, "dataset-coverage.json"), JSON.stringify({ county: COUNTY, datasets: [] }));
+    // The exact shape of the defect: the newest run record was written AFTER the publish read the
+    // history, so the document carries only the previous run and its previous parquet.
+    writeLocal(paths, [withQueryTable("01M0K3MMVXPFKM5JBHADMFRDNJ", "QmTheRunBefore", "bafybeiTheRunBefore")]);
+
+    const uploaded: string[] = [];
+    const client = {
+      send: async (cmd: { input?: { Key?: string } }) => {
+        if (cmd.input?.Key !== undefined) uploaded.push(cmd.input.Key);
+        return {};
+      },
+      middlewareStack: { add: () => undefined, remove: () => undefined },
+    };
+    const { fetchImpl } = stubFetch({ gateway: async () => respond(404, "not found") });
+
+    await expect(
+      executePublish({
+        paths,
+        env: { FILEBASE_ACCESS_KEY: "test-access", FILEBASE_SECRET_KEY: "test-secret", FILEBASE_BUCKET_DUVAL: "test-bucket" } as NodeJS.ProcessEnv,
+        publish: true,
+        logger: log,
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        clientFactory: () => client as never,
+      }),
+    ).rejects.toThrow(/none of them records query-table.parquet/);
+
+    // The gate runs before the first PUT, so there is no state in which the bucket holds this
+    // publish's parquet next to a history that does not mention it. The artifacts already live
+    // stay live, and stay consistent with each other.
+    expect(uploaded).toEqual([]);
+  });
+
+  it("refuses rather than guesses when the local history cannot be read", async () => {
+    const paths = makePaths();
+    const qt = (await writeQueryTable(paths)).queryTable as { cid: string; cidV1: string };
+    writeFileSync(join(paths.publishDir, "run-history.json"), "{ not json");
+    expect(() => assertRunHistoryDescribesQueryTable({ paths, cid: qt.cid, cidV1: qt.cidV1, logger: log })).toThrow(
+      /could not be read/,
+    );
   });
 });

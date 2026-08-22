@@ -16,7 +16,12 @@ import {
   type FilebaseEnv,
   type IpnsReadbackOptions,
 } from "./filebase.js";
-import { mergePublishedRunHistory, type MergeResult } from "./runHistory.js";
+import {
+  assertRunHistoryDescribesQueryTable,
+  mergePublishedRunHistory,
+  type MergeResult,
+  type QueryTableProvenance,
+} from "./runHistory.js";
 
 /**
  * IPNS labels per Elephant conventions (one label per dataset; never reuse).
@@ -129,6 +134,12 @@ export interface PublishManifest {
   ok: boolean;
   /** What happened to the already-published run history on this publish (see publish/runHistory.ts). */
   runHistory: MergeResult;
+  /**
+   * The run inside the published history that produced the query table this publish uploaded, and
+   * the CID that proves it is the same file. Asserted before the first upload, so a manifest that
+   * exists at all is a manifest whose history describes its own data.
+   */
+  queryTableProvenance: QueryTableProvenance | null;
 }
 
 /** The storage account refusing to mint another name reads like this on the Filebase free plan. */
@@ -225,6 +236,17 @@ export async function executePublish(opts: {
   });
 
   const planned = await planPublish(opts.paths);
+
+  // Gate, before a single byte is uploaded: the history we are about to publish has to contain the
+  // run that produced the parquet we are about to publish. See assertRunHistoryDescribesQueryTable.
+  const plannedQueryTable = planned.find((o) => o.name === "query-table.parquet");
+  if (plannedQueryTable === undefined) throw new Error("query table missing from publish plan");
+  const queryTableProvenance = assertRunHistoryDescribesQueryTable({
+    paths: opts.paths,
+    cid: plannedQueryTable.cid,
+    cidV1: plannedQueryTable.cidV1,
+    logger: log,
+  });
 
   const results: PublishedObject[] = [];
   const upload = async (o: PublishObject): Promise<PublishedObject> => {
@@ -426,6 +448,7 @@ export async function executePublish(opts: {
     ipnsFailures,
     ok,
     runHistory,
+    queryTableProvenance,
   };
   mkdirSync(opts.paths.publishDir, { recursive: true });
   writeFileSync(join(opts.paths.publishDir, "publish-manifest.json"), JSON.stringify(manifest, null, 2));
@@ -473,6 +496,19 @@ export function formatManifest(m: PublishManifest): string {
     `history:  ${rh.outcome} (local ${rh.localRuns} + published ${rh.publishedRuns} -> publishing ${rh.mergedRuns} runs)` +
       (rh.detail === null ? "" : ` [${rh.detail}]`),
   );
+  const p = m.queryTableProvenance;
+  if (p !== null) {
+    lines.push(
+      `covers:   query-table.parquet ${p.cid} was produced by run ${p.runId}` +
+        (p.runStartedAt === null ? "" : ` (${p.runStartedAt}${p.runTrigger === null ? "" : `, ${p.runTrigger}`})`) +
+        `, which IS in the ${p.historyRuns}-run history above`,
+    );
+  }
+  // The runs page reads this document. Served from the IPNS name it lags by about a publish cycle,
+  // because the gateway resolves the name from its own cached record rather than from the Names
+  // API the publisher writes to; served from this CID it is exactly what this publish produced.
+  const rhObject = m.objects.find((o) => o.name === "run-history.json");
+  if (rhObject !== undefined) lines.push(`          this publish's copy: ${rhObject.gatewayUrl}`);
   for (const f of m.ipnsFailures) {
     const verb = f.kind === "quota" ? "SKIPPED (account name quota)" : "FAILED";
     lines.push(`ipns ${verb} label=${f.label} -> stays CID-addressed (${f.reason})`);

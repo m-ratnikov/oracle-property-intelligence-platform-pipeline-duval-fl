@@ -28,15 +28,22 @@ export const WATER_VIEW_DIST_M = 150;
 export const WATER_BBOX_DIST_M = 30;
 
 /**
- * Above this many years a tenure is a placeholder date, not a finding.
+ * Above this many years a tenure is not evidence a reader can act on.
  *
- * The City of Jacksonville recorded sales file carries sentinel dates (1800-01-01, 1899-01-01) for
- * parcels whose transfer predates the digital record, and they arrive here as tenures of 226 and
- * 127 years. They still satisfy "no ownership change in 10 years" - a parcel with a placeholder
+ * The City of Jacksonville recorded sales file carries dates that predate the digital record, and
+ * they arrive here as centuries long tenures: 1899-12-30 as 126 years, 1899-01-01 as 127, and
+ * 1800-01-01 as 226. They still satisfy "no ownership change in 10 years" - a parcel with such a
  * date has not changed hands recently either - so the rule keeps counting them, but they are
- * ordered last and labelled, because a 226 year hold read as evidence makes a correct answer look
- * fabricated. A genuine deed from before 1926 that is still in force is vanishingly rare, so 100
- * years is the line.
+ * ordered last and labelled, because a 226 year hold read as the first evidence on screen makes a
+ * correct answer look fabricated.
+ *
+ * The cut is deliberately blunt rather than a sentinel list. Measured on the published artifact,
+ * the 153,240 matching parcels hold 1,508 tenures over 100 years: the great majority are the 1899
+ * and 1800 dates above, and the rest are scattered genuine looking deeds from 1901 to 1925. A
+ * sentinel list would pass those through as findings; an age cut does not, and neither kind is
+ * something a reader should act on. Below the line the oldest surviving tenures are exactly 100
+ * years - 1925 and 1926 conveyances of municipal land, a railway right of way and a cemetery -
+ * which are plausible enough to lead the result set.
  */
 export const TENURE_PLAUSIBLE_MAX_YEARS = 100;
 
@@ -62,6 +69,26 @@ const TENURE_ORDER = `(years_since_last_sale <= ${TENURE_PLAUSIBLE_MAX_YEARS}) D
 const PROVENANCE = SPINE_PROVENANCE_COLUMNS.join(", ");
 const CURRENT_YEAR = "EXTRACT(YEAR FROM CURRENT_DATE)::INTEGER";
 
+/**
+ * A share of the artifact a card reports beside the plain non-null coverage of its columns.
+ *
+ * Non-null coverage alone can be the reassuring half of a fact. roof_age_basis carries a value on
+ * 88.9 percent of published parcels, which reads as a well covered column until you know that none
+ * of those rows is permit derived. The preset therefore names the split it wants counted, the
+ * number comes out of the same scan as the headline count, and the card cannot show one without
+ * the other.
+ */
+export interface CoverageMeasure {
+  /** Result alias suffix. Must be a bare identifier. */
+  key: string;
+  /** What the badge reads. */
+  label: string;
+  /** Boolean SQL counted with a FILTER over the whole published table. */
+  predicate: string;
+  /** Hover text: what the share means, in the reader's terms. */
+  note: string;
+}
+
 export interface QuestionPreset {
   id: string;
   /** Short label for buttons. */
@@ -72,6 +99,8 @@ export interface QuestionPreset {
   rule: string;
   /** Columns that must exist in the published parquet for this preset to run. */
   requires: string[];
+  /** Extra shares of the artifact this card has to report next to its column coverage. */
+  measures?: CoverageMeasure[];
   /**
    * The rule as a bare WHERE clause. The row query and the coverage query are built from this same
    * string, so the count under a result can never drift from the rows above it.
@@ -105,13 +134,21 @@ export const PRESETS: QuestionPreset[] = [
     predicate: ROOF_PREDICATE,
     label: "Roof older than 15 years",
     question: "Which properties have roofs older than 15 years?",
-    rule: `Keep a parcel when the estimated roof year is ${ROOF_AGE_YEARS} or more years before today. roof_year_est is not a roof date unless roof_age_basis says PERMIT: that value means a re-roof permit reconciled to the folio, while EFF_YR_BLT_PROXY and ACT_YR_BLT_PROXY mean no county roof date exists and the appraiser's effective or actual year built is standing in for one. Read roof_age_basis on the row before treating any of this as a roof age; the value is shown on every row for exactly that reason.`,
+    rule: `Keep a parcel when the estimated roof year is ${ROOF_AGE_YEARS} or more years before today. In this artifact roof_year_est is never an actual roof date. roof_age_basis carries one value and one only, EFF_YR_BLT_PROXY, on every parcel that carries a basis at all: it means no county roof date exists for that parcel and the appraiser's effective year built is standing in for one. PERMIT, the only basis that would make roof_year_est a re-roof date, is on no published row. So is ACT_YR_BLT_PROXY. The badges under the result measure both of those against the artifact you are reading, and roof_age_basis is on every row so the claim can be checked rather than trusted.`,
     requires: ["roof_year_est", "roof_age_basis"],
+    measures: [
+      {
+        key: "permit_basis",
+        label: "roof_age_basis = PERMIT",
+        predicate: "roof_age_basis = 'PERMIT'",
+        note: "parcels whose roof year came from a re-roof permit rather than from the year built proxy",
+      },
+    ],
     assumptions: [
-      "A proxy basis is not a roof replacement date. The JaxEPICS permit source is enumerated in bounded windows, so a parcel whose re-roof permit has not been reached yet falls back to the year built proxy and is indistinguishable here from a parcel that was never re-roofed. Both over state roof age.",
-      "Effective year built moves when the appraiser records a major improvement, so it is a better proxy than the actual year built and still not a roof date.",
+      "A proxy basis is not a roof replacement date, and here every basis is a proxy. The JaxEPICS permit source ingested nothing at all: permit_count, roof_permit_count, last_roof_permit_year, last_roof_permit_date and has_permits are null on every published row. A parcel re-roofed last year and a parcel never re-roofed are therefore indistinguishable, and both over state roof age.",
+      "Effective year built moves when the appraiser records a major improvement, so it is a better proxy than the actual year built. ACT_YR_BLT_PROXY, the fallback to the actual year built, is used on no published row: wherever the roll publishes a year at all it publishes eff_year_built, so the fallback is never reached.",
       "Parcels with no roof_year_est at all are excluded rather than guessed at. The coverage figure under the result says how many those are.",
-      "roof_covering_material is not shown. It comes from the property appraiser detail pages, a slow source pulled in bounded windows, so it is null on most or all published rows and would be an empty column pretending to be evidence.",
+      "roof_covering_material is not shown. It comes from the property appraiser detail pages, a slow source pulled in bounded windows, so it is populated on well under one percent of published rows and would be an empty column pretending to be evidence.",
     ],
     evidence: ["roof_year_est", "roof_age_years", "roof_age_basis", "built_year"],
     sql: (limit) => `SELECT
@@ -169,7 +206,7 @@ LIMIT ${limitOf(limit)}`,
     requires: ["years_since_last_sale", "last_sale_date_any", "tenure_basis", "has_sale_on_record"],
     assumptions: [
       "Parcels with no transfer on record are excluded, not counted as long held. has_sale_on_record is false for them, tenure_basis reads NO_SALE_ON_RECORD, and years_since_last_sale is NULL for that reason rather than because the property was held a long time. No transfer on record and a long hold are different findings and this rule reports only the second.",
-      `The recorded sales file carries placeholder dates for transfers that predate the digital record, and they arrive as tenures of a century or more (years_since_last_sale = 127 and 226 are sale dates of 1899 and 1800). They still satisfy the rule, so they stay in the count, but they sort last and are marked placeholder_date in tenure_quality. Anything over ${TENURE_PLAUSIBLE_MAX_YEARS} years is a data artefact, not a finding.`,
+      `The recorded sales file carries dates for transfers that predate the digital record, and they arrive as tenures of a century or more: last_sale_date_any of 1899-12-30, 1899-01-01 and 1800-01-01 read as 126, 127 and 226 years. They still satisfy the rule, so they stay in the count, but they sort last and tenure_quality marks them placeholder_date. The cut is blunt on purpose: every tenure over ${TENURE_PLAUSIBLE_MAX_YEARS} years is labelled and demoted, whether it is an obvious 1899 sentinel or a genuine looking 1921 deed, because neither is a tenure a reader can act on.`,
       "Non arms length transfers (quit claims, deeds between related parties) still count as an ownership change if the county recorded them.",
     ],
     evidence: [
@@ -288,10 +325,18 @@ LIMIT ${limitOf(limit)}`,
     label: "Roof over 15 years AND no sale in 10 years",
     question:
       "Which properties have roofs older than 15 years and have not exchanged ownership in more than 10 years?",
-    rule: `Both rules at once: roof_year_est is ${ROOF_AGE_YEARS} or more years old and years_since_last_sale is ${OWNERSHIP_HOLD_YEARS} or more. roof_age_basis says whether the roof year is a permit date or a year built proxy, and the tenure comes from last_sale_date_any with tenure_basis naming the column it came from. This is the first agent prompt in the demo transcript.`,
+    rule: `Both rules at once: roof_year_est is ${ROOF_AGE_YEARS} or more years old and years_since_last_sale is ${OWNERSHIP_HOLD_YEARS} or more. roof_age_basis is EFF_YR_BLT_PROXY on every row that carries it, so the roof year here is the appraiser's effective year built standing in for a roof date, never a permit date. The tenure comes from last_sale_date_any, with tenure_basis naming the column it came from. This is the first agent prompt in the demo transcript.`,
     requires: ["roof_year_est", "roof_age_basis", "years_since_last_sale", "last_sale_date_any", "tenure_basis"],
+    measures: [
+      {
+        key: "permit_basis",
+        label: "roof_age_basis = PERMIT",
+        predicate: "roof_age_basis = 'PERMIT'",
+        note: "parcels whose roof year came from a re-roof permit rather than from the year built proxy",
+      },
+    ],
     assumptions: [
-      "Inherits every assumption of the two rules it combines: a proxy roof basis is not a roof date, and a placeholder sale date can inflate the tenure.",
+      "Inherits every assumption of the two rules it combines: the roof basis is a year built proxy and not a roof date, and a placeholder sale date can inflate the tenure.",
       "Requires both signals to be present, so parcels with no roof year, or with no transfer on record, drop out entirely rather than being counted either way.",
     ],
     evidence: [
@@ -373,29 +418,101 @@ export const COMBINED_QUESTIONS = PRESETS.filter((preset) => preset.combined);
  * the coverage counts are what tell those two apart on screen.
  */
 export function statsSql(preset: QuestionPreset): string {
-  const coverage = preset.requires
-    .map((column) => `  count(${column}) AS "coverage_${column}"`)
-    .join(",\n");
-  const coverageClause = coverage.length > 0 ? `,\n${coverage}` : "";
+  const parts = [
+    ...preset.requires.map((column) => `  count(${column}) AS "coverage_${column}"`),
+    ...(preset.measures ?? []).map(
+      (measure) => `  count(*) FILTER (WHERE ${measure.predicate}) AS "measure_${measure.key}"`,
+    ),
+  ];
+  const extraClause = parts.length > 0 ? `,\n${parts.join(",\n")}` : "";
   return `SELECT
   count(*) AS total_parcels,
-  count(*) FILTER (WHERE ${preset.predicate}) AS matching_parcels${coverageClause}
+  count(*) FILTER (WHERE ${preset.predicate}) AS matching_parcels${extraClause}
 FROM ${VIEW_NAME}`;
+}
+
+/** Result alias a measure lands under, so the card and the SQL cannot disagree about the key. */
+export function measureAlias(measure: CoverageMeasure): string {
+  return `measure_${measure.key}`;
+}
+
+/** Result alias a required column's non-null count lands under. */
+export function coverageAlias(column: string): string {
+  return `coverage_${column}`;
 }
 
 export function presetById(id: string): QuestionPreset | undefined {
   return PRESETS.find((preset) => preset.id === id);
 }
 
-/** Columns missing from the published parquet that this preset needs. */
-export function missingColumns(preset: QuestionPreset, available: Iterable<string>): string[] {
-  const have = new Set([...available].map((column) => column.toLowerCase()));
-  return preset.requires.filter((column) => !have.has(column.toLowerCase()));
+/* --------------------------------------------------- what the UI knows yet */
+
+/**
+ * What the UI knows about the published schema, as a state rather than as a list.
+ *
+ * The empty array is the trap this type exists to remove. DuckDB-WASM takes seconds to boot and
+ * attach the parquet over HTTP range reads, and for that whole window the engine's column list is
+ * `[]` - which is indistinguishable, to any caller holding a plain array, from an artifact that
+ * genuinely publishes none of the columns a rule needs. The Questions page drew the wrong
+ * conclusion from it and told every arriving reviewer that the published table has no
+ * roof_year_est, which is the exact opposite of what the artifact contains, for as long as the
+ * engine took to attach.
+ *
+ * There is deliberately no value of this type that means "loaded, but nothing here yet".
+ */
+export type SchemaState =
+  | { readonly status: "loading" }
+  | { readonly status: "loaded"; readonly columns: readonly string[] };
+
+/** The schema is not known yet. Nothing may be concluded from it. */
+export const SCHEMA_LOADING: SchemaState = { status: "loading" };
+
+/** The engine has described the artifact: these are its columns, whatever they turn out to be. */
+export function loadedSchema(columns: Iterable<string>): SchemaState {
+  return { status: "loaded", columns: [...columns] };
+}
+
+/**
+ * Whether a card can answer, cannot answer, or does not yet know - one value, so a caller cannot
+ * render the "cannot answer" branch without having proved the schema was loaded first.
+ */
+export type PresetAvailability =
+  | { readonly status: "unknown" }
+  | { readonly status: "runnable" }
+  | { readonly status: "unanswerable"; readonly missing: readonly string[] };
+
+/** The single decision every question card is built from. */
+export function presetAvailability(
+  preset: QuestionPreset,
+  schema: SchemaState,
+): PresetAvailability {
+  if (schema.status === "loading") return { status: "unknown" };
+  const have = new Set(schema.columns.map((column) => column.toLowerCase()));
+  const missing = preset.requires.filter((column) => !have.has(column.toLowerCase()));
+  return missing.length === 0 ? { status: "runnable" } : { status: "unanswerable", missing };
 }
 
 /* ------------------------------------------------------- workbench guard */
 
+/**
+ * `pragma` stays, and it is the one entry here that had to be argued rather than assumed.
+ *
+ * The case for dropping it: in DuckDB `PRAGMA name = value` is a spelling of SET, so the keyword is
+ * not read only in general, and DESCRIBE, SHOW and SUMMARIZE already expose every introspection the
+ * workbench offers, which makes PRAGMA look like surface bought for nothing.
+ *
+ * The case for keeping it, which won: the introspection forms (`PRAGMA table_info('properties')`,
+ * `PRAGMA show_tables`, `PRAGMA database_list`, `PRAGMA version`) are exactly as read only as the
+ * DESCRIBE this workbench already runs, and the /query page documents PRAGMA as accepted, so
+ * refusing it would leave the page contradicting itself. The assignment form is what actually had
+ * to go, and it is refused explicitly below rather than by dropping the whole keyword. Nothing
+ * reachable through PRAGMA reads a file: the reader patterns below match on the function call, not
+ * on the leading keyword, so `PRAGMA` gains an attacker no ground the other rules give up.
+ */
 const ALLOWED_STARTS = ["select", "with", "describe", "summarize", "show", "pragma", "explain"];
+
+/** `PRAGMA x = y` is SET in disguise: a configuration change, not a read. */
+const PRAGMA_ASSIGNMENT = /=/;
 
 const FORBIDDEN = [
   "attach",
@@ -455,12 +572,33 @@ const IO_FUNCTION_PATTERNS: { pattern: RegExp; label: string }[] = [
 ];
 
 /**
+ * A bare string literal where a table name belongs. This is a file read with no reader named.
+ *
+ * DuckDB's replacement scan turns `FROM '<anything>'` into an implicit read of that path or URL, so
+ * `SELECT * FROM '/etc/passwd'` and `SELECT * FROM 'https://evil.example.com/x.parquet'` are the
+ * same attack as `read_parquet(...)` with the function elided. Both walked through every rule above
+ * until this one existed, which is why the comment on the scheme list below no longer claims that
+ * refusing readers refuses remote fetches.
+ *
+ * Matched against the masked form, where every string literal has been emptied, so only the
+ * POSITION of the literal matters and nothing inside it can dodge the rule.
+ *
+ * Known and accepted false positive: `EXTRACT(YEAR FROM '1899-01-01')` puts a literal in the same
+ * position and is refused. The fix is the better spelling anyway - `EXTRACT(YEAR FROM DATE
+ * '1899-01-01')`, or a cast - and the refusal message says so, so nobody is left guessing.
+ */
+const STRING_IN_TABLE_POSITION = /(^|[^a-z0-9_])(from|join)\s*\(?\s*'/;
+
+/**
  * URL schemes that only ever appear in an attempt to make the engine fetch something.
  *
  * http and https are deliberately NOT here: source_url is a published column, so
  * `WHERE source_url LIKE 'https://paopropertysearch%'` is a legitimate query over this dataset and
- * refusing it would be a false positive. A remote fetch needs a reader function to go with the URL,
- * and every reader is already refused above.
+ * refusing it would be a false positive.
+ *
+ * This list is a third cheap check, not the thing that stops a remote fetch. Two separate rules do
+ * that: the reader patterns above cover a fetch that names its reader, and STRING_IN_TABLE_POSITION
+ * covers one that does not.
  */
 const FORBIDDEN_URL_SCHEMES = /(^|[^a-z0-9_])(file|s3|gs|gcs|az|azure|abfss?|r2|hf|ipfs|ipns):\/\//;
 
@@ -471,19 +609,119 @@ export interface GuardResult {
   reason?: string;
 }
 
-/** Remove line and block comments so they cannot hide a second statement. */
-export function stripSqlComments(sql: string): string {
-  return sql.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--[^\n\r]*/g, " ");
+/**
+ * The three forms of a statement the guard reasons over, produced in one pass.
+ *
+ * A regex cannot separate code from text in SQL, and the previous version tried. `WHERE
+ * address_street LIKE '%--%'` has a line comment marker inside a string literal; blind stripping
+ * rewrote it to `WHERE address_street LIKE '%`, a different and unterminated statement - and the
+ * rewritten text was what went on to execute. So this walks the statement instead, tracking
+ * whether it is inside a comment, a single quoted literal (`''` escapes) or a double quoted
+ * identifier (`""` escapes).
+ */
+interface SqlForms {
+  /**
+   * Caller text with comments replaced by a space, literals untouched. This is the text that
+   * executes: a comment cannot smuggle anything past the wrapper once it is gone, and with the
+   * walk above nothing inside a literal is touched to get there.
+   */
+  code: string;
+  /** `code`, case folded, identifier quotes removed so `"read_text"(` cannot hide behind them. */
+  folded: string;
+  /**
+   * `folded` with every string literal emptied to `''`. Structural rules read this one, so a
+   * keyword or a semicolon that is only ever DATA - `WHERE owner_name LIKE '%COPY%'`,
+   * `WHERE legal_description LIKE '%LOT 3; BLK 2%'` - cannot be mistaken for code.
+   */
+  masked: string;
+}
+
+function readSqlForms(sql: string): SqlForms {
+  let code = "";
+  let folded = "";
+  let masked = "";
+  let i = 0;
+
+  while (i < sql.length) {
+    const char = sql[i];
+    const next = sql[i + 1];
+
+    if (char === "-" && next === "-") {
+      while (i < sql.length && sql[i] !== "\n" && sql[i] !== "\r") i += 1;
+      code += " ";
+      folded += " ";
+      masked += " ";
+      continue;
+    }
+
+    if (char === "/" && next === "*") {
+      i += 2;
+      while (i < sql.length && !(sql[i] === "*" && sql[i + 1] === "/")) i += 1;
+      i += 2;
+      code += " ";
+      folded += " ";
+      masked += " ";
+      continue;
+    }
+
+    if (char === "'") {
+      const start = i;
+      i += 1;
+      while (i < sql.length) {
+        if (sql[i] === "'" && sql[i + 1] === "'") {
+          i += 2;
+          continue;
+        }
+        if (sql[i] === "'") {
+          i += 1;
+          break;
+        }
+        i += 1;
+      }
+      const literal = sql.slice(start, i);
+      code += literal;
+      folded += literal.toLowerCase();
+      masked += "''";
+      continue;
+    }
+
+    if (char === '"') {
+      const start = i;
+      i += 1;
+      while (i < sql.length) {
+        if (sql[i] === '"' && sql[i + 1] === '"') {
+          i += 2;
+          continue;
+        }
+        if (sql[i] === '"') {
+          i += 1;
+          break;
+        }
+        i += 1;
+      }
+      const quoted = sql.slice(start, i);
+      const inner = quoted.replace(/"/g, "").toLowerCase();
+      code += quoted;
+      folded += inner;
+      masked += inner;
+      continue;
+    }
+
+    code += char;
+    folded += char.toLowerCase();
+    masked += char.toLowerCase();
+    i += 1;
+  }
+
+  return { code, folded, masked };
 }
 
 /**
- * Fold a statement to the form the deny rules are written against: comments gone, identifier
- * quotes gone so `"read_text"(...)` cannot hide behind them, case folded.
- *
- * Only used for the scan. The statement that executes is the caller's original text.
+ * Remove line and block comments so they cannot hide a second statement, without touching text
+ * inside a string literal or a quoted identifier.
  */
-function scanForm(sql: string): string {
-  return stripSqlComments(sql).replace(/"/g, "").toLowerCase();
+export function stripSqlComments(sql: string): string {
+  return readSqlForms(sql).code;
 }
 
 /**
@@ -503,20 +741,27 @@ function scanForm(sql: string): string {
  * The browser workbench (/query) runs DuckDB-WASM in the reader's own tab against a virtual file
  * system with no host paths and no server credentials in the process, so it has layer two only.
  * That is the correct trade there: the only thing a reader can reach is their own browser.
+ *
+ * What executes is the caller's statement with comments removed and nothing else rewritten. The
+ * structural rules read a masked copy in which literals are emptied, so text can never be mistaken
+ * for code, and code can never hide inside text.
  */
 export function guardSql(raw: string, limit: number = DEFAULT_LIMIT): GuardResult {
-  const stripped = stripSqlComments(raw).trim();
-  if (stripped === "") return { ok: false, reason: "Enter a statement first." };
+  const forms = readSqlForms(raw);
+  if (forms.code.trim() === "") return { ok: false, reason: "Enter a statement first." };
 
-  const withoutTrailing = stripped.replace(/;+\s*$/, "").trim();
-  if (withoutTrailing.includes(";")) {
+  const statement = forms.code.trim().replace(/;+\s*$/, "").trim();
+  const masked = forms.masked.trim().replace(/;+\s*$/, "").trim();
+  const folded = forms.folded;
+
+  if (masked.includes(";")) {
     return {
       ok: false,
       reason: "One statement at a time. Remove the extra semicolon.",
     };
   }
 
-  const firstWord = withoutTrailing.split(/\s+/, 1)[0]?.toLowerCase() ?? "";
+  const firstWord = masked.split(/\s+/, 1)[0] ?? "";
   if (!ALLOWED_STARTS.includes(firstWord)) {
     return {
       ok: false,
@@ -524,15 +769,28 @@ export function guardSql(raw: string, limit: number = DEFAULT_LIMIT): GuardResul
     };
   }
 
-  const scanned = scanForm(withoutTrailing);
+  if (firstWord === "pragma" && PRAGMA_ASSIGNMENT.test(masked)) {
+    return {
+      ok: false,
+      reason: "Read only workbench. PRAGMA may inspect the database, not set an option.",
+    };
+  }
+
   for (const keyword of FORBIDDEN) {
-    if (new RegExp(`(^|[^a-z0-9_])${keyword}([^a-z0-9_]|$)`).test(scanned)) {
+    if (new RegExp(`(^|[^a-z0-9_])${keyword}([^a-z0-9_]|$)`).test(masked)) {
       return { ok: false, reason: `Read only workbench. "${keyword}" is not allowed.` };
     }
   }
 
+  if (STRING_IN_TABLE_POSITION.test(masked)) {
+    return {
+      ok: false,
+      reason: `Read only workbench. A quoted string after FROM or JOIN is a file or URL read, not a table: this session may only read the published "${VIEW_NAME}" view. If you meant a date or a cast, name the type first, as in EXTRACT(YEAR FROM DATE '1899-01-01').`,
+    };
+  }
+
   for (const { pattern, label } of IO_FUNCTION_PATTERNS) {
-    if (pattern.test(scanned)) {
+    if (pattern.test(folded)) {
       return {
         ok: false,
         reason: `Read only workbench. ${label} cannot be called: this session may only read the published "${VIEW_NAME}" view, never a file or a URL.`,
@@ -540,7 +798,7 @@ export function guardSql(raw: string, limit: number = DEFAULT_LIMIT): GuardResul
     }
   }
 
-  if (FORBIDDEN_URL_SCHEMES.test(scanned)) {
+  if (FORBIDDEN_URL_SCHEMES.test(folded)) {
     return {
       ok: false,
       reason: `Read only workbench. Only the published "${VIEW_NAME}" view can be read, not a file or object store URL.`,
@@ -550,8 +808,8 @@ export function guardSql(raw: string, limit: number = DEFAULT_LIMIT): GuardResul
   const effectiveLimit = limitOf(limit);
   const needsWrapping = firstWord === "select" || firstWord === "with";
   const sql = needsWrapping
-    ? `SELECT * FROM (\n${withoutTrailing}\n) AS guarded_query LIMIT ${effectiveLimit}`
-    : withoutTrailing;
+    ? `SELECT * FROM (\n${statement}\n) AS guarded_query LIMIT ${effectiveLimit}`
+    : statement;
 
   return { ok: true, sql };
 }

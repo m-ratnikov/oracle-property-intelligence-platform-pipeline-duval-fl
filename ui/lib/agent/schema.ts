@@ -39,17 +39,17 @@ export const COLUMN_MEANINGS: Record<string, string> = {
   built_year: "Year the main structure was built, as recorded by the appraiser.",
   livable_floor_area: "Heated / living area in square feet.",
   roof_year_est:
-    "DERIVED. Best estimate of the year the current roof went on, and a PROXY rather than a roof date unless roof_age_basis says PERMIT. Always read roof_age_basis beside it.",
+    "DERIVED. Best estimate of the year the current roof went on. On every published row it is a PROXY, not a roof date: roof_age_basis is EFF_YR_BLT_PROXY on all 359,129 rows that have a value and PERMIT on none, so this is the appraiser's effective year built standing in. Always read roof_age_basis beside it.",
   roof_age_basis:
-    "DERIVED. Evidence behind roof_year_est: PERMIT (a re-roof permit reconciled to the folio) or EFF_YR_BLT_PROXY / ACT_YR_BLT_PROXY (year built standing in because no county roof date exists). Read it per row: only PERMIT is a roof date, and the JaxEPICS permit source is enumerated in bounded windows, so most rows are a proxy.",
+    "DERIVED. Evidence behind roof_year_est. Measured on the published artifact: EFF_YR_BLT_PROXY on 359,129 of 404,023 rows and NULL on the other 44,894. PERMIT appears on ZERO published rows, so no roof date here comes from a re-roof permit, and ACT_YR_BLT_PROXY appears on ZERO rows as well, because eff_year_built is populated on exactly the 359,129 rows that have a roof year at all and the actual-year-built fallback is never reached. Every published roof year is therefore the appraiser's effective year built standing in, which over states roof age. Do not describe a basis this data does not contain.",
   roof_age_years:
     "DERIVED. Whole years between roof_year_est and the pipeline run date. Inherits the proxy caveat above.",
   roof_covering_material:
-    "From the Duval Property Appraiser detail pages, a slow US-egress-only source pulled in bounded windows, so it covers only the parcels visited so far and is null on most or all published rows. Do not cite it as evidence.",
+    "From the Duval Property Appraiser detail pages, a slow US-egress-only source pulled in bounded windows, so it covers only the parcels visited so far: non null on 930 of 404,023 published rows (0.23 percent). Do not cite it as evidence.",
   exterior_wall_material:
-    "From the appraiser detail pages, same bounded window caveat: null on most or all published rows.",
+    "From the appraiser detail pages, same bounded window caveat: non null on 930 of 404,023 published rows (0.23 percent).",
   total_area:
-    "From the appraiser detail pages, same bounded window caveat. Use livable_floor_area, which the roll publishes directly.",
+    "From the appraiser detail pages, same bounded window caveat: non null on 930 of 404,023 published rows (0.23 percent). Use livable_floor_area, which the roll publishes directly.",
   lot_size_acre: "Lot size in acres.",
   lot_area_sqft: "Lot area in square feet.",
   assessed_value: "Assessed value on the roll, USD.",
@@ -72,7 +72,7 @@ export const COLUMN_MEANINGS: Record<string, string> = {
     "DERIVED. Owner mailing address classified against the parcel: LOCAL (in county), REGIONAL (elsewhere in FL/GA/SC/AL), NATIONAL (rest of US), FOREIGN, or null when no mailing address.",
   hoa_flag: "Always NULL. Placeholder in the Elephant contract; no Duval source publishes it.",
   last_sale_date:
-    "Sale date from the FDOR roll and SDF file ONLY, which cover the two most recent transfers. NULL on 352,233 of 404,023 Duval parcels (87.2 percent). A NULL here is NOT a long hold: use last_sale_date_any and years_since_last_sale, and has_sale_on_record to tell 'no transfer on record' apart. Never cite this as tenure evidence.",
+    "Sale date from the FDOR roll and SDF file ONLY, which cover the two most recent transfers. NULL on 351,742 of 404,023 Duval parcels (87.06 percent). A NULL here is NOT a long hold: use last_sale_date_any and years_since_last_sale, and has_sale_on_record to tell 'no transfer on record' apart. Never cite this as tenure evidence.",
   last_sale_price: "Price of that FDOR roll transfer, USD. Null wherever last_sale_date is null.",
   last_sale_date_any:
     "DERIVED. The sale date actually used for tenure: the later of last_sale_date and coj_last_sale_date. Populated on 401,832 of 404,023 parcels (99.5 percent). tenure_basis names which column it came from. This is the column to cite for ownership hold questions.",
@@ -201,7 +201,7 @@ export function ruleDescriptions(): RuleDescription[] {
  * system prompt requires preset_question for these eight questions, so carrying a second copy here
  * buys nothing and costs about 800 tokens per step. Cutting it is what keeps a three step answer
  * inside the request ceiling tests/agent-prompt-budget.test.ts guards, which in turn is what keeps
- * the free tier claims on the settings page true.
+ * a single answer affordable on the operator credential this deployment runs on.
  */
 export function ruleCatalogue(): Pick<RuleDescription, "name" | "question" | "evidence_columns">[] {
   return ruleDescriptions().map(({ name, question, evidence_columns }) => ({
@@ -247,7 +247,7 @@ export const THRESHOLDS = {
  * Which column to cite for each question, and which lookalike column to leave alone.
  *
  * This exists because the model kept reaching for the obvious name. Asked about ownership tenure it
- * selected last_sale_date, which is null on roughly 87 percent of parcels, and printed a table of
+ * selected last_sale_date, which is null on 87.06 percent of parcels, and printed a table of
  * "not available" next to a correct count. The column that carries the answer is
  * last_sale_date_any. Naming both halves - use this, not that, and why - is what stops it, and it
  * is the same list the Questions page presets use, so the two surfaces cannot drift apart.
@@ -257,13 +257,13 @@ export const EVIDENCE_GUIDE = [
     topic: "ownership tenure / no sale in N years",
     use: ["last_sale_date_any", "tenure_basis", "tenure_source", "years_since_last_sale", "has_sale_on_record"],
     avoid: ["last_sale_date", "last_sale_price"],
-    why: "last_sale_date comes from the FDOR roll and SDF only, which cover the two most recent transfers, so it is NULL on 352,233 of 404,023 parcels. years_since_last_sale is computed from last_sale_date_any, tenure_basis says which column that came from, and has_sale_on_record = false is what a parcel with no transfer on record looks like. tenure_basis is never NULL, so do not test it with IS NULL.",
+    why: "last_sale_date comes from the FDOR roll and SDF only, which cover the two most recent transfers, so it is NULL on 351,742 of 404,023 parcels (87.06 percent). years_since_last_sale is computed from last_sale_date_any, tenure_basis says which column that came from, and has_sale_on_record = false is what a parcel with no transfer on record looks like. tenure_basis is never NULL, so do not test it with IS NULL.",
   },
   {
     topic: "roof age",
     use: ["roof_year_est", "roof_age_basis", "roof_age_years", "built_year"],
     avoid: ["roof_covering_material"],
-    why: "roof_year_est is a roof date only where roof_age_basis says PERMIT; EFF_YR_BLT_PROXY and ACT_YR_BLT_PROXY mean the year built is standing in and the roof age is over stated. roof_covering_material comes from the appraiser detail pages, a bounded window source, and is null on most or all rows.",
+    why: "roof_age_basis is EFF_YR_BLT_PROXY on 359,129 of 404,023 published rows and NULL on the other 44,894. PERMIT and ACT_YR_BLT_PROXY are on ZERO rows, so no published roof year is a permit date: every one is the appraiser's effective year built standing in, and roof age is over stated everywhere. roof_covering_material comes from the appraiser detail pages, a bounded window source, and is non null on only 930 of 404,023 rows.",
   },
   {
     topic: "owner region",

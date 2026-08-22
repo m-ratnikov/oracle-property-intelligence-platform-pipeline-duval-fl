@@ -166,7 +166,14 @@ describe("agent loop with a mocked model", () => {
       anthropic: { cacheControl: { type: "ephemeral" } },
     });
     const toolNames = (calls[0].tools ?? []).map((tool) => tool.name).sort();
-    expect(toolNames).toEqual(["get_property", "get_run_history", "get_schema", "preset_question", "run_sql"]);
+    expect(toolNames).toEqual([
+      "count_criteria",
+      "get_property",
+      "get_run_history",
+      "get_schema",
+      "preset_question",
+      "run_sql",
+    ]);
     expect(calls[1].prompt.some((message) => message.role === "tool")).toBe(true);
   });
 

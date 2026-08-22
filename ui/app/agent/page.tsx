@@ -51,7 +51,14 @@ const DEMO_PROMPTS = [
  * Named, not described. The descriptions lived in a sidebar card that repeated on every answer;
  * what the names have to carry is the claim that the agent can only read.
  */
-const TOOL_NAMES = ["get_schema", "preset_question", "run_sql", "get_property", "get_run_history"];
+const TOOL_NAMES = [
+  "get_schema",
+  "preset_question",
+  "run_sql",
+  "count_criteria",
+  "get_property",
+  "get_run_history",
+];
 
 const EVIDENCE_META = new Set(["property_id", "address", "source_system", "source_url", "fetched_at", "via"]);
 

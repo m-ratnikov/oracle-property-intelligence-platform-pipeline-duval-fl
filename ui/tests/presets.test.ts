@@ -18,7 +18,8 @@ import {
   VIEW_NAME,
   columnCoverageSql,
   guardSql,
-  missingColumns,
+  loadedSchema,
+  presetAvailability,
   propertyByIdSql,
   searchPropertiesSql,
   statsSql,
@@ -99,7 +100,7 @@ describe("the six questions", () => {
   it.each(PRESETS.map((preset) => [preset.id, preset] as const))(
     "%s returns evidence backed rows",
     async (_id, preset) => {
-      expect(missingColumns(preset, columns)).toEqual([]);
+      expect(presetAvailability(preset, loadedSchema(columns))).toEqual({ status: "runnable" });
 
       const result = await rows(preset.sql(50));
       expect(result.length, `${preset.id} returned no rows`).toBeGreaterThan(0);

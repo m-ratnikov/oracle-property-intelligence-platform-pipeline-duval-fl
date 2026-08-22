@@ -362,8 +362,8 @@ export async function buildFeatures(
   /**
    * tenure_basis names the column `last_sale_date_any` was taken from, and therefore the column
    * `years_since_last_sale` and `no_sale_10y_flag` were computed from:
-   *   FDOR_SALE          -> last_sale_date       (FDOR SDF / NAL roll sale, 12.8% of Duval rows)
-   *   COJ_SALESL         -> coj_last_sale_date   (COJ parcel layer SALESL, 99.4% of Duval rows)
+   *   FDOR_SALE          -> last_sale_date       (FDOR SDF / NAL roll sale, 12.94% of Duval rows)
+   *   COJ_SALESL         -> coj_last_sale_date   (COJ parcel layer SALESL, 99.43% of Duval rows)
    *   NO_SALE_ON_RECORD  -> no sale in any source; last_sale_date_any, years_since_last_sale and
    *                         no_sale_10y_flag are all NULL and MUST NOT be read as a long hold.
    * The value is never NULL, so "no transfer on record" and "a transfer we could not date" can

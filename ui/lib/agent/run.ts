@@ -17,6 +17,7 @@ import { classifyProviderError } from "./errors";
 import { keyFingerprint, safeMessage } from "./redact";
 import { SYSTEM_PROMPT } from "./prompt";
 import { createAgentTools, newTrace, type AgentProgress } from "./tools";
+import { formatCountLedger, verifyAnswerTotals } from "./totals";
 import { logAgent } from "./log";
 import type { AgentChatMessage, AgentResponse, AgentUsage } from "./types";
 
@@ -108,9 +109,23 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentResponse>
     instructions: resolved.instructions(SYSTEM_PROMPT),
     tools,
     // Stable tool order keeps the cached prefix identical across turns.
-    toolOrder: ["get_schema", "preset_question", "run_sql", "get_property", "get_run_history"],
+    // count_criteria is appended rather than slotted in beside run_sql: the cached prompt prefix is
+    // the tool list in order, so adding a tool at the end leaves every earlier schema byte for byte
+    // where it was and the cache keeps hitting.
+    toolOrder: ["get_schema", "preset_question", "run_sql", "get_property", "get_run_history", "count_criteria"],
     stopWhen: stepCountIs(options.maxSteps ?? MAX_STEPS),
-    maxOutputTokens: 4096,
+    // Halved from 4096, which was the larger half of the worst case spend on a public route.
+    //
+    // Chosen against measurements, not a guess. A deployed prompt A answer renders 4,056 characters
+    // of markdown. The largest answer the system prompt permits (eight example rows, sixteen
+    // evidence columns, the full assumptions section) is 5,536 characters, and a markdown table of
+    // dates and numbers tokenises near three characters per token, so that worst case is about
+    // 1,845 tokens. 1,500 would clip it about a fifth of the way through the evidence table, and a
+    // total truncated mid table is exactly the failure this file's totals gate exists to prevent.
+    // 2,048 clears the measured worst case with headroom and still halves the ceiling. The "Counts
+    // in this answer" table is appended below by the totals gate, server side, so it costs no model
+    // output tokens and does not press on this number.
+    maxOutputTokens: 2048,
     temperature: 0.2,
   });
 
@@ -146,6 +161,26 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentResponse>
         : "The model returned no text. The transcript shows the tool calls that were made.";
   }
 
+  // The totals gate. Everything above this line is the model's; everything a reader sees is
+  // checked against what the tools returned first.
+  //
+  // This is the structural half of the source-backed claim. The system prompt can ask the model to
+  // report only computed totals, and it mostly will, but "mostly" is not a property anyone can
+  // verify. Here a numeral presented as a population count is either backed by a number a tool
+  // returned this turn, in which case it stands and its query is listed underneath, or it is not,
+  // in which case it is deleted from the text. The failure mode is a visible hole in the answer,
+  // never a confident wrong number, and that trade is the whole point.
+  const verified = verifyAnswerTotals(answer, trace.counts, trace.seen);
+  answer = verified.answer;
+  const ledger = formatCountLedger(verified.cited, verified.unverified);
+  if (ledger) answer = `${answer.trimEnd()}\n\n${ledger}`;
+  if (verified.unverified.length > 0) {
+    logAgent("warn", "removed uncomputed totals from answer", {
+      removed: verified.unverified,
+      computed_counts: trace.counts.map((claim) => claim.value),
+    });
+  }
+
   // Freshness: whatever get_run_history recorded, else a best effort read so
   // the badge is always populated.
   let freshness = trace.freshness;
@@ -173,6 +208,8 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentResponse>
     tool_calls: trace.calls,
     evidence: trace.evidence,
     assumptions: trace.assumptions,
+    totals: verified.cited,
+    unverified_totals: verified.unverified,
     data_freshness: freshness,
     model: `${resolved.provider}:${servedModelId}`,
     usage,
@@ -189,6 +226,8 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentResponse>
     steps: result.steps.length,
     tool_calls: trace.calls.length,
     evidence_rows: trace.evidence.length,
+    computed_counts: trace.counts.length,
+    unverified_totals: verified.unverified.length,
     finish_reason: result.finishReason,
     input_tokens: usage.input_tokens,
     output_tokens: usage.output_tokens,

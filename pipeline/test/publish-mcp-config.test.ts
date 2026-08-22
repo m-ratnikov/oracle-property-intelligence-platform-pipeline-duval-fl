@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Paths } from "../src/config.js";
 import { createLogger } from "../src/log.js";
+import { computeFileCid } from "../src/publish/cid.js";
 import { executePublish, IPNS_LABELS } from "../src/publish/index.js";
 import { PublishedCountyCatalogSchema } from "../src/publish/catalog.js";
 
@@ -19,13 +20,32 @@ import { PublishedCountyCatalogSchema } from "../src/publish/catalog.js";
  * every six hours by design.
  */
 
-function makePaths(): Paths {
+async function makePaths(): Promise<Paths> {
   const dir = mkdtempSync(join(tmpdir(), "duval-mcp-config-"));
   const publishDir = join(dir, "artifacts", "publish", "duval");
   mkdirSync(publishDir, { recursive: true });
-  writeFileSync(join(publishDir, "query-table.parquet"), Buffer.from("PAR1-fixture-query-table"));
+  const queryTable = join(publishDir, "query-table.parquet");
+  writeFileSync(queryTable, Buffer.from("PAR1-fixture-query-table"));
   writeFileSync(join(publishDir, "dataset-coverage.json"), JSON.stringify({ county: "duval", datasets: [] }));
-  writeFileSync(join(publishDir, "run-history.json"), JSON.stringify({ county: "duval", runs: [] }));
+  // The publish refuses to ship a run history that does not record the parquet beside it, so the
+  // fixture asserts the same identity a real run record does: this run produced this exact file.
+  const qt = await computeFileCid(queryTable);
+  writeFileSync(
+    join(publishDir, "run-history.json"),
+    JSON.stringify({
+      county: "duval",
+      generatedAt: "2026-08-21T23:46:43.558Z",
+      runCount: 1,
+      runs: [
+        {
+          run_id: "01M0KBA53DPMHRGXV66NQ0GRY5",
+          started_at: "2026-08-21T23:43:16.590Z",
+          trigger: "consolidation",
+          artifacts: { queryTable: { path: "query-table.parquet", cid: qt.cid, cidV1: qt.cidV1 } },
+        },
+      ],
+    }),
+  );
   return {
     dataDir: dir,
     dbPath: join(dir, "duval.duckdb"),
@@ -80,7 +100,7 @@ const NO_SLEEP = { sleep: async (): Promise<void> => undefined };
 
 describe("publish output is the source of truth for MCP configuration", () => {
   it("addresses the query table and the coverage snapshot by the CID this publish produced", async () => {
-    const paths = makePaths();
+    const paths = await makePaths();
     const { fetchImpl } = namesApi();
 
     const m = await executePublish({
@@ -107,7 +127,7 @@ describe("publish output is the source of truth for MCP configuration", () => {
   });
 
   it("keeps the catalog URL mutable, because it is fetched as JSON and never handed to DuckDB", async () => {
-    const paths = makePaths();
+    const paths = await makePaths();
     const { fetchImpl } = namesApi();
     const m = await executePublish({
       paths,
@@ -124,7 +144,7 @@ describe("publish output is the source of truth for MCP configuration", () => {
   });
 
   it("publishes a catalog that names exactly the artifacts the env block names", async () => {
-    const paths = makePaths();
+    const paths = await makePaths();
     const { fetchImpl } = namesApi();
     const m = await executePublish({
       paths,
@@ -145,7 +165,7 @@ describe("publish output is the source of truth for MCP configuration", () => {
   });
 
   it("writes a pasteable env file that separates the per-publish lines from the set-once lines", async () => {
-    const paths = makePaths();
+    const paths = await makePaths();
     const { fetchImpl } = namesApi();
     const m = await executePublish({
       paths,
@@ -166,7 +186,7 @@ describe("publish output is the source of truth for MCP configuration", () => {
   });
 
   it("reports a partial publish instead of passing silently", async () => {
-    const paths = makePaths();
+    const paths = await makePaths();
     // The run-history name refuses for a reason that is not a plan quota: a real failure.
     const { fetchImpl } = namesApi({ fail: (label) => (label === IPNS_LABELS.runHistory ? "503 upstream unavailable" : null) });
     const m = await executePublish({
@@ -184,7 +204,7 @@ describe("publish output is the source of truth for MCP configuration", () => {
   });
 
   it("treats the storage account's name quota as a limitation, not a failed publish", async () => {
-    const paths = makePaths();
+    const paths = await makePaths();
     const { fetchImpl } = namesApi({ fail: (label) => (label === IPNS_LABELS.queryTable ? null : "402 plan limit reached") });
     const m = await executePublish({
       paths,

@@ -1,5 +1,6 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { PRESETS, SIX_QUESTIONS } from "../../lib/sql";
+import { SOURCE_FAMILIES } from "../../lib/columns";
 
 /**
  * Browser smoke suite against a production build.
@@ -30,6 +31,34 @@ const FIRST_QUESTION_ID = SIX_QUESTIONS[0].id;
 const READABLE_UTC = /\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?Z/;
 /** An epoch integer with no separators. What a provenance cell must never look like. */
 const RAW_EPOCH = /\b1\d{12}\b/;
+
+/**
+ * Grid columns whose value is the name of a source system rather than a code inside one.
+ *
+ * `<family>_source` for every family the pipeline publishes, plus tenure_source, which the artifact
+ * documents as "the source system that published the tenure date". last_sale_source ends in _source
+ * too and is deliberately not here: it carries "SDF" or "PA_DETAIL", which name a column inside the
+ * sales family rather than who published it.
+ */
+const SYSTEM_NAMING_COLUMNS = new Set<string>([
+  ...SOURCE_FAMILIES.map((family) => `${family.key}_source`),
+  "tenure_source",
+]);
+
+async function headerNames(card: Locator): Promise<string[]> {
+  const names = await card.locator("thead th").allTextContents();
+  return names.map((name) => name.trim());
+}
+
+async function columnsNamingASystem(card: Locator): Promise<string[]> {
+  return (await headerNames(card)).filter((name) => SYSTEM_NAMING_COLUMNS.has(name));
+}
+
+async function cellText(card: Locator, row: Locator, column: string): Promise<string> {
+  const index = (await headerNames(card)).indexOf(column);
+  if (index < 0) return "";
+  return (await row.locator("td").nth(index).textContent()) ?? "";
+}
 
 /**
  * The published dataset-coverage.json, trimmed to three rows: the source that is genuinely
@@ -218,11 +247,37 @@ test.describe("the questions", () => {
       // Every result grid carries provenance.
       // Header text is uppercased by CSS, so match case insensitively.
       await expect(card.getByRole("columnheader", { name: /provenance/i })).toBeVisible();
-      const provenance = card.getByRole("cell").filter({ hasText: /duval_appraiser/i }).first();
+
+      const firstRow = card.locator("tbody tr").first();
+      const provenance = firstRow.getByTestId("provenance");
       await expect(provenance).toBeVisible();
       // The collection timestamp in that cell is a date a person can read, never a raw epoch.
       await expect(provenance).toContainText(READABLE_UTC);
       await expect(provenance).not.toContainText(RAW_EPOCH);
+
+      /*
+       * The assertion this test used to make was `hasText: /duval_appraiser/i`, and it passed
+       * against the defect it was supposed to catch. source_system is duval_appraiser on all
+       * 404,023 rows, so requiring the cell to say it proved only that the cell existed, and never
+       * that the system beside a value was the system that produced it. A row showing an Overture
+       * walking distance credited the county property appraiser and this test called it readable.
+       *
+       * What it asserts now: the systems the cell names must include whatever the row's own
+       * `<family>_source` column says. That column is on screen next to the evidence, so the two
+       * cannot disagree without the grid contradicting itself in the same row.
+       */
+      const named = (await provenance.getAttribute("data-systems")) ?? "";
+      expect(named, `preset ${id} names no source system`).not.toBe("");
+      expect(named.split(","), `preset ${id} drops the spine`).toContain("duval_appraiser");
+
+      for (const column of await columnsNamingASystem(card)) {
+        const shown = (await cellText(card, firstRow, column)).trim();
+        if (shown === "" || shown === "not available") continue;
+        expect(
+          named.split(","),
+          `preset ${id} shows ${column} = ${shown} but its provenance names ${named}`,
+        ).toContain(shown);
+      }
     }
   });
 

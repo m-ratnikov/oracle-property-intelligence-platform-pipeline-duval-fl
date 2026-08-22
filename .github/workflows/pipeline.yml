@@ -12,6 +12,12 @@ name: pipeline
 # back under runs/. The DuckDB working set lives in a branch-scoped Actions cache that GitHub
 # evicts, so runs/ is the only durable record and it has to be able to answer "is the cron actually
 # running" and "did a table just shrink" on its own.
+#
+# "Is the cron running" is answered by runs/ci-runs.json, which is DERIVED from the Actions API and
+# not accumulated. Accumulating cannot work here: the ledger did not exist when the first scheduled
+# run landed, and the file is committed to a branch this project force-pushes over, so a tally could
+# be reset to zero by a git operation rather than by reality. The reconcile step below re-reads the
+# API every run, so the file states what GitHub says happened whatever the branch has been through.
 on:
   schedule:
     - cron: "17 */6 * * *"
@@ -44,6 +50,9 @@ concurrency:
 
 permissions:
   contents: write
+  # The reconcile step lists this workflow's own runs to rebuild runs/ci-runs.json. Naming any
+  # permission here sets every unnamed one to none, so this line is what makes that call possible.
+  actions: read
 
 env:
   DATA_DIR: ${{ github.workspace }}/.data
@@ -119,7 +128,9 @@ jobs:
       - name: Run pipeline (all tracks)
         env:
           # github.event_name is `schedule` on a cron tick, and the CLI records it verbatim in
-          # runs/<run_id>.json and in runs/ci-runs.json. Do not replace it with a literal.
+          # runs/<run_id>.json and in the `runs` layer of runs/ci-runs.json. Do not replace it with
+          # a literal. The `workflow_runs` layer of that file comes from the API instead, so the two
+          # can be compared: they should agree about every run this clone actually executed.
           TRACKS: ${{ github.event.inputs.tracks || 'default' }}
           WINDOW: ${{ github.event.inputs.window || '' }}
           ALLOW_REGRESSION: ${{ github.event.inputs.allow_regression || 'false' }}
@@ -160,6 +171,23 @@ jobs:
             pnpm run publish:open-data
             pnpm run publish:ipfs
           fi
+
+      - name: Reconcile the CI run ledger against the GitHub Actions API
+        # Always, and last. A cron tick that FAILED is the tick a reader most needs to see, and the
+        # pipeline command never reaches its own recording step when it fails. Running here also
+        # means this very workflow run reports itself (as in_progress), and that the ledger the
+        # commit step pushes is the reconciled one rather than the appended one.
+        #
+        # This never fails the job: an API it could not read is recorded in the file as an outcome,
+        # which is visible and honest, where a red run would only hide the evidence it collects.
+        if: always()
+        # Belt and braces for the sentence above: the script handles every API failure itself, and
+        # this covers the case where an earlier failure meant `pnpm install` never ran, so the
+        # runner cannot start it at all.
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: pnpm exec tsx src/publish/reconcileCi.ts
 
       - name: Save source artifacts + DuckDB for the next run
         if: always()

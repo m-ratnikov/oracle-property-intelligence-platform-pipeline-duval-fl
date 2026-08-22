@@ -393,13 +393,20 @@ describe("one bad file never fails the run", () => {
 });
 
 describe("the run records committed to this repository", () => {
-  it("all load, and the latest-*.json manifests are the only files skipped", async () => {
+  it("all load, and only the bookkeeping files beside them are skipped", async () => {
     const db = await coldDb();
     const result = await rehydrate(db, join(REPO_DIR, "runs"));
 
     expect(result.runsInserted).toBeGreaterThanOrEqual(31);
     expect(result.runsInserted + result.skipped.length).toBe(result.filesSeen);
-    expect(result.skipped.every((s) => s.file.startsWith("latest-"))).toBe(true);
+    // runs/ holds three kinds of file. The per-run records, named for their ULID, are the only ones
+    // that rehydrate. The `latest-*` copies are the newest publish's outputs kept for a reader. The
+    // three ledgers are ABOUT the runs rather than records OF one: ci-runs.json in particular
+    // carries a `runs` array and track-state.json carries a `run_id`, so naming them here is what
+    // stops either being mistaken for a run and inserted into run_log as a phantom.
+    const bookkeeping = /^(latest-.+|ci-runs|table-highwater|track-state)\.json$/;
+    expect(result.skipped.filter((s) => !bookkeeping.test(s.file))).toEqual([]);
+    expect(result.skipped.map((s) => s.file)).toEqual(expect.arrayContaining(["ci-runs.json", "table-highwater.json", "track-state.json"]));
     expect(result.sourcesInserted).toBeGreaterThanOrEqual(result.runsInserted);
 
     const history = await loadRunHistory(db);

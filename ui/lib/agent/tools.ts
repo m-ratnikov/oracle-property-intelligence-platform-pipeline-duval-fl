@@ -29,6 +29,16 @@ import {
 } from "./schema";
 import { FAMILY_PROVENANCE_COLUMNS } from "@/lib/columns";
 import type { AgentDataFreshness, AgentEvidenceRow, AgentToolCall } from "./types";
+import {
+  aggregateValueShape,
+  classifyCountShape,
+  conjunctionTotal,
+  COUNT_COLUMN,
+  COUNT_SEMANTICS,
+  harvestNumbers,
+  SHAPE_IN_WORDS,
+  type CountClaim,
+} from "./totals";
 import { logAgent } from "./log";
 
 export const RUN_SQL_MAX_LIMIT = 200;
@@ -36,6 +46,8 @@ export const RUN_SQL_DEFAULT_LIMIT = 50;
 export const PRESET_MAX_LIMIT = 200;
 export const PRESET_DEFAULT_LIMIT = 25;
 export const EVIDENCE_CAP = 60;
+/** Criteria per count_criteria call. Six is more signals than any question here combines. */
+export const COUNT_CRITERIA_MAX = 6;
 
 export interface ToolContext {
   db: PropertyDb;
@@ -74,12 +86,40 @@ export interface ToolTrace {
   evidence: AgentEvidenceRow[];
   assumptions: string[];
   freshness: AgentDataFreshness | null;
+  /**
+   * Every count a tool computed this turn, with the statement that produced it. run.ts checks the
+   * answer's totals against this before the answer is returned, which is why a count is registered
+   * here at the moment it is computed rather than being reconstructed from the prose afterwards.
+   */
+  counts: CountClaim[];
+  /**
+   * Every number any tool returned this turn, including numbers inside prose a tool returned. A
+   * numeral the answer presents as a population count has to be in here or it is not printed.
+   */
+  seen: Set<number>;
   /** Set by a caller that is streaming; absent for curl, tests and the plain JSON path. */
   onProgress?: (event: AgentProgress) => void;
 }
 
 export function newTrace(onProgress?: (event: AgentProgress) => void): ToolTrace {
-  return { calls: [], evidence: [], assumptions: [], freshness: null, onProgress };
+  return { calls: [], evidence: [], assumptions: [], freshness: null, counts: [], seen: new Set(), onProgress };
+}
+
+/** Register a computed count and its receipt. */
+function recordCount(trace: ToolTrace, claim: CountClaim) {
+  trace.counts.push(claim);
+  trace.seen.add(claim.value);
+}
+
+/**
+ * Take everything a tool is about to hand the model and remember the numbers in it.
+ *
+ * Called with the exact object returned, so the allow list is by construction "what the model
+ * saw", not a hand maintained list of fields that someone has to remember to extend.
+ */
+function harvest(trace: ToolTrace, output: unknown) {
+  harvestNumbers(output, trace.seen);
+  return output;
 }
 
 /** Human wording for each tool, used in the progress log. */
@@ -87,6 +127,7 @@ const TOOL_LABELS: Record<string, string> = {
   get_schema: "Reading the published table's columns",
   preset_question: "Running the question's SQL rule",
   run_sql: "Running SQL against the published parquet",
+  count_criteria: "Counting each criterion, all of them together, and every score level",
   get_property: "Fetching one parcel's full record",
   get_run_history: "Checking how fresh the data is",
 };
@@ -157,7 +198,7 @@ function noteDataCaveats(trace: ToolTrace, rows: Row[]) {
   if (proxy > 0) {
     addAssumption(
       trace,
-      `${proxy} of ${rows.length} returned rows have a PROXY roof_age_basis (EFF_YR_BLT_PROXY / ACT_YR_BLT_PROXY): no county roof date exists for them, so the appraiser's year built stands in and the row is NOT a permit derived roof date. Only roof_age_basis = PERMIT is a roof date, and the permit source is enumerated in bounded windows, so a parcel whose re-roof permit has not been reached yet is indistinguishable here from one never re-roofed. Both over state roof age.`,
+      `${proxy} of ${rows.length} returned rows have a PROXY roof_age_basis (EFF_YR_BLT_PROXY): no county roof date exists for them, so the appraiser's effective year built stands in and the row is NOT a permit derived roof date. roof_age_basis = PERMIT would be a roof date, but it is on ZERO published rows, because the JaxEPICS permit source is enumerated in bounded windows and no re-roof permit reconciled to a folio in them. Every roof age here is therefore a proxy and over states roof age; a parcel that was re-roofed last year looks the same as one never re-roofed.`,
     );
   }
   const nullTransit = rows.filter(
@@ -187,7 +228,7 @@ function noteDataCaveats(trace: ToolTrace, rows: Row[]) {
       `${nullSale} of ${rows.length} returned rows have years_since_last_sale NULL, which happens only when has_sale_on_record is false and tenure_basis reads NO_SALE_ON_RECORD: no source records any transfer for the parcel. The long hold rule EXCLUDES them. No transfer on record is a gap in the record, NOT evidence of a long hold, and the two must be reported as different findings.`,
     );
   }
-  // The 87 percent null column. If the model selected it anyway, the answer is about to show a
+  // The 87.06 percent null column. If the model selected it anyway, the answer is about to show a
   // table of "not available" beside a correct count, which reads as a fabricated answer.
   const nullRollSale = rows.filter(
     (row) => "last_sale_date" in row && row.last_sale_date === null,
@@ -195,7 +236,7 @@ function noteDataCaveats(trace: ToolTrace, rows: Row[]) {
   if (nullRollSale > 0) {
     addAssumption(
       trace,
-      `${nullRollSale} of ${rows.length} returned rows have last_sale_date NULL. That column comes from the FDOR roll and SDF only, which cover the two most recent transfers, so it is null on 87 percent of Duval parcels. It is NOT what years_since_last_sale is measured from. Cite last_sale_date_any, tenure_basis and tenure_source instead.`,
+      `${nullRollSale} of ${rows.length} returned rows have last_sale_date NULL. That column comes from the FDOR roll and SDF only, which cover the two most recent transfers, so it is null on 351,742 of 404,023 Duval parcels (87.06 percent). It is NOT what years_since_last_sale is measured from. Cite last_sale_date_any, tenure_basis and tenure_source instead.`,
     );
   }
   const noSaleOnRecord = rows.filter(
@@ -274,12 +315,27 @@ export function createAgentTools(context: ToolContext, trace: ToolTrace) {
 
   const get_schema = tool({
     description:
-      "Describe the `properties` view: every column with its DuckDB type and a one line meaning, the six standard question rules in plain English (thresholds, evidence columns, known caveats), and `evidence_guide`, which names the column to cite for each question and the lookalike column to avoid. Call once before writing SQL. Read evidence_guide before choosing columns: for ownership tenure the answer is in last_sale_date_any and tenure_basis, not in last_sale_date, which is null on about 87 percent of parcels.",
+      "Describe the `properties` view: every column with its DuckDB type and a one line meaning, the six standard question rules in plain English (thresholds, evidence columns, known caveats), and `evidence_guide`, which names the column to cite for each question and the lookalike column to avoid. Call once before writing SQL. Read evidence_guide before choosing columns: for ownership tenure the answer is in last_sale_date_any and tenure_basis, not in last_sale_date, which is null on 87.06 percent of parcels.",
     inputSchema: z.object({}),
     execute: async () => {
       const started = Date.now();
       try {
-        const described = await db.query(`DESCRIBE ${VIEW_NAME}`);
+        const rowCountSql = `SELECT COUNT(*) AS total FROM ${VIEW_NAME}`;
+        const [described, counted] = await Promise.all([
+          db.query(`DESCRIBE ${VIEW_NAME}`),
+          // Measured, not quoted from a note. The size of the universe is the number every other
+          // total has to be plausible against, so it is registered as a computed count like any
+          // other, which is what lets the answer say it out loud.
+          db.query(rowCountSql),
+        ]);
+        const rowCount = Number(counted.rows[0]?.total ?? 0);
+        recordCount(trace, {
+          value: rowCount,
+          counts: `rows in the published ${VIEW_NAME} view, one per parcel`,
+          sql: rowCountSql,
+          shape: "aggregate",
+          tool: "get_schema",
+        });
         // The per family provenance pairs follow one pattern and are described once, below, rather
         // than repeating the same sentence twenty four times in a result that is re-sent on every
         // step of the loop.
@@ -297,6 +353,7 @@ export function createAgentTools(context: ToolContext, trace: ToolTrace) {
           source: db.source,
           is_sample: db.isSample,
           column_count: allNames.length,
+          row_count: rowCount,
           columns,
           spine_provenance_columns: SPINE_PROVENANCE,
           provenance_families: provenanceFamilies().filter((family) =>
@@ -309,9 +366,9 @@ export function createAgentTools(context: ToolContext, trace: ToolTrace) {
             "One row per folio (property_id). Extra derived columns sit next to the 37 canonical Elephant columns.",
             "DuckDB SQL dialect. Use EXTRACT(YEAR FROM CURRENT_DATE) for the current year.",
             "run_sql accepts a single SELECT or WITH statement; results are capped at 200 rows.",
-            "Ownership tenure comes from last_sale_date_any (401,832 of 404,023 rows) with tenure_basis and tenure_source naming where it came from, never from last_sale_date (NULL on 352,233 rows). years_since_last_sale is NULL exactly when has_sale_on_record is false, and such a parcel is EXCLUDED from the long hold rule, never counted as a long hold. tenure_basis is never NULL: it reads NO_SALE_ON_RECORD instead, so do not test it with IS NULL.",
+            "Ownership tenure comes from last_sale_date_any (401,832 of 404,023 rows) with tenure_basis and tenure_source naming where it came from, never from last_sale_date (NULL on 351,742 rows). years_since_last_sale is NULL exactly when has_sale_on_record is false, and such a parcel is EXCLUDED from the long hold rule, never counted as a long hold. tenure_basis is never NULL: it reads NO_SALE_ON_RECORD instead, so do not test it with IS NULL.",
             "owner_count is NULL on every row. The FDOR roll has no co-owner column, so has_additional_owners (the ET AL / ET UX marker) is the only multi owner signal; never present owner_count as a number.",
-            "roof_year_est is a roof date only where roof_age_basis says PERMIT. EFF_YR_BLT_PROXY and ACT_YR_BLT_PROXY mean the year built is standing in, which over states roof age.",
+            "roof_age_basis is EFF_YR_BLT_PROXY on 359,129 of 404,023 rows and NULL on the other 44,894. PERMIT and ACT_YR_BLT_PROXY are on ZERO rows, so NO published roof year is a permit date and every one is the appraiser's effective year built standing in, which over states roof age. Do not tell a reader a row might be PERMIT: none is.",
             "source_system, source_url and fetched_at describe the appraisal roll spine only and are identical on every row. Per family provenance is in <family>_source / <family>_fetched_at, and source_systems lists every system that contributed to a row.",
             "This session can read only the published `properties` view. The engine is opened with external file system and network access disabled and its configuration locked, so file and URL readers (read_text, read_blob, read_csv_auto, glob, a read_parquet of any other path) will fail. That is by design; do not try to work around it.",
           ],
@@ -319,13 +376,14 @@ export function createAgentTools(context: ToolContext, trace: ToolTrace) {
         record(trace, {
           name: "get_schema",
           input: {},
-          summary: `${allNames.length} columns, ${output.rules.length} rules`,
-          output_summary: `${allNames.length} columns, ${output.rules.length} rules`,
+          summary: `${allNames.length} columns, ${output.rules.length} rules, ${rowCount} rows`,
+          output_summary: `${allNames.length} columns, ${output.rules.length} rules, ${rowCount} rows`,
           elapsed_ms: Date.now() - started,
           row_count: allNames.length,
-          result: { column_count: allNames.length, is_sample: db.isSample },
+          total_matched: rowCount,
+          result: { column_count: allNames.length, row_count: rowCount, is_sample: db.isSample },
         });
-        return output;
+        return harvest(trace, output);
       } catch (error) {
         const message = errorMessage(error);
         record(trace, {
@@ -344,7 +402,7 @@ export function createAgentTools(context: ToolContext, trace: ToolTrace) {
 
   const run_sql = tool({
     description:
-      "Run ONE read only SELECT or WITH statement against the `properties` view in DuckDB and return the rows. Use for combinations, rankings and aggregates the presets do not cover. `properties` is the ONLY readable object: mutations, multiple statements, ATTACH/COPY/INSTALL, and every file or URL reader (read_text, read_blob, read_csv_auto, read_json_auto, glob, read_parquet of any other path) are rejected, and the engine itself refuses them too. The result is capped at `limit` rows (default 50, max 200); `total_matched` reports the full match when the cap cut rows off. Select the evidence columns from get_schema's evidence_guide: for ownership tenure that is last_sale_date_any, tenure_basis, tenure_source and years_since_last_sale, plus has_sale_on_record to separate no transfer on record from a long hold, and NOT last_sale_date, which is NULL on 352,233 of 404,023 parcels; for roof age it is roof_year_est with roof_age_basis beside it, and roof_covering_material is null on most or all rows. owner_count is NULL on every row: use has_additional_owners.",
+      "Run ONE read only SELECT or WITH statement against the `properties` view in DuckDB and return the rows. Use for combinations, rankings and aggregates the presets do not cover. `properties` is the ONLY readable object: mutations, multiple statements, ATTACH/COPY/INSTALL, and every file or URL reader (read_text, read_blob, read_csv_auto, read_json_auto, glob, read_parquet of any other path) are rejected, and the engine itself refuses them too. The result is capped at `limit` rows (default 50, max 200). COUNTS: `total_matched` is returned ONLY when this statement's predicate is a plain AND of conditions; for any other shape it is null and the honest number is `rows_selected`, with `count_shape`, `count_sql` and `count_semantics` saying what it does and does not mean. A scored, weighted or OR query therefore has NO total_matched, by construction: use count_criteria to get the conjunction total. Select the evidence columns from get_schema's evidence_guide: for ownership tenure that is last_sale_date_any, tenure_basis, tenure_source and years_since_last_sale, plus has_sale_on_record to separate no transfer on record from a long hold, and NOT last_sale_date, which is NULL on 351,742 of 404,023 parcels; for roof age it is roof_year_est with roof_age_basis beside it, which is EFF_YR_BLT_PROXY or NULL on every published row and never PERMIT, and roof_covering_material is non null on only 930 of 404,023 rows. owner_count is NULL on every row: use has_additional_owners.",
     inputSchema: z.object({
       sql: z
         .string()
@@ -380,21 +438,60 @@ export function createAgentTools(context: ToolContext, trace: ToolTrace) {
       }
       try {
         const result = await db.query(guarded.sql);
+        const inner = withoutTrailingLimit(sql.replace(/;+\s*$/, "").trim());
+        let countSql = `SELECT COUNT(*) AS total FROM (\n${inner}\n) AS counted`;
         let totalMatched: number | null = result.rows.length;
         if (result.rows.length >= effectiveLimit) {
           try {
-            const inner = withoutTrailingLimit(sql.replace(/;+\s*$/, "").trim());
-            const counted = await db.query(`SELECT COUNT(*) AS total FROM (\n${inner}\n) AS counted`);
+            const counted = await db.query(countSql);
             totalMatched = Number(counted.rows[0]?.total ?? result.rows.length);
           } catch {
             totalMatched = null;
           }
+        } else {
+          // Fewer rows than the cap means the rows ARE the whole match, so no second query is
+          // needed. The receipt for the count is then the statement itself.
+          countSql = inner;
+        }
+        // Classify the model's own statement, never the COUNT wrapper: the wrapper puts the
+        // interesting WHERE one paren deep, where a depth aware scan would not find it.
+        const shape = classifyCountShape(inner);
+        const strictTotal = conjunctionTotal(shape, totalMatched);
+        if (totalMatched !== null) {
+          recordCount(trace, {
+            value: totalMatched,
+            counts:
+              shape === "conjunction"
+                ? "rows matching this statement's predicate, a plain AND of conditions"
+                : `rows selected by this statement, whose predicate is ${SHAPE_IN_WORDS[shape]}`,
+            sql: countSql,
+            shape,
+            tool: "run_sql",
+          });
+        }
+        // A hand written `SELECT COUNT(*) ... WHERE ...` is the honest way to get a total, and the
+        // number is inside the one row it returns rather than in its row count. Register it with the
+        // shape of the WHERE that produced it, so that route arrives with a receipt too.
+        if (shape === "aggregate" && result.rows.length === 1) {
+          const valueShape = aggregateValueShape(inner);
+          for (const [column, value] of Object.entries(result.rows[0])) {
+            if (typeof value !== "number" || !Number.isInteger(value) || !COUNT_COLUMN.test(column)) continue;
+            recordCount(trace, {
+              value,
+              counts: `${column} from this aggregate, over a predicate that is ${SHAPE_IN_WORDS[valueShape]}`,
+              sql: inner,
+              shape: valueShape,
+              tool: "run_sql",
+            });
+          }
         }
         recordEvidence(trace, result.rows, "run_sql");
         noteDataCaveats(trace, result.rows);
+        // The shape rides in the transcript line as well, so a reader scanning the tool panel meets
+        // the caveat next to the number instead of having to open the JSON to find it.
         const summary = `${result.rows.length} rows${
-          totalMatched !== null && totalMatched !== result.rows.length ? ` of ${totalMatched} matched` : ""
-        } in ${result.elapsed_ms} ms`;
+          totalMatched !== null && totalMatched !== result.rows.length ? ` of ${totalMatched} selected` : ""
+        }${shape === "conjunction" ? "" : `, ${shape} predicate: not a conjunction total`} in ${result.elapsed_ms} ms`;
         record(trace, {
           name: "run_sql",
           input,
@@ -403,17 +500,31 @@ export function createAgentTools(context: ToolContext, trace: ToolTrace) {
           elapsed_ms: Date.now() - started,
           row_count: result.rows.length,
           total_matched: totalMatched,
-          result: { columns: result.columns, row_count: result.rows.length, total_matched: totalMatched },
+          count_shape: shape,
+          result: {
+            columns: result.columns,
+            row_count: result.rows.length,
+            rows_selected: totalMatched,
+            total_matched: strictTotal,
+            count_shape: shape,
+          },
         });
-        return {
+        return harvest(trace, {
           columns: result.columns,
           rows: result.rows,
           row_count: result.rows.length,
-          total_matched: totalMatched,
+          // Non null ONLY when the predicate is a plain AND of conditions. Every other shape gets
+          // null here and the honest number under rows_selected, so the field named "total matched"
+          // cannot carry a number that did not match all of the criteria.
+          total_matched: strictTotal,
+          rows_selected: totalMatched,
+          count_shape: shape,
+          count_sql: countSql,
+          count_semantics: COUNT_SEMANTICS[shape],
           capped: totalMatched !== null && totalMatched > result.rows.length,
           elapsed_ms: result.elapsed_ms,
           is_sample: db.isSample,
-        };
+        });
       } catch (error) {
         const message = errorMessage(error);
         record(trace, {
@@ -465,6 +576,19 @@ export function createAgentTools(context: ToolContext, trace: ToolTrace) {
             : Promise.resolve(null),
         ]);
         const totalMatched = counted ? Number(counted.rows[0]?.total ?? result.rows.length) : null;
+        const countSql = predicate ? `SELECT COUNT(*) AS total FROM ${VIEW_NAME} WHERE ${predicate}` : sql;
+        // Every preset predicate is a plain AND, but it is classified rather than assumed: a preset
+        // that gains an OR one day must lose its conjunction total on the same commit, not later.
+        const shape = predicate ? classifyCountShape(predicate) : "unknown";
+        if (totalMatched !== null) {
+          recordCount(trace, {
+            value: totalMatched,
+            counts: `parcels matching the ${preset.id} rule (predicate is ${SHAPE_IN_WORDS[shape]})`,
+            sql: countSql,
+            shape,
+            tool: "preset_question",
+          });
+        }
         recordEvidence(trace, result.rows, `preset_question:${name}`, preset.evidence);
         for (const assumption of preset.assumptions) addAssumption(trace, assumption);
         noteDataCaveats(trace, result.rows);
@@ -479,9 +603,10 @@ export function createAgentTools(context: ToolContext, trace: ToolTrace) {
           elapsed_ms: Date.now() - started,
           row_count: result.rows.length,
           total_matched: totalMatched,
+          count_shape: shape,
           result: { preset_id: preset.id, row_count: result.rows.length, total_matched: totalMatched },
         });
-        return {
+        return harvest(trace, {
           preset: name,
           preset_id: preset.id,
           question: preset.question,
@@ -492,11 +617,14 @@ export function createAgentTools(context: ToolContext, trace: ToolTrace) {
           sql,
           rows: result.rows,
           row_count: result.rows.length,
-          total_matched: totalMatched,
+          total_matched: conjunctionTotal(shape, totalMatched),
+          count_shape: shape,
+          count_sql: countSql,
+          count_semantics: COUNT_SEMANTICS[shape],
           capped: totalMatched !== null && totalMatched > result.rows.length,
           elapsed_ms: result.elapsed_ms,
           is_sample: db.isSample,
-        };
+        });
       } catch (error) {
         const message = errorMessage(error);
         record(trace, {
@@ -550,14 +678,14 @@ export function createAgentTools(context: ToolContext, trace: ToolTrace) {
           row_count: 1,
           result: { property_id: row.property_id, open_data_url: openData?.url ?? null },
         });
-        return {
+        return harvest(trace, {
           found: true,
           row,
           open_data: openData
             ? { url: openData.url, document: openData.document }
             : { url: null, note: "No per property JSON reachable for this parcel (not published yet, or OPEN_DATA_INDEX_URL unset)." },
           is_sample: db.isSample,
-        };
+        });
       } catch (error) {
         const message = errorMessage(error);
         record(trace, {
@@ -623,7 +751,7 @@ export function createAgentTools(context: ToolContext, trace: ToolTrace) {
           row_count: runs.length,
           result: { runs: loaded.history.runs.length, latest_run_id: loaded.freshness.run_id },
         });
-        return {
+        return harvest(trace, {
           county: loaded.history.county,
           generated_at: loaded.history.generatedAt,
           source: loaded.location.source,
@@ -631,7 +759,7 @@ export function createAgentTools(context: ToolContext, trace: ToolTrace) {
           run_count: loaded.history.runs.length,
           latest: loaded.freshness,
           runs,
-        };
+        });
       } catch (error) {
         const message = errorMessage(error);
         record(trace, {
@@ -648,8 +776,235 @@ export function createAgentTools(context: ToolContext, trace: ToolTrace) {
     },
   });
 
-  return { get_schema, run_sql, preset_question, get_property, get_run_history };
+  /**
+   * The affirmative half of the totals fix.
+   *
+   * "Strong candidates for further review" is a scored question, and a scored question is exactly
+   * where a model composes an OR or a weighted sum and then narrates its row count as though every
+   * condition held. This tool takes the criteria as a LIST and does the composing itself, so the
+   * conjunction total, the disjunction total and the per score counts all come back at once, each
+   * under a name that says what it is. There is no way to get a number out of it that is not
+   * labelled with the predicate it came from.
+   */
+  const count_criteria = tool({
+    description:
+      "Count a set of criteria properly. Give 2 to 6 boolean SQL conditions over `properties`, each with a plain English label, and this returns: `all_criteria` (parcels where EVERY condition holds, which is the number to report as the total matched), `any_criteria` (parcels where at least one holds, which is NOT that number), `per_criterion` counts, `by_criteria_met` (how many parcels met 4 of 4, 3 of 4 and so on), the universe row count, the exact SQL behind each number, and the top ranked rows with the per criterion flags as evidence. ALWAYS use this instead of hand writing a scored, weighted or OR query for a multi signal question such as strong candidates for further review: run_sql returns no total_matched for such a statement, on purpose.",
+    inputSchema: z.object({
+      criteria: z
+        .array(
+          z.object({
+            label: z.string().min(1).describe("The condition in plain English, for the answer to quote."),
+            expression: z
+              .string()
+              .min(1)
+              .describe(
+                "A boolean SQL expression over `properties`, for example \"roof_year_est IS NOT NULL AND roof_year_est <= EXTRACT(YEAR FROM CURRENT_DATE) - 15\". No SELECT, no subquery over another table.",
+              ),
+          }),
+        )
+        .min(2)
+        .max(COUNT_CRITERIA_MAX)
+        .describe("The criteria, in the order the answer will present them."),
+      columns: z
+        .array(z.string())
+        .max(12)
+        .optional()
+        .describe("Extra evidence columns to return on each row, on top of the identity and provenance columns."),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(PRESET_MAX_LIMIT)
+        .optional()
+        .describe(`Rows to return, up to ${PRESET_MAX_LIMIT}. Default ${PRESET_DEFAULT_LIMIT}.`),
+    }),
+    execute: async ({ criteria, columns, limit }) => {
+      const started = Date.now();
+      const effectiveLimit = Math.min(
+        Math.max(limit ?? PRESET_DEFAULT_LIMIT, PRESET_DEFAULT_LIMIT),
+        PRESET_MAX_LIMIT,
+      );
+      const input = { criteria, columns: columns ?? [], limit: effectiveLimit };
+      const fail = (message: string, extra: Record<string, unknown> = {}) => {
+        record(trace, {
+          name: "count_criteria",
+          input,
+          summary: `rejected: ${message}`,
+          output_summary: `rejected: ${message}`,
+          elapsed_ms: Date.now() - started,
+          row_count: null,
+          error: message,
+        });
+        return { error: message, ...extra };
+      };
+
+      // Each expression goes through the same guard run_sql uses. The DuckDB instance is sealed as
+      // well, so this is defence in depth rather than the only boundary, but a criterion is model
+      // written SQL and model written SQL is checked wherever it enters.
+      for (const criterion of criteria) {
+        const probe = guardSql(`SELECT COUNT(*) FROM ${VIEW_NAME} WHERE (${criterion.expression})`, 1);
+        if (!probe.ok) return fail(`criterion "${criterion.label}" was rejected: ${probe.reason}`, { rejected: true });
+      }
+
+      try {
+        const described = await db.query(`DESCRIBE ${VIEW_NAME}`);
+        const known = new Set(described.rows.map((row) => String(row.column_name)));
+        const extra = (columns ?? []).filter((column) => known.has(column));
+        const unknownColumns = (columns ?? []).filter((column) => !known.has(column));
+
+        const flags = criteria.map((criterion, index) => ({
+          alias: `criterion_${index + 1}_met`,
+          label: criterion.label,
+          expression: criterion.expression,
+          caseExpr: `CASE WHEN (${criterion.expression}) THEN 1 ELSE 0 END`,
+        }));
+        const allPredicate = criteria.map((criterion) => `(${criterion.expression})`).join(" AND ");
+        const anyPredicate = criteria.map((criterion) => `(${criterion.expression})`).join(" OR ");
+        const scoreExpr = flags.map((flag) => flag.caseExpr).join(" + ");
+
+        const countsSql = `SELECT COUNT(*) AS universe_rows,\n  ${flags
+          .map((flag, index) => `COUNT(*) FILTER (WHERE (${criteria[index].expression})) AS ${flag.alias}`)
+          .join(",\n  ")},\n  COUNT(*) FILTER (WHERE ${allPredicate}) AS all_criteria,\n  COUNT(*) FILTER (WHERE ${anyPredicate}) AS any_criteria\nFROM ${VIEW_NAME}`;
+        const histogramSql = `SELECT criteria_met, COUNT(*) AS parcels FROM (SELECT ${scoreExpr} AS criteria_met FROM ${VIEW_NAME}) AS scored GROUP BY 1 ORDER BY 1 DESC`;
+        const rowSelect = [
+          "property_id",
+          ...ADDRESS_COLUMNS,
+          ...flags.map((flag) => `${flag.caseExpr} AS ${flag.alias}`),
+          `${scoreExpr} AS criteria_met`,
+          ...extra,
+          ...SPINE_PROVENANCE,
+        ].join(",\n  ");
+        const rowsSql = `SELECT ${rowSelect}\nFROM ${VIEW_NAME}\nORDER BY criteria_met DESC, property_id\nLIMIT ${effectiveLimit}`;
+
+        const [countsResult, histogramResult, rowsResult] = await Promise.all([
+          db.query(countsSql),
+          db.query(histogramSql),
+          db.query(rowsSql),
+        ]);
+
+        const counts = countsResult.rows[0] ?? {};
+        const universeRows = Number(counts.universe_rows ?? 0);
+        const allCriteria = Number(counts.all_criteria ?? 0);
+        const anyCriteria = Number(counts.any_criteria ?? 0);
+        const perCriterion = flags.map((flag, index) => ({
+          criterion: index + 1,
+          label: flag.label,
+          expression: flag.expression,
+          parcels: Number(counts[flag.alias] ?? 0),
+          sql: `SELECT COUNT(*) AS total FROM ${VIEW_NAME} WHERE (${flag.expression})`,
+        }));
+        const histogram = histogramResult.rows.map((row) => ({
+          criteria_met: Number(row.criteria_met ?? 0),
+          parcels: Number(row.parcels ?? 0),
+        }));
+
+        recordCount(trace, {
+          value: universeRows,
+          counts: `rows in the published ${VIEW_NAME} view, one per parcel`,
+          sql: `SELECT COUNT(*) AS total FROM ${VIEW_NAME}`,
+          shape: "aggregate",
+          tool: "count_criteria",
+        });
+        for (const entry of perCriterion) {
+          recordCount(trace, {
+            value: entry.parcels,
+            counts: `parcels meeting criterion ${entry.criterion} on its own: ${entry.label}`,
+            sql: entry.sql,
+            shape: "conjunction",
+            tool: "count_criteria",
+          });
+        }
+        // The conjunction is composed here, by this tool, from the criteria as given. That is why
+        // it can be labelled a conjunction with a straight face even when one criterion is itself
+        // an OR: what the number counts is rows where every listed criterion holds.
+        recordCount(trace, {
+          value: allCriteria,
+          counts: `parcels meeting ALL ${criteria.length} criteria`,
+          sql: `SELECT COUNT(*) AS total FROM ${VIEW_NAME} WHERE ${allPredicate}`,
+          shape: "conjunction",
+          tool: "count_criteria",
+        });
+        recordCount(trace, {
+          value: anyCriteria,
+          counts: `parcels meeting AT LEAST ONE of the ${criteria.length} criteria, which is not the number meeting all of them`,
+          sql: `SELECT COUNT(*) AS total FROM ${VIEW_NAME} WHERE ${anyPredicate}`,
+          shape: "disjunction",
+          tool: "count_criteria",
+        });
+        for (const bucket of histogram) {
+          recordCount(trace, {
+            value: bucket.parcels,
+            counts: `parcels meeting exactly ${bucket.criteria_met} of the ${criteria.length} criteria`,
+            sql: `${histogramSql} (row where criteria_met = ${bucket.criteria_met})`,
+            shape: "scored",
+            tool: "count_criteria",
+          });
+        }
+
+        recordEvidence(trace, rowsResult.rows, "count_criteria");
+        noteDataCaveats(trace, rowsResult.rows);
+        addAssumption(
+          trace,
+          `A criterion a parcel has no data for scores 0, not negative: criteria_met counts conditions PROVED true, so a parcel with a NULL signal is indistinguishable here from one that fails that condition. ${allCriteria.toLocaleString(
+            "en-US",
+          )} of ${universeRows.toLocaleString("en-US")} parcels meet all ${criteria.length} criteria; ${anyCriteria.toLocaleString(
+            "en-US",
+          )} meet at least one, and that larger number is not an answer to "how many meet the criteria".`,
+        );
+
+        const summary = `${allCriteria} of ${universeRows} meet all ${criteria.length} criteria (${anyCriteria} meet at least one)`;
+        record(trace, {
+          name: "count_criteria",
+          input,
+          summary,
+          output_summary: summary,
+          elapsed_ms: Date.now() - started,
+          row_count: rowsResult.rows.length,
+          total_matched: allCriteria,
+          count_shape: "conjunction",
+          result: { all_criteria: allCriteria, any_criteria: anyCriteria, universe_rows: universeRows },
+        });
+
+        return harvest(trace, {
+          universe_rows: universeRows,
+          all_criteria: {
+            parcels: allCriteria,
+            means: `parcels meeting ALL ${criteria.length} criteria. THIS is the number to report as the total matched.`,
+            sql: `SELECT COUNT(*) AS total FROM ${VIEW_NAME} WHERE ${allPredicate}`,
+          },
+          any_criteria: {
+            parcels: anyCriteria,
+            means:
+              "parcels meeting AT LEAST ONE criterion. Never report this as the number meeting the criteria, and if you cite it, say in the same sentence that it is the at-least-one count.",
+            sql: `SELECT COUNT(*) AS total FROM ${VIEW_NAME} WHERE ${anyPredicate}`,
+          },
+          per_criterion: perCriterion,
+          by_criteria_met: histogram,
+          counts_sql: countsSql,
+          histogram_sql: histogramSql,
+          rows_sql: rowsSql,
+          rows: rowsResult.rows,
+          row_count: rowsResult.rows.length,
+          scoring_rule: `criteria_met = ${flags.map((flag) => `(${flag.label} ? 1 : 0)`).join(" + ")}. A missing signal scores 0, not negative.`,
+          ignored_columns: unknownColumns,
+          elapsed_ms: countsResult.elapsed_ms + histogramResult.elapsed_ms + rowsResult.elapsed_ms,
+          is_sample: db.isSample,
+        });
+      } catch (error) {
+        return fail(errorMessage(error));
+      }
+    },
+  });
+
+  return { get_schema, run_sql, preset_question, count_criteria, get_property, get_run_history };
 }
 
 export type AgentTools = ReturnType<typeof createAgentTools>;
-export const TOOL_NAMES = ["get_schema", "run_sql", "preset_question", "get_property", "get_run_history"] as const;
+export const TOOL_NAMES = [
+  "get_schema",
+  "run_sql",
+  "preset_question",
+  "count_criteria",
+  "get_property",
+  "get_run_history",
+] as const;

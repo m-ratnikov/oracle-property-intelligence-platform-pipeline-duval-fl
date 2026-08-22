@@ -244,7 +244,10 @@ export default function QueryPage() {
             DuckDB-WASM runs an in memory database in your tab. It cannot write to the published
             artifact even if it wanted to. The guard on top rejects anything that is not a single
             SELECT, WITH, DESCRIBE, SUMMARIZE, SHOW, PRAGMA or EXPLAIN, and wraps every result set in
-            a LIMIT.
+            a LIMIT. PRAGMA is accepted only in its introspection form; the assignment spelling
+            (PRAGMA x = y) is refused, because it is how DuckDB writes SET. Statements that would
+            read a file are refused too, including a bare quoted path or URL standing where a table
+            name belongs, which DuckDB would otherwise resolve to a reader.
           </div>
 
           <div className="card card-pad mt-3 text-[12px]">

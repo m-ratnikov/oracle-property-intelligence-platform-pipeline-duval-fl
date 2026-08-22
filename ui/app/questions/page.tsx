@@ -2,9 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useEngineBoot, useSql } from "@/lib/hooks";
-import { COMBINED_QUESTIONS, SIX_QUESTIONS, DEFAULT_LIMIT, missingColumns, statsSql } from "@/lib/sql";
-import type { QuestionPreset } from "@/lib/sql";
-import type { ColumnMeta } from "@/lib/duckdb";
+import {
+  COMBINED_QUESTIONS,
+  SIX_QUESTIONS,
+  DEFAULT_LIMIT,
+  SCHEMA_LOADING,
+  coverageAlias,
+  loadedSchema,
+  measureAlias,
+  presetAvailability,
+  statsSql,
+} from "@/lib/sql";
+import type { QuestionPreset, SchemaState } from "@/lib/sql";
 import { formatInt, formatRatioPercent } from "@/lib/format";
 import { PageHeader, Section, Callout, Spinner, ErrorBox, CopyButton } from "@/components/ui";
 import { DataTable } from "@/components/DataTable";
@@ -12,14 +21,20 @@ import { EngineStatus } from "@/components/EngineStatus";
 
 function QuestionCard({
   preset,
-  columns,
-  ready,
+  schema,
   index,
   autoRun = false,
 }: {
   preset: QuestionPreset;
-  columns: ColumnMeta[];
-  ready: boolean;
+  /*
+   * The engine's schema as a state, never as a bare column list.
+   *
+   * A card must not be able to say "this artifact does not publish roof_year_est" while the only
+   * thing it knows is that the engine has not described the artifact yet. Taking a SchemaState
+   * instead of `ColumnMeta[] + ready` is what makes that unsayable: there is no value here that
+   * reads as an empty schema, and `presetAvailability` answers "unknown" for the loading one.
+   */
+  schema: SchemaState;
   index: number;
   /** Run this card once, unprompted, as soon as the engine can answer it. */
   autoRun?: boolean;
@@ -32,13 +47,10 @@ function QuestionCard({
   const [showSql, setShowSql] = useState(false);
   const [ranAutomatically, setRanAutomatically] = useState(false);
 
-  const missing = useMemo(
-    () => missingColumns(preset, columns.map((column) => column.name)),
-    [preset, columns],
-  );
+  const availability = useMemo(() => presetAvailability(preset, schema), [preset, schema]);
 
   const statement = preset.sql(limit);
-  const runnable = ready && missing.length === 0;
+  const runnable = availability.status === "runnable";
 
   const execute = useCallback(() => {
     void run(preset.sql(limit));
@@ -74,14 +86,25 @@ function QuestionCard({
      * silently counted as zero, which would accuse a populated column of being empty.
      */
     const coverage = preset.requires.map((column) => {
-      const key = `coverage_${column}`;
+      const key = coverageAlias(column);
       const measured = key in row;
       return { column, measured, nonNull: measured ? toCount(row[key]) : null };
+    });
+    /*
+     * The shares the preset asked for on top of plain non-null coverage. roof_age_basis reads a
+     * comfortable 88.9 percent covered while none of those rows is permit derived, so the card
+     * shows the permit share beside it and lets the artifact, not the copy, say it is zero.
+     */
+    const measures = (preset.measures ?? []).map((measure) => {
+      const key = measureAlias(measure);
+      const measured = key in row;
+      return { ...measure, measured, count: measured ? toCount(row[key]) : null };
     });
     return {
       total,
       matching: toCount(row.matching_parcels),
       coverage,
+      measures,
       // required columns that carry no value at all in this artifact
       empty: coverage.filter((entry) => entry.measured && entry.nonNull === 0).map((entry) => entry.column),
     };
@@ -137,17 +160,18 @@ function QuestionCard({
       </div>
 
       {/*
-        Only claim a column is missing once the engine has actually described the artifact.
-        `columns` is empty for the seconds it takes DuckDB-WASM to boot, so this callout used to
-        appear on every card during the first load and tell a reviewer the published table has no
+        Reachable only through the "unanswerable" arm, which `presetAvailability` cannot return
+        while the schema is still loading. That is the whole point of the union: this callout used
+        to be gated on an empty column array, so for the seconds DuckDB-WASM took to boot it
+        appeared on every card and told an arriving reviewer that the published table has no
         roof_year_est - the opposite of what the artifact contains.
       */}
-      {ready && missing.length > 0 ? (
+      {availability.status === "unanswerable" ? (
         <div className="px-4 py-3">
           <Callout tone="warn" title="Cannot answer from this artifact">
             The published query table does not contain{" "}
-            <span className="mono">{missing.join(", ")}</span>. This question stays disabled rather
-            than returning an answer the data cannot support.
+            <span className="mono">{availability.missing.join(", ")}</span>. This question stays
+            disabled rather than returning an answer the data cannot support.
           </Callout>
         </div>
       ) : null}
@@ -208,7 +232,7 @@ function QuestionCard({
             and it is where the tenure coverage figure lands on screen: last_sale_date_any is
             populated on 99.5% of parcels while the roll's own last_sale_date is on 12.9%.
           */}
-          {summary !== null && summary.coverage.length > 0 ? (
+          {summary !== null && summary.coverage.length + summary.measures.length > 0 ? (
             <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11.5px]">
               <span className="text-faint">evidence coverage</span>
               {summary.coverage.map((entry) => (
@@ -232,6 +256,25 @@ function QuestionCard({
                   {!entry.measured
                     ? "not measured"
                     : formatRatioPercent(entry.nonNull ?? 0, summary.total)}
+                </span>
+              ))}
+              {summary.measures.map((measure) => (
+                <span
+                  key={measure.key}
+                  data-testid={`measure-${preset.id}-${measure.key}`}
+                  className={
+                    !measure.measured || measure.count === 0 ? "badge badge-warn" : "badge badge-accent"
+                  }
+                  title={
+                    measure.measured
+                      ? `${measure.note}: ${formatInt(measure.count)} of ${formatInt(summary.total)} published parcels`
+                      : `${measure.label}: not measured by the stats query for this rule`
+                  }
+                >
+                  <span className="mono">{measure.label}</span>{" "}
+                  {measure.measured
+                    ? formatRatioPercent(measure.count ?? 0, summary.total)
+                    : "not measured"}
                 </span>
               ))}
             </div>
@@ -261,12 +304,13 @@ function QuestionCard({
         </div>
       ) : (
         <div className="px-4 pb-4 text-[12.5px]" data-testid={`idle-${preset.id}`}>
-          {!ready ? (
-            <span className="text-faint">
-              Waiting for the query engine. The run button turns on as soon as the published parquet
-              is attached.
-            </span>
-          ) : missing.length > 0 ? (
+          {availability.status === "unknown" ? (
+            /*
+             * Not knowing the schema is a loading state, never a finding. This is the branch the
+             * "Cannot answer from this artifact" callout used to steal on a cold load.
+             */
+            <Spinner label="Attaching the published parquet. The run button turns on when the engine has described it." />
+          ) : availability.status === "unanswerable" ? (
             <span className="text-faint">
               Disabled: this artifact does not publish the columns the rule needs.
             </span>
@@ -302,7 +346,20 @@ function QuestionCard({
 
 export default function QuestionsPage() {
   const engine = useEngineBoot();
-  const ready = engine.stage === "ready";
+
+  /*
+   * The one place the engine's column list is turned into a schema state, so no card has to
+   * remember to check `stage` before believing `columns`. lib/duckdb.ts only ever publishes
+   * columns together with the "ready" stage; this narrows that pair into a single value, and every
+   * card below takes the value rather than the pair.
+   */
+  const schema = useMemo<SchemaState>(
+    () =>
+      engine.stage === "ready"
+        ? loadedSchema(engine.columns.map((column) => column.name))
+        : SCHEMA_LOADING,
+    [engine.stage, engine.columns],
+  );
 
   return (
     <div>
@@ -320,8 +377,8 @@ export default function QuestionsPage() {
         answers something before you touch it; every other card runs when you press{" "}
         <span className="badge badge-accent">run</span>, because each one is a full scan of the
         published parquet in your browser. Highlighted cells are the evidence for the rule on that
-        row. The provenance column collapses source_system, source_url and fetched_at, so any row
-        can be checked against the county record it came from. Where a rule rests on a proxy rather
+        row. The provenance column names every system that contributed a value to the row, so any
+        row can be checked against the record it came from. Where a rule rests on a proxy rather
         than a direct measurement, the basis column says so and the assumptions list explains it.
       </Callout>
 
@@ -334,8 +391,7 @@ export default function QuestionsPage() {
             <QuestionCard
               key={preset.id}
               preset={preset}
-              columns={engine.columns}
-              ready={ready}
+              schema={schema}
               index={index + 1}
               autoRun={index === 0}
             />
@@ -352,8 +408,7 @@ export default function QuestionsPage() {
             <QuestionCard
               key={preset.id}
               preset={preset}
-              columns={engine.columns}
-              ready={ready}
+              schema={schema}
               index={SIX_QUESTIONS.length + index + 1}
             />
           ))}

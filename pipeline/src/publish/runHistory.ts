@@ -78,6 +78,17 @@ export type GatewayFetch = (
 export const RUN_HISTORY_FILE = "run-history.json";
 const DEFAULT_TIMEOUT_MS = 20_000;
 
+/** The run record, inside the history about to be published, that claims the parquet being published. */
+export interface QueryTableProvenance {
+  cid: string;
+  cidV1: string;
+  runId: string;
+  runStartedAt: string | null;
+  runTrigger: string | null;
+  /** How many runs the document being published carries. */
+  historyRuns: number;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -119,6 +130,16 @@ export function mergeRunHistories(local: RunHistoryDoc, published: RunHistoryEnt
   return { ...local, runCount: runs.length, runs };
 }
 
+/** When the copy the gateway served was generated, for the lag line in the merge log. Never throws. */
+function publishedGeneratedAt(text: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return isRecord(parsed) && typeof parsed.generatedAt === "string" ? parsed.generatedAt : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Parse the bytes fetched from the gateway. Anything that is not a usable same-county document degrades. */
 export function parsePublishedRunHistory(
   text: string,
@@ -147,6 +168,93 @@ export function parsePublishedRunHistory(
   }
   const dropped = parsed.runs.length - runs.length;
   return { runs, outcome: "merged", detail: dropped > 0 ? `${dropped} published run(s) had no run_id and were dropped` : null };
+}
+
+/**
+ * Find the run whose recorded query-table artifact IS the parquet about to be uploaded.
+ *
+ * Every run record carries the CID of the query table that run produced, and the publisher computes
+ * the CID of the file on disk. Matching them is an exact identity check, not a heuristic: it is the
+ * same content hash on both sides. It is stated in terms of the ARTIFACT rather than of "the newest
+ * run id", because two branch lineages write into the same `runs/` directory here and the newest
+ * committed run id is not necessarily the run that built this working set.
+ */
+export function findRunForQueryTable(runs: RunHistoryEntry[], cid: string, cidV1: string): RunHistoryEntry | null {
+  for (const run of runs) {
+    const artifacts = run.artifacts;
+    if (!isRecord(artifacts)) continue;
+    const qt = artifacts.queryTable;
+    if (!isRecord(qt)) continue;
+    if (qt.cid === cid || qt.cidV1 === cidV1) return run;
+  }
+  return null;
+}
+
+/**
+ * The invariant that makes /runs honest: the history this publish uploads must contain the run that
+ * produced the artifact this publish uploads.
+ *
+ * Without it the property is incidental. It holds today only because the run record happens to be
+ * written before the publish command starts, and any future reordering (or a publish driven from a
+ * cache older than the checked-out `runs/`) would silently ship a history that does not describe
+ * the data beside it, which is precisely the "always one run stale" failure this guards.
+ *
+ * Called BEFORE the first upload, so a violation publishes nothing at all and the artifacts already
+ * live stay live and stay mutually consistent. That is the same shape as the query-table validation
+ * gate: a failed gate keeps the last set that passed. It does not introduce a window in which the
+ * history and the artifacts can describe different runs, because there is no window: either every
+ * object of this publish goes up, or none does.
+ *
+ * Returns null when there is no local run history to publish at all. A publish that ships no history
+ * makes no claim about which run produced the data, so there is nothing here to contradict; the
+ * plan already treats run-history.json as optional for exactly that first-publish case.
+ */
+export function assertRunHistoryDescribesQueryTable(opts: {
+  paths: Paths;
+  cid: string;
+  cidV1: string;
+  logger: Logger;
+}): QueryTableProvenance | null {
+  const file = join(opts.paths.publishDir, RUN_HISTORY_FILE);
+  if (!existsSync(file)) {
+    opts.logger.info("run_history_absent_from_publish", { file, cid: opts.cid });
+    return null;
+  }
+  let runs: RunHistoryEntry[] = [];
+  let parseError: string | null = null;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+    if (!isRecord(parsed) || !Array.isArray(parsed.runs)) throw new Error("run-history.json has no runs array");
+    runs = parsed.runs.map(asEntry).filter((r): r is RunHistoryEntry => r !== null);
+  } catch (err) {
+    parseError = err instanceof Error ? err.message : String(err);
+  }
+  const found = parseError === null ? findRunForQueryTable(runs, opts.cid, opts.cidV1) : null;
+  if (found === null) {
+    opts.logger.error("run_history_does_not_describe_query_table", {
+      file,
+      cid: opts.cid,
+      cidV1: opts.cidV1,
+      history_runs: runs.length,
+      parse_error: parseError,
+    });
+    throw new Error(
+      `publish aborted: ${file} carries ${runs.length} run(s) and none of them records query-table.parquet ${opts.cid}. ` +
+        (parseError === null
+          ? "The run history would be published without the run that produced the data beside it. Re-run the pipeline so the run record is written before the publish."
+          : `The local run history could not be read: ${parseError}`),
+    );
+  }
+  const provenance: QueryTableProvenance = {
+    cid: opts.cid,
+    cidV1: opts.cidV1,
+    runId: found.run_id,
+    runStartedAt: startedAt(found) === "" ? null : startedAt(found),
+    runTrigger: typeof found.trigger === "string" ? found.trigger : null,
+    historyRuns: runs.length,
+  };
+  opts.logger.info("run_history_describes_query_table", { ...provenance });
+  return provenance;
 }
 
 /**
@@ -284,6 +392,11 @@ export async function mergePublishedRunHistory(opts: {
     published_runs: parsed.runs.length,
     merged_runs: merged.runs.length,
     recovered_from_published: recovered,
+    // The gateway resolves the IPNS name from its own cached record, which lags the Names API by
+    // roughly a publish cycle. Logging what the name actually served, next to what we are about to
+    // publish, turns "the site looks a run behind" into a dated fact instead of a suspicion.
+    published_generated_at: publishedGeneratedAt(got.text),
+    local_generated_at: local.generatedAt,
     note: parsed.detail,
   });
   return {

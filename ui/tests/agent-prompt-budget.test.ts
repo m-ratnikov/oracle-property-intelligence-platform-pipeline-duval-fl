@@ -1,6 +1,6 @@
 /**
  * How many tokens one answer actually costs, and whether that still fits the
- * free tiers the settings page advertises.
+ * free tiers of the providers the model registry lists.
  *
  * This exists because a free tier is not a yes or no property. Groq publishes
  * a free tier for `openai/gpt-oss-120b` that looks generous until you notice
@@ -41,8 +41,22 @@ const CHARS_PER_TOKEN = 4;
  * 131 the pipeline actually publishes. Nothing about the agent changed: the
  * narrower sample had been under reporting what this loop costs against the
  * published artifact, and `get_schema` describes 43 more columns on every step.
+ *
+ * Raised again from 15,000 to 17,000 when the totals gate landed. The measured
+ * largest request went from 13,693 to 15,209 tokens, a 1,516 token rise made of
+ * four things, all of them meaning rather than padding: the sixth tool
+ * (`count_criteria`), whose schema is resent on every step and is what makes a
+ * scored question answerable without inventing a total; the "Totals" section of
+ * the system prompt, which states the rule the gate enforces so the model can
+ * comply instead of being corrected; the count semantics fields on the run_sql
+ * and preset_question descriptions; and the corrected roof and tenure figures,
+ * which replaced "most or all rows" with the measured counts and cost words to
+ * gain accuracy. The ceiling is set at 17,000 rather
+ * than just above the measurement so it keeps its job, which is to fail when
+ * something grows by an order of magnitude and the free tier notes in the
+ * registry need rewriting, not to fail on the next honest sentence.
  */
-const MAX_SINGLE_REQUEST_TOKENS = 15_000;
+const MAX_SINGLE_REQUEST_TOKENS = 17_000;
 
 /** The free tier ceiling this agent is already known to exceed. */
 const GROQ_FREE_TOKENS_PER_MINUTE = 8_000;

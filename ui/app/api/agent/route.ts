@@ -9,7 +9,19 @@ import {
   AgentBadRequestError,
   AgentRateLimitError,
 } from "@/lib/agent/errors";
-import { AGENT_RATE_LIMIT, clientAddress } from "@/lib/agent/ratelimit";
+import {
+  AGENT_RATE_LIMIT,
+  agentBudget,
+  boundTranscript,
+  clientAddress,
+  spendCeilingSettings,
+  MAX_MESSAGES,
+  MAX_MESSAGE_CHARS,
+  MAX_OUTPUT_TOKENS_PER_STEP,
+  MAX_TOOL_STEPS,
+  MAX_TRANSCRIPT_CHARS,
+  type BudgetDecision,
+} from "@/lib/agent/ratelimit";
 import { safeMessage } from "@/lib/agent/redact";
 import { PROVIDERS } from "@/lib/agent/providers";
 import {
@@ -33,13 +45,23 @@ import {
  *      `x-llm-api-key` + `x-llm-provider` + `x-llm-model`;
  *   2. the server environment, when a key is configured there.
  * With neither, the route returns 501 and a typed body saying so, rather than
- * inventing an answer. This deployment ships with no server key, so path 1 is
- * the normal path; a caller may still send their own key by header.
+ * inventing an answer. Which of the two is the normal path depends on what the
+ * deployment configured, and the code does not assume: GET /api/agent reports
+ * which one would answer this request, by variable name, never by value.
  *
  * THE KEY. It exists for the duration of one request. It is not stored, not
  * cached, not written to a cookie, and not logged: every log line and every
  * error string on this path goes through `safeMessage` first, and the GET
  * probe below reports only whether a key is set, never its value.
+ *
+ * WHAT A STRANGER CAN SPEND. This route is public on purpose and stays public,
+ * so the answer cannot be "add a login". It is bounded instead, by the three
+ * ceilings in lib/agent/ratelimit.ts: a per address limit, one global budget
+ * shared by every caller who does NOT bring a key, and hard per request caps on
+ * tool steps and transcript size that give the global budget a known unit cost.
+ * A caller who sends x-llm-api-key spends their own money and is exempt from
+ * the global budget, which is why bringing a key is the advice on every ceiling
+ * message here.
  */
 
 export const runtime = "nodejs";
@@ -119,6 +141,9 @@ function parseMessages(body: unknown): AgentChatMessage[] | null {
   const raw = (body as { messages?: unknown; message?: unknown }).messages;
   if (Array.isArray(raw)) {
     const messages = raw
+      // Bounded before anything walks the array, so a pathological body cannot
+      // make the filtering itself the expensive part of the request.
+      .slice(-MAX_MESSAGES)
       .filter(
         (item): item is { role: string; content: string } =>
           typeof item === "object" &&
@@ -127,12 +152,54 @@ function parseMessages(body: unknown): AgentChatMessage[] | null {
           typeof (item as { content?: unknown }).content === "string",
       )
       .filter((item) => item.role === "user" || item.role === "assistant")
-      .map((item) => ({ role: item.role as "user" | "assistant", content: item.content.slice(0, 8000) }));
-    return messages.length > 0 ? messages : null;
+      .map((item) => ({ role: item.role as "user" | "assistant", content: item.content }));
+    return messages.length > 0 ? boundTranscript(messages) : null;
   }
   const single = (body as { message?: unknown }).message;
-  if (typeof single === "string" && single.trim()) return [{ role: "user", content: single.slice(0, 8000) }];
+  if (typeof single === "string" && single.trim()) {
+    return [{ role: "user", content: single.slice(0, MAX_MESSAGE_CHARS) }];
+  }
   return null;
+}
+
+/** "3 hours", "12 minutes", "45 seconds". Retry-After is a number; a reader is not. */
+function humanDuration(seconds: number): string {
+  if (seconds >= 3600) {
+    const hours = Math.round(seconds / 3600);
+    return `${hours} hour${hours === 1 ? "" : "s"}`;
+  }
+  if (seconds >= 60) {
+    const minutes = Math.round(seconds / 60);
+    return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  }
+  return `${seconds} second${seconds === 1 ? "" : "s"}`;
+}
+
+/**
+ * The global budget is spent.
+ *
+ * Deliberately not routed through toErrorResponse: the generic 429 hint talks
+ * about a per address cap, and telling a reader to wait for their own window
+ * when what they hit is the deployment's daily budget is a small lie on the one
+ * screen they read to understand what happened. This says what the cap is, what
+ * the number was, and what still works, which is the difference between a
+ * spending limit and a broken page.
+ */
+function budgetExceeded(decision: BudgetDecision): NextResponse<AgentResponse> {
+  const windowLabel = humanDuration(Math.round(decision.windowMs / 1000));
+  const message = [
+    "This public demo answers on the operator's own model credential, so it runs under a spending cap, and the cap is spent.",
+    `The cap is ${decision.globalLimit} questions per ${windowLabel} across every visitor, enforced here as ${decision.perInstanceLimit} on this server instance. It rolls over in ${humanDuration(decision.retryAfterSeconds)}.`,
+  ].join(" ");
+
+  return NextResponse.json(
+    emptyResponse(
+      "error",
+      message,
+      "Nothing is broken and no data is missing. The Questions page answers the same rules in the browser with no model at all, and sending your own credential in the x-llm-api-key header answers without counting against this cap. GET /api/agent reports the exact ceiling and how it is enforced.",
+    ),
+    { status: 429, headers: { "retry-after": String(decision.retryAfterSeconds) } },
+  );
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -179,6 +246,30 @@ export async function POST(request: Request): Promise<Response> {
 
   const modelChoice = readModelChoice(request.headers);
 
+  // The global spend ceiling. Two placement decisions, both deliberate.
+  //
+  // Only a KEYLESS caller reaches it: someone who sent their own credential is
+  // about to spend their own money, and capping that would protect nothing
+  // while making the bring your own key path - the escape hatch every ceiling
+  // message here points at - useless.
+  //
+  // And it is charged LAST, after the body has parsed and validated, so a flood
+  // of malformed requests cannot drain the day's budget without ever reaching a
+  // model. A spend control that can be turned into an availability attack has
+  // traded one problem for another.
+  if (!credential) {
+    const budget = agentBudget().check();
+    if (!budget.allowed) {
+      logAgent("warn", "agent global budget exhausted", {
+        global_limit: budget.globalLimit,
+        per_instance_limit: budget.perInstanceLimit,
+        used_on_this_instance: budget.usedOnThisInstance,
+        retry_after_s: budget.retryAfterSeconds,
+      });
+      return budgetExceeded(budget);
+    }
+  }
+
   // Streaming is opt in by Accept header. A turn takes about ten seconds and has taken seventy, and
   // this route can only answer once, at the end, so a reader watching a spinner has no idea whether
   // anything is happening. A client that asks for NDJSON gets the real events as they occur and the
@@ -188,7 +279,17 @@ export async function POST(request: Request): Promise<Response> {
 
   if (!wantsStream) {
     try {
-      const response = await runAgent({ messages, credential, modelChoice, abortSignal: request.signal });
+      const response = await runAgent({
+        messages,
+        credential,
+        modelChoice,
+        // The per request output ceiling. run.ts defaults to 12 steps; the
+        // route asks for fewer so the worst case a single call can cost is a
+        // number this deployment chose rather than one the loop happened to
+        // have. See MAX_TOOL_STEPS in lib/agent/ratelimit.ts.
+        maxSteps: MAX_TOOL_STEPS,
+        abortSignal: request.signal,
+      });
       return NextResponse.json(response);
     } catch (error: unknown) {
       return toErrorResponse(error, secrets, credential ? "user" : "server");
@@ -217,6 +318,7 @@ export async function POST(request: Request): Promise<Response> {
           messages,
           credential,
           modelChoice,
+          maxSteps: MAX_TOOL_STEPS,
           abortSignal: request.signal,
           onProgress: (event) => send({ type: "progress", ...event }),
         });
@@ -264,6 +366,9 @@ export async function GET(request: Request): Promise<NextResponse> {
   let headerError: string | null = null;
 
   const choices = serverModelChoices();
+  const ceiling = spendCeilingSettings();
+  // peek, not check: a capability probe must not spend the budget it reports.
+  const budget = agentBudget().peek();
 
   try {
     const credential = readUserCredential(request.headers);
@@ -299,6 +404,42 @@ export async function GET(request: Request): Promise<NextResponse> {
     })),
     tools: ["get_schema", "run_sql", "preset_question", "get_property", "get_run_history"],
     rate_limit: { scope: "per client address", note: "in process, per instance; see lib/agent/ratelimit.ts" },
+    // What a stranger can spend on this deployment, reported rather than
+    // claimed. Every number here is the one the code enforces, and every
+    // approximation says which way it is approximate: an operator reading this
+    // should be able to work out the worst case bill without reading the code,
+    // and a reviewer who trips a ceiling should be able to confirm it was a
+    // budget and not a bug.
+    spend_ceiling: {
+      per_request: {
+        max_tool_steps: MAX_TOOL_STEPS,
+        max_output_tokens_per_step: MAX_OUTPUT_TOKENS_PER_STEP,
+        max_output_tokens_per_request: MAX_TOOL_STEPS * MAX_OUTPUT_TOKENS_PER_STEP,
+        max_transcript_chars: MAX_TRANSCRIPT_CHARS,
+        max_message_chars: MAX_MESSAGE_CHARS,
+        note: "Hard caps, and an environment variable can only tighten them. Input is bounded by the transcript cap plus the tool row limits in lib/agent/tools.ts, not by a single number, so it is not quoted as one.",
+      },
+      global: {
+        applies_to: "questions answered on this deployment's own credential; a request carrying x-llm-api-key pays for itself and is not counted",
+        declared_limit: budget.globalLimit,
+        window_seconds: Math.round(budget.windowMs / 1000),
+        enforced_on_this_instance: budget.perInstanceLimit,
+        used_on_this_instance: budget.usedOnThisInstance,
+        assumed_instances: ceiling.assumedInstances,
+        enforcement:
+          "in process, per instance. The declared limit is divided by assumed_instances and each instance enforces the share, so the sum lands on the declared limit only while that assumption holds. More warm instances than assumed, or instance churn resetting fresh counters, both raise the real total in proportion.",
+      },
+      provider_side: {
+        // The only ceiling here that a recycled lambda cannot reset, which is
+        // why it is reported even though this code cannot enforce it.
+        declared_usd: ceiling.declaredCeilingUsd,
+        env_key: "AGENT_SPEND_CEILING_USD",
+        server_credential_is_billed: ceiling.serverCredentialIsBilled,
+        clamped: ceiling.clamped,
+        note: "The authoritative ceiling is a hard spend cap set on the key at the provider, because that is the only one instance churn cannot reset. This value is what the operator declared was set there; nothing here can verify it.",
+      },
+      basis: ceiling.basis,
+    },
     message: active
       ? `agent will answer with ${active.provider}:${active.model} (${active.source} credential)`
       : NOT_CONFIGURED_MESSAGE,

@@ -3,7 +3,7 @@
  *
  * The defect these tests exist to stop was not a wrong answer. The no-sale-10-years rule returned
  * the right parcels and the right count, and then displayed last_sale_date, a column that is null
- * on 352,233 of 404,023 published rows, beside the claim that tenure was "measured from
+ * on 351,742 of 404,023 published rows, beside the claim that tenure was "measured from
  * last_sale_date". Every evidence row read "not available", every tenure read 127 or 226, and the
  * card's own assumption said parcels with no recorded sale were excluded. A correct answer
  * presented that way reads as fabricated, which is worse than being wrong and admitting it.
@@ -23,7 +23,10 @@ import {
   SIX_QUESTIONS,
   TENURE_PLAUSIBLE_MAX_YEARS,
   VIEW_NAME,
-  missingColumns,
+  loadedSchema,
+  measureAlias,
+  statsSql,
+  presetAvailability,
   presetById,
 } from "@/lib/sql";
 import {
@@ -49,8 +52,21 @@ const SAMPLE_COVERAGE: unknown = JSON.parse(
   readFileSync(resolve(process.cwd(), "public", "sample", "dataset-coverage.json"), "utf8"),
 );
 
-/** The only three values roof_age_basis can carry, and the three the roof card has to name. */
+/**
+ * The basis values the pipeline can emit, and the one the artifact actually carries.
+ *
+ * Measured against the published parquet the runtime serves (404,023 rows): roof_age_basis is
+ * EFF_YR_BLT_PROXY on 359,129 rows and NULL on the other 44,894. PERMIT is on zero rows because
+ * the JaxEPICS permit source ingests nothing, and ACT_YR_BLT_PROXY is on zero rows because the
+ * roll publishes eff_year_built wherever it publishes a year at all, so the fallback to the actual
+ * year built is never reached. The sample parquet carries the same single value.
+ *
+ * The card has to name all three - a reader needs to know PERMIT is the basis that would have made
+ * roof_year_est a real roof date - and has to say which of them no row carries.
+ */
 const ROOF_BASIS_VALUES = ["PERMIT", "EFF_YR_BLT_PROXY", "ACT_YR_BLT_PROXY"];
+const PUBLISHED_ROOF_BASIS = "EFF_YR_BLT_PROXY";
+const UNPUBLISHED_ROOF_BASES = ["PERMIT", "ACT_YR_BLT_PROXY"];
 
 let db: PropertyDb;
 
@@ -138,6 +154,54 @@ describe("the tenure rule", () => {
     expect(preset.evidence).toContain("tenure_source");
   });
 
+  it("shows a tenure date on every row it returns, never a column of not available", async () => {
+    /*
+     * The defect this file opens with, asserted at full strength rather than at the 50 percent bar
+     * the generic evidence check uses. Measured on the published artifact: the rule matches 153,240
+     * parcels, 152,586 of which have last_sale_date NULL - so the roll's own column would read
+     * "not available" on 99.6 percent of the evidence a reviewer looks at. last_sale_date_any is
+     * populated on all 153,240, and tenure_basis on all 404,023 published rows.
+     */
+    const result = await db.query(preset.sql(200));
+    expect(result.rows.length).toBeGreaterThan(0);
+    for (const row of result.rows) {
+      expect(row.last_sale_date_any, "a matching row with no tenure date to show").toBeTruthy();
+      expect(row.tenure_basis, "a matching row with no tenure basis to show").toBeTruthy();
+      expect(String(row.tenure_basis)).not.toBe("NO_SALE_ON_RECORD");
+    }
+  });
+
+  it("never leads with a date that predates the digital record", async () => {
+    /*
+     * The card used to open on STATE OF FLORIDA at 226 years, then twelve rows of 127. Sentinel
+     * dates satisfy the rule and stay in the count, but a reader meets the strongest evidence
+     * first or the whole answer reads as fabricated. 1800-01-01 and 1899-01-01 are 226 and 127
+     * years, both past the placeholder line, so neither can reach the top of the page.
+     */
+    const result = await db.query(preset.sql(20));
+    for (const row of result.rows) {
+      const date = String(row.last_sale_date_any);
+      expect(date.slice(0, 4), `${date} leads the result set`).not.toBe("1800");
+      expect(date.slice(0, 4), `${date} leads the result set`).not.toBe("1899");
+      expect(row.tenure_quality).toBe("recorded_transfer");
+    }
+  });
+
+  it("excludes every parcel with no transfer on record, rather than counting it as a long hold", async () => {
+    // Measured on the published artifact: 2,191 parcels read NO_SALE_ON_RECORD and none of them
+    // matches the rule. The assumption on the card claims exactly that, so it is checked here
+    // against the data instead of being trusted as prose.
+    const [counts] = (
+      await db.query(
+        `SELECT count(*) FILTER (WHERE NOT has_sale_on_record) AS no_sale,
+                count(*) FILTER (WHERE NOT has_sale_on_record AND ${preset.predicate}) AS matched
+         FROM ${VIEW_NAME}`,
+      )
+    ).rows;
+    expect(Number(counts.no_sale), "the sample models no parcel without a transfer").toBeGreaterThan(0);
+    expect(Number(counts.matched)).toBe(0);
+  });
+
   it("puts a plausible tenure first and a placeholder date last", async () => {
     const result = await db.query(preset.sql(200));
     const tenures = result.rows.map((row) => Number(row.years_since_last_sale));
@@ -196,11 +260,48 @@ describe("the roof rule does not claim evidence it never had", () => {
     },
   );
 
-  it("names all three basis values so a reader can tell a proxy row from a permit row", () => {
+  it("names the one basis the artifact carries, and says the other two are on no row", async () => {
+    /*
+     * The wording this replaces read "EFF_YR_BLT_PROXY and ACT_YR_BLT_PROXY mean no county roof
+     * date exists", which offers a reader three live possibilities where the data has one. A
+     * reviewer checking roof_age_basis finds a single value on every populated row, and copy that
+     * implies otherwise costs the card the credibility the basis column was added to earn.
+     */
     const roof = presetById("roof-older-than-15")!;
     const text = `${roof.rule} ${roof.assumptions.join(" ")}`;
-    for (const basis of ROOF_BASIS_VALUES) {
+
+    expect(text, `the roof card does not name ${PUBLISHED_ROOF_BASIS}`).toContain(
+      PUBLISHED_ROOF_BASIS,
+    );
+    for (const basis of UNPUBLISHED_ROOF_BASES) {
       expect(text, `the roof card does not name ${basis}`).toContain(basis);
+    }
+    // and says so, rather than listing them as alternatives a row might carry
+    expect(text, "the roof card does not say which bases are on no published row").toMatch(
+      /on no published row|is on no row|no published row/i,
+    );
+
+    const bases = await db.query(
+      `SELECT DISTINCT roof_age_basis AS basis FROM ${VIEW_NAME} WHERE roof_age_basis IS NOT NULL`,
+    );
+    expect(bases.rows.map((row) => String(row.basis))).toEqual([PUBLISHED_ROOF_BASIS]);
+  });
+
+  it("reports the permit derived share on the card rather than only non-null coverage", async () => {
+    /*
+     * roof_age_basis is non-null on 88.9 percent of published parcels. On its own that badge reads
+     * as a well covered column, and it is the reassuring half of the fact: none of those rows came
+     * from a permit. The preset declares the split so the card measures it from the same scan as
+     * the headline count, and the zero comes from the artifact rather than from copy that could
+     * quietly go stale.
+     */
+    for (const preset of PRESETS.filter((entry) => entry.requires.includes("roof_age_basis"))) {
+      const permitMeasure = (preset.measures ?? []).find((measure) => measure.key === "permit_basis");
+      expect(permitMeasure, `${preset.id} does not measure its permit derived share`).toBeDefined();
+
+      const [stat] = (await db.query(statsSql(preset))).rows;
+      expect(stat, `${preset.id} stats query`).toHaveProperty(measureAlias(permitMeasure!));
+      expect(Number(stat[measureAlias(permitMeasure!)]), `${preset.id} permit derived rows`).toBe(0);
     }
   });
 
@@ -238,6 +339,9 @@ describe("the roof rule does not claim evidence it never had", () => {
       "a basis value the roof card never explains",
     ).toEqual([]);
     expect(published, "a PERMIT roof basis with no permit row behind it").not.toContain("PERMIT");
+    expect(published, "a basis value beyond the single one the artifact carries").toEqual([
+      PUBLISHED_ROOF_BASIS,
+    ]);
 
     const [counts] = (
       await db.query(
@@ -358,7 +462,9 @@ describe("the published column contract, where breaking it would be silent", () 
     const described = await db.query(`DESCRIBE ${VIEW_NAME}`);
     const available = described.rows.map((row) => String(row.column_name));
     for (const preset of PRESETS) {
-      expect(missingColumns(preset, available), `${preset.id}`).toEqual([]);
+      expect(presetAvailability(preset, loadedSchema(available)), `${preset.id}`).toEqual({
+        status: "runnable",
+      });
     }
   });
 });
@@ -395,9 +501,18 @@ describe("the agent and the Questions page state one rule", () => {
     }
   });
 
-  it("the system prompt says a proxy roof basis is not a roof date", () => {
+  it("the system prompt says no published row carries a permit derived roof date", () => {
+    // Rewritten from "a roof date only where roof_age_basis says PERMIT", which was true of the
+    // pipeline's intent and false of the published artifact. Measured there, roof_age_basis is
+    // EFF_YR_BLT_PROXY on 359,129 rows and NULL on 44,894; PERMIT and ACT_YR_BLT_PROXY are on zero.
+    // A prompt that offers PERMIT as a live possibility lets the agent describe a basis this data
+    // does not contain, which is the same class of defect as reporting an uncomputed total.
     expect(SYSTEM_PROMPT).toContain("EFF_YR_BLT_PROXY");
-    expect(SYSTEM_PROMPT).toMatch(/roof date only where roof_age_basis says PERMIT/i);
+    expect(SYSTEM_PROMPT).toMatch(/no published row carries a permit derived roof date/i);
+    expect(SYSTEM_PROMPT).toMatch(/PERMIT on zero/i);
+    // ACT_YR_BLT_PROXY is still named, but only to say it is on zero rows. Naming a value the data
+    // does not contain is fine; implying the agent might meet one is not.
+    expect(SYSTEM_PROMPT).toMatch(/PERMIT and ACT_YR_BLT_PROXY are on ZERO rows/);
   });
 
   it("the system prompt states the new tenure contract, not the old one", () => {

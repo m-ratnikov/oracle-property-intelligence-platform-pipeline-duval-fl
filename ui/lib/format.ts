@@ -385,3 +385,288 @@ export function toCsv(
   }
   return lines.join("\r\n");
 }
+
+/* ------------------------------------------------------------------------- *
+ * Per column provenance
+ * ------------------------------------------------------------------------- */
+
+/**
+ * The parquet KV key under which the pipeline publishes its column to family map.
+ *
+ * The map is read from the artifact rather than restated here. The pipeline decides which column
+ * belongs to which family, and a second copy in the UI is a copy that drifts: the screen would go
+ * on attributing a column to a system the published file had already moved it away from.
+ */
+export const COLUMN_PROVENANCE_KEY = "elephant_column_provenance";
+
+export interface ProvenanceFamily {
+  key: string;
+  label: string;
+  /** Null for the families this pipeline computes rather than fetches. */
+  sourceSystem: string | null;
+  /** The per row column naming the system that reached this parcel, null when the family has none. */
+  sourceColumn: string | null;
+  fetchedAtColumn: string | null;
+}
+
+export interface ColumnProvenanceMap {
+  families: Readonly<Record<string, ProvenanceFamily>>;
+  /** Column name to family key, for every column the artifact publishes. */
+  columns: Readonly<Record<string, string>>;
+  /**
+   * Every system name any family declares.
+   *
+   * This is what separates a source column that names a system (tenure_source is "coj_parcels")
+   * from one that names a basis code inside a family (last_sale_source is "SDF"). Both end in
+   * _source and only the first is a provenance claim.
+   */
+  systems: ReadonlySet<string>;
+}
+
+function asText(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  return text === "" ? null : text;
+}
+
+/** Parse the published map. Returns null for anything this UI cannot trust, so callers fall back. */
+export function parseColumnProvenance(value: unknown): ColumnProvenanceMap | null {
+  if (typeof value !== "string" || value.trim() === "") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const document = parsed as { families?: unknown; columns?: unknown };
+  if (!Array.isArray(document.families)) return null;
+  if (typeof document.columns !== "object" || document.columns === null) return null;
+
+  const families: Record<string, ProvenanceFamily> = {};
+  const systems = new Set<string>();
+  for (const entry of document.families) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const family = entry as Record<string, unknown>;
+    if (typeof family.key !== "string" || family.key === "") continue;
+    const sourceSystem = asText(family.sourceSystem);
+    families[family.key] = {
+      key: family.key,
+      label: typeof family.label === "string" ? family.label : family.key,
+      sourceSystem,
+      sourceColumn: asText(family.sourceColumn),
+      fetchedAtColumn: asText(family.fetchedAtColumn),
+    };
+    if (sourceSystem !== null) systems.add(sourceSystem);
+  }
+
+  const columns: Record<string, string> = {};
+  for (const [column, entry] of Object.entries(document.columns as Record<string, unknown>)) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const family = (entry as { family?: unknown }).family;
+    if (typeof family === "string" && family !== "") columns[column] = family;
+  }
+
+  if (Object.keys(families).length === 0 || Object.keys(columns).length === 0) return null;
+  return { families, columns, systems };
+}
+
+/**
+ * One contributing source behind part of a row.
+ *
+ * `columns` is what makes the entry checkable: it names the displayed values this source actually
+ * produced, so a badge can never be read as covering values it had no part in.
+ */
+export interface RowSource {
+  /**
+   * "system" was fetched from a named external system. "derived" was computed by this pipeline
+   * from other families. "unattributed" is a value whose family source column is NULL on this row,
+   * which is a hole in the provenance and is shown as one rather than guessed at.
+   */
+  kind: "system" | "derived" | "unattributed";
+  /** The system exactly as the artifact spells it. Empty for "derived" and "unattributed". */
+  system: string;
+  /** The displayed columns this source produced, in display order. */
+  columns: string[];
+  /** The fetch instant for this source, when the row carries one. */
+  fetchedAt: unknown;
+}
+
+const KIND_ORDER: Record<RowSource["kind"], number> = {
+  system: 0,
+  unattributed: 1,
+  derived: 2,
+};
+
+/**
+ * When this system's data was fetched, from whatever the row happens to carry.
+ *
+ * The family's own fetched_at column is preferred. The canonical `fetched_at` is used only for the
+ * system `source_system` names, since those two are a pair by the Elephant contract; using it for
+ * any other system would date that system's work by the appraisal roll's clock.
+ */
+function fetchedAtFor(
+  map: ColumnProvenanceMap,
+  row: Record<string, unknown>,
+  system: string,
+  family?: ProvenanceFamily,
+): unknown {
+  const candidates =
+    family?.fetchedAtColumn != null
+      ? [family.fetchedAtColumn]
+      : Object.values(map.families)
+          .filter((entry) => entry.sourceSystem === system && entry.fetchedAtColumn !== null)
+          .map((entry) => entry.fetchedAtColumn as string);
+  for (const candidate of candidates) {
+    const value = row[candidate];
+    if (value !== null && value !== undefined) return value;
+  }
+  if (asText(row.source_system) === system) return row.fetched_at ?? null;
+  return null;
+}
+
+/**
+ * Which sources produced the displayed values of one row.
+ *
+ * The point of this function is that a provenance badge names the provenance OF THE VALUES BESIDE
+ * IT. `source_system` describes the appraisal roll spine the row is keyed on and nothing else, so a
+ * row showing a Starbucks walking distance next to it was claiming Overture's work for the county
+ * property appraiser. Every displayed column is resolved through the artifact's own map to the
+ * family that produced it, and that family's source value ON THIS ROW names the system, because a
+ * family can fall back to a different system per parcel and is NULL on parcels it never reached.
+ */
+export function rowSources(
+  map: ColumnProvenanceMap | null,
+  displayColumns: readonly string[],
+  row: Record<string, unknown>,
+): RowSource[] {
+  if (map === null) return [];
+
+  const groups = new Map<string, RowSource>();
+  const credit = (
+    kind: RowSource["kind"],
+    system: string,
+    column: string,
+    fetchedAt: unknown,
+  ): void => {
+    const key = `${kind}:${system}`;
+    const existing = groups.get(key);
+    if (existing === undefined) {
+      groups.set(key, { kind, system, columns: [column], fetchedAt });
+      return;
+    }
+    existing.columns.push(column);
+    if (existing.fetchedAt === null || existing.fetchedAt === undefined) {
+      existing.fetchedAt = fetchedAt;
+    }
+  };
+
+  for (const column of displayColumns) {
+    // No value, no provenance claim: a NULL cell reads "not available" and needs no source.
+    if (row[column] === null || row[column] === undefined) continue;
+
+    const familyKey = map.columns[column];
+    // A workbench alias the artifact never named. Attributing it would be a guess.
+    if (familyKey === undefined) continue;
+
+    /*
+     * A source column whose value is one of the systems the artifact declares carries its own
+     * provenance and is believed over its family. This is how the pipeline-derived tenure date
+     * still names the system that published it: tenure_source sits in the derived family, but its
+     * value is a real system such as "coj_parcels".
+     */
+    const ownSystem = column.endsWith("_source") ? asText(row[column]) : null;
+    if (ownSystem !== null && map.systems.has(ownSystem)) {
+      credit("system", ownSystem, column, fetchedAtFor(map, row, ownSystem));
+      continue;
+    }
+
+    const family = map.families[familyKey];
+    if (family === undefined) continue;
+
+    if (family.sourceColumn !== null && family.sourceColumn in row) {
+      const onRow = asText(row[family.sourceColumn]);
+      if (onRow === null) {
+        credit("unattributed", "", column, null);
+        continue;
+      }
+      credit("system", onRow, column, fetchedAtFor(map, row, onRow, family));
+      continue;
+    }
+
+    if (family.sourceSystem !== null) {
+      const system = family.sourceSystem;
+      credit("system", system, column, fetchedAtFor(map, row, system, family));
+      continue;
+    }
+
+    credit("derived", "", column, null);
+  }
+
+  const spine = asText(row.source_system);
+  return [...groups.values()].sort((left, right) => {
+    // The spine is what the row is keyed on, so it reads first.
+    const leftSpine = left.kind === "system" && left.system === spine ? 0 : 1;
+    const rightSpine = right.kind === "system" && right.system === spine ? 0 : 1;
+    if (leftSpine !== rightSpine) return leftSpine - rightSpine;
+    if (KIND_ORDER[left.kind] !== KIND_ORDER[right.kind]) {
+      return KIND_ORDER[left.kind] - KIND_ORDER[right.kind];
+    }
+    return left.system.localeCompare(right.system);
+  });
+}
+
+/**
+ * The same summary for an artifact that publishes no column map.
+ *
+ * The generated sample parquet carries all 131 columns but no KV metadata, so without this the
+ * sample and every e2e run would fall back to the single spine badge that is the bug. It cannot
+ * say which column each system produced, only which systems the row names, so it reports the
+ * systems and leaves `columns` empty. `familyKeys` is the family list the UI already holds
+ * (lib/columns.ts SOURCE_FAMILIES); it is passed in rather than imported so this module stays pure.
+ */
+export function fallbackRowSources(
+  familyKeys: readonly string[],
+  displayColumns: readonly string[],
+  row: Record<string, unknown>,
+): RowSource[] {
+  const known = new Set(familyKeys.map((family) => `${family}_source`));
+  const systems = new Map<string, unknown>();
+
+  const spine = asText(row.source_system);
+  if (spine !== null) systems.set(spine, row.fetched_at ?? null);
+
+  /*
+   * source_systems is the row's own list of every system that contributed a value to it, so where
+   * the query selected it there is nothing left to infer. tenure_source is included by name because
+   * the artifact documents it as "the source system that published the tenure date": it is the one
+   * source column outside the family list whose value is a system rather than a basis code.
+   */
+  for (const entry of (asText(row.source_systems) ?? "").split(",")) {
+    const system = entry.trim();
+    if (system !== "" && !systems.has(system)) systems.set(system, null);
+  }
+
+  for (const column of displayColumns) {
+    if (!known.has(column) && column !== "tenure_source") continue;
+    const system = asText(row[column]);
+    if (system === null) continue;
+    const family = column.slice(0, -"_source".length);
+    const fetchedAt = row[`${family}_fetched_at`] ?? null;
+    if (!systems.has(system) || systems.get(system) == null) systems.set(system, fetchedAt);
+  }
+
+  return [...systems.entries()]
+    .map(([system, fetchedAt]): RowSource => ({
+      kind: "system",
+      system,
+      columns: [],
+      fetchedAt,
+    }))
+    .sort((left, right) => {
+      const leftSpine = left.system === spine ? 0 : 1;
+      const rightSpine = right.system === spine ? 0 : 1;
+      if (leftSpine !== rightSpine) return leftSpine - rightSpine;
+      return left.system.localeCompare(right.system);
+    });
+}

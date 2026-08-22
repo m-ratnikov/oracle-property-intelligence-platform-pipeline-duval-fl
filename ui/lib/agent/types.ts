@@ -9,6 +9,8 @@
  * `tool_calls` are the same array. Readers can use either spelling.
  */
 
+import type { CountClaim, CountShape } from "./totals";
+
 export interface AgentToolCall {
   name: string;
   input: Record<string, unknown>;
@@ -22,6 +24,11 @@ export interface AgentToolCall {
   row_count: number | null;
   /** Total rows that matched before the limit was applied, when known. */
   total_matched?: number | null;
+  /**
+   * What the tool's predicate actually was. A count over a disjunction or a score is not a count of
+   * rows meeting every criterion, and the transcript says which it was next to the number.
+   */
+  count_shape?: CountShape;
   /** Set when the tool returned an error message instead of data. */
   error?: string;
   /** Kept for the original stub's consumers; a compact view of the output. */
@@ -73,6 +80,17 @@ export interface AgentResponse {
   evidence: AgentEvidenceRow[];
   /** What the agent or the rules could not determine from the published data. */
   assumptions: string[];
+  /**
+   * Every count the answer cites, with the exact statement that produced each one and whether that
+   * statement was a conjunction. The answer's own "Counts in this answer" table is rendered from
+   * this, so a total on the page always arrives attached to its predicate.
+   */
+  totals: CountClaim[];
+  /**
+   * Numbers the model wrote as population counts that no tool produced this turn. They were removed
+   * from the answer text rather than shown, and are kept here so the removal is auditable.
+   */
+  unverified_totals: string[];
   data_freshness: AgentDataFreshness | null;
   model: string | null;
   usage: AgentUsage | null;
@@ -91,7 +109,7 @@ export interface AgentRequestBody {
 }
 
 export const NOT_CONFIGURED_MESSAGE =
-  "agent not configured: choose a model and add your own API key on the settings page";
+  "agent not configured: no model credential is set on the server, and no key was sent in the x-llm-api-key header";
 
 export function emptyResponse(
   status: AgentResponse["status"],
@@ -106,6 +124,8 @@ export function emptyResponse(
     tool_calls: [],
     evidence: [],
     assumptions: [],
+    totals: [],
+    unverified_totals: [],
     data_freshness: null,
     model: null,
     usage: null,

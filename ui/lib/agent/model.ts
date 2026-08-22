@@ -25,11 +25,18 @@
  *                         AI_GATEWAY_API_KEY,
  *                         ANTHROPIC_API_KEY, AWS_BEARER_TOKEN_BEDROCK, ...
  *
- * This deployment ships with NO server key set, on purpose: a public,
- * unauthenticated route attached to somebody's API budget is a bill waiting to
- * happen. With nothing configured the route answers 501 and says so, and the
- * x-llm-api-key header is the way in. Setting one env var flips path 2 on without
- * another code change.
+ * A server key on a public, unauthenticated route is a bill waiting to happen,
+ * so path 2 is only safe with a ceiling on it. That ceiling is not here: it is
+ * in ratelimit.ts, which reads the selection this module returns, works out
+ * from the registry whether the chosen model is billed, and bounds what every
+ * keyless caller together can spend before the route will run one. This module
+ * stays a pure switch, so nothing about which provider answers depends on a
+ * spend rule and nothing about the spend rule depends on a provider branch.
+ *
+ * With nothing configured at all the route answers 501 and says so, and the
+ * x-llm-api-key header is the way in. Setting one env var flips path 2 on
+ * without another code change, which is exactly why the ceiling has to apply
+ * itself rather than wait to be switched on too.
  */
 
 import type { Env } from "./types";

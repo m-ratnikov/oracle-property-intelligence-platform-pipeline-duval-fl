@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  COLUMN_PROVENANCE_KEY,
   NOT_AVAILABLE,
   displayCellForColumn,
+  fallbackRowSources,
   formatDateOnly,
   formatMetres,
   formatTimestamp,
@@ -12,11 +14,17 @@ import {
   formatUsd,
   isDateOnlyColumn,
   isTimestampColumn,
+  parseColumnProvenance,
+  rowSources,
   toCsv,
 } from "@/lib/format";
-import { CURRENCY_COLUMNS, METRE_COLUMNS, PROVENANCE_COLUMNS } from "@/lib/columns";
+import type { ColumnProvenanceMap, RowSource } from "@/lib/format";
+import { CURRENCY_COLUMNS, METRE_COLUMNS, SOURCE_FAMILIES } from "@/lib/columns";
+import { REGISTERED_FILE, runQuery } from "@/lib/duckdb";
+import { queryTableParquetUrl } from "@/lib/config";
 
 const PROVENANCE_SET = new Set<string>(["source_system", "source_url", "fetched_at"]);
+const FAMILY_KEYS = SOURCE_FAMILIES.map((family) => family.key);
 const LINK_COLUMNS = new Set(["property_id"]);
 const NUMERIC_HINTS = /(_m|_value|_price|_year|_count|_area|_sqft|_acre|latitude|longitude|rows|delta)$/;
 
@@ -25,7 +33,10 @@ export interface DataTableProps {
   rows: Record<string, unknown>[];
   /** Columns highlighted as the evidence behind a question. */
   evidence?: string[];
-  /** Collapse source_system + source_url + fetched_at into one provenance cell. */
+  /**
+   * Replace the source_system / source_url / fetched_at columns with one provenance cell that
+   * names every system behind the values on that row, not just the appraisal roll spine.
+   */
   collapseProvenance?: boolean;
   csvName?: string;
   emptyMessage?: string;
@@ -100,37 +111,164 @@ function renderValue(column: string, value: unknown): React.ReactNode {
   return displayCellForColumn(column, value);
 }
 
-/** source_system + source_url + fetched_at rendered as one compact provenance cell. */
-function ProvenanceCell({ row }: { row: Record<string, unknown> }) {
-  const system = row.source_system ? String(row.source_system) : null;
-  const url = row.source_url ? String(row.source_url) : null;
-  /*
-   * `fetched_at` is a DuckDB TIMESTAMP, which duckdb-wasm hands over as an epoch number. This cell
-   * used to stringify it, so every provenance cell in the app read "DUVAL_APPRAISER source
-   * 1787320736294". It is formatted from the raw value, and the title carries the full instant to
-   * the second while the cell shows minutes.
-   */
-  const fetched = row.fetched_at ?? null;
-  const fetchedText = fetched === null ? null : formatTimestampShort(fetched);
-  const fetchedTitle = fetched === null ? undefined : `fetched_at ${formatTimestamp(fetched)}`;
+/**
+ * The column to family map, read once from the published parquet footer.
+ *
+ * Module scoped rather than per component: every result grid on the page wants the same map, it
+ * cannot change while an artifact is loaded, and reading it is a footer read against a file DuckDB
+ * has already opened. A failure resolves to null instead of throwing, because a missing map must
+ * degrade the provenance cell, never break the results table above it.
+ */
+let provenanceMap: ColumnProvenanceMap | null = null;
+let provenanceLoad: Promise<ColumnProvenanceMap | null> | null = null;
 
-  if (!system && !url && fetched === null) {
-    return <span className="na">{NOT_AVAILABLE}</span>;
+function loadColumnProvenance(): Promise<ColumnProvenanceMap | null> {
+  provenanceLoad ??= (async () => {
+    try {
+      const result = await runQuery(
+        queryTableParquetUrl(),
+        `SELECT decode(value) AS value FROM parquet_kv_metadata('${REGISTERED_FILE}')
+         WHERE decode(key) = '${COLUMN_PROVENANCE_KEY}'`,
+      );
+      provenanceMap = parseColumnProvenance(result.rows[0]?.value);
+    } catch {
+      // An artifact published before the map existed, or a build without the parquet metadata
+      // functions. The cell falls back to the source columns the row itself carries.
+      provenanceMap = null;
+    }
+    return provenanceMap;
+  })();
+  return provenanceLoad;
+}
+
+function useColumnProvenance(enabled: boolean): ColumnProvenanceMap | null {
+  const [map, setMap] = useState<ColumnProvenanceMap | null>(provenanceMap);
+  useEffect(() => {
+    if (!enabled || map !== null) return;
+    let cancelled = false;
+    void loadColumnProvenance().then((loaded) => {
+      if (!cancelled) setMap(loaded);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, map]);
+  return map;
+}
+
+function sourceLabel(source: RowSource): string {
+  if (source.kind === "system") return source.system;
+  if (source.kind === "derived") return "derived by this pipeline";
+  return "source not named on this row";
+}
+
+function sourceTitle(source: RowSource): string {
+  const covers =
+    source.columns.length > 0
+      ? `Produced ${source.columns.join(", ")} on this row.`
+      : "Named by the source columns this row carries.";
+  if (source.kind === "derived") {
+    return `${covers} Computed by the pipeline from other families rather than fetched, and each of these names its own evidence in a sibling basis column.`;
   }
+  if (source.kind === "unattributed") {
+    return `${covers} The family that publishes it names no system on this row, so the pipeline cannot say where the value came from.`;
+  }
+  const fetched =
+    source.fetchedAt === null || source.fetchedAt === undefined
+      ? "This row does not carry a fetch time for it."
+      : `Fetched ${formatTimestamp(source.fetchedAt)}.`;
+  return `${covers} ${fetched}`;
+}
+
+function SourceLine({
+  source,
+  spine,
+  url,
+}: {
+  source: RowSource;
+  spine: string | null;
+  url: string | null;
+}) {
+  /*
+   * `fetched_at` is a DuckDB TIMESTAMP, which duckdb-wasm hands over as an epoch number. It is
+   * formatted from the raw value rather than stringified, and the title carries the full instant to
+   * the second while the line shows minutes.
+   */
+  const fetched = source.fetchedAt ?? null;
+  // source_url is the appraisal roll's dataset URL, so it belongs to the spine system alone.
+  const isSpine = source.kind === "system" && source.system === spine;
 
   return (
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-      <span className="badge badge-neutral">{system ?? "unknown source"}</span>
-      {url ? (
+      <span
+        className={source.kind === "system" ? "badge badge-neutral" : "badge badge-neutral na"}
+        title={sourceTitle(source)}
+      >
+        {sourceLabel(source)}
+      </span>
+      {isSpine && url ? (
         <a className="mono text-[11px]" href={url} target="_blank" rel="noreferrer" title={url}>
           source
         </a>
-      ) : (
-        <span className="na text-[11px]">no url</span>
-      )}
-      <span className="mono text-[11px] text-faint" title={fetchedTitle}>
-        {fetchedText ?? NOT_AVAILABLE}
-      </span>
+      ) : null}
+      {fetched !== null ? (
+        <span
+          className="mono text-[11px] text-faint"
+          title={`fetched ${formatTimestamp(fetched)}`}
+        >
+          {formatTimestampShort(fetched)}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/**
+ * Where the values shown on this row actually came from.
+ *
+ * This cell used to print `source_system` and nothing else, so a row whose evidence was an Overture
+ * walking distance or a JTA GTFS transit distance still credited the county property appraiser.
+ * `source_system` describes the appraisal roll spine the row is keyed on: in the published artifact
+ * it is "duval_appraiser" on all 404,023 rows, while `source_systems` holds 18 distinct
+ * combinations, so the one badge was flattening 18 real provenance profiles into a single name that
+ * was wrong for most of the values beside it. Every contributing system is now named, resolved per
+ * displayed column through the map the artifact publishes, and each carries its own fetch time
+ * rather than borrowing the roll's.
+ */
+function ProvenanceCell({
+  row,
+  columns,
+  map,
+}: {
+  row: Record<string, unknown>;
+  columns: string[];
+  map: ColumnProvenanceMap | null;
+}) {
+  const spine = row.source_system ? String(row.source_system) : null;
+  const url = row.source_url ? String(row.source_url) : null;
+
+  const resolved = rowSources(map, columns, row);
+  const sources = resolved.length > 0 ? resolved : fallbackRowSources(FAMILY_KEYS, columns, row);
+
+  if (sources.length === 0) return <span className="na">{NOT_AVAILABLE}</span>;
+
+  return (
+    <span
+      className="inline-flex flex-col items-start gap-0.5"
+      data-testid="provenance"
+      data-systems={sources
+        .filter((source) => source.kind === "system")
+        .map((source) => source.system)
+        .join(",")}
+    >
+      {sources.map((source) => (
+        <SourceLine
+          key={`${source.kind}:${source.system}`}
+          source={source}
+          spine={spine}
+          url={url}
+        />
+      ))}
     </span>
   );
 }
@@ -153,6 +291,8 @@ export function DataTable({
     () => (hasProvenance ? columns.filter((column) => !PROVENANCE_SET.has(column)) : columns),
     [columns, hasProvenance],
   );
+
+  const provenance = useColumnProvenance(hasProvenance);
 
   const download = () => {
     const csv = toCsv(columns, rows);
@@ -218,7 +358,7 @@ export function DataTable({
                 ))}
                 {hasProvenance ? (
                   <td>
-                    <ProvenanceCell row={row} />
+                    <ProvenanceCell row={row} columns={displayColumns} map={provenance} />
                   </td>
                 ) : null}
               </tr>
@@ -229,9 +369,14 @@ export function DataTable({
 
       {hasProvenance ? (
         <p className="mt-1.5 text-[11.5px] text-faint">
-          The provenance column collapses {PROVENANCE_COLUMNS.slice(0, 3).join(", ")}. The CSV export
-          keeps them as separate columns and writes{" "}
-          <span className="mono">fetched_at</span> as an ISO 8601 UTC instant.
+          The provenance column names every system behind the values on that row, not just{" "}
+          <span className="mono">source_system</span>, which describes the appraisal roll spine the
+          row is keyed on and is the same on every row. Each column is attributed through the column
+          to family map published inside the parquet, so hover a badge to see which values it
+          produced and when it was fetched. The CSV export keeps{" "}
+          <span className="mono">source_system</span>, <span className="mono">source_url</span> and{" "}
+          <span className="mono">fetched_at</span> as separate columns and writes the timestamp as an
+          ISO 8601 UTC instant.
         </p>
       ) : null}
     </div>

@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { COUNTY, type Paths } from "../config.js";
+import type { CiHistoryProvenance, CiWorkflowRun } from "./ciHistory.js";
 
 /**
  * Two small committed files that make the pipeline's continuity provable without a database.
@@ -14,6 +15,18 @@ import { COUNTY, type Paths } from "../config.js";
  * trusted to remember anything. Both files are rebuilt by merging what is on disk with what this
  * run knows, keyed so a re-run repairs its own entry and never truncates the rest, which also makes
  * them safe under the concurrent commit-back the workflow does.
+ *
+ * `ci-runs.json` carries two layers, and they answer different questions:
+ *
+ *   workflow_runs  every run of the workflow, DERIVED from the GitHub Actions API (ciHistory.ts).
+ *                  This is what "is the cron actually running" is answered from, because GitHub
+ *                  keeps it whatever we do to branches and it covers ticks that happened before
+ *                  this code existed. A force-push cannot reset it: the next run re-derives it.
+ *   runs           the pipeline's own record of each run it executed, with the run KIND and the
+ *                  ULID that ties the CI run to runs/<run_id>.json and to the published history.
+ *
+ * The two are merged independently and keyed independently, so the reconcile never disturbs a
+ * pipeline record and a pipeline record never disturbs the reconciled history.
  */
 
 // ---------------------------------------------------------------------------- CI run ledger
@@ -39,12 +52,39 @@ export interface CiRunEntry {
 export interface CiRunLedger {
   county: string;
   updated_at: string;
-  /** Count per CI event, so "is the cron actually running" is answerable at a glance. */
+  /**
+   * How many times each CI event ran the workflow, so "is the cron actually running" is answerable
+   * at a glance. Counts every run of the workflow, including ones that were cancelled or are still
+   * going, because the question is whether the tick fired. `by_event_conclusion` splits it.
+   */
   by_event: Record<string, number>;
+  /** Per event, how those runs ended (`success`, `failure`, `cancelled`, or the live status). */
+  by_event_conclusion: Record<string, Record<string, number>>;
+  /**
+   * `actions_api` means the tally counts workflow runs GitHub reported. `local_records` means the
+   * API could not be read and the tally falls back to the runs this clone happened to witness,
+   * which undercounts by construction. Never read `by_event` without reading this.
+   */
+  by_event_source: "actions_api" | "local_records";
+  /** How the `workflow_runs` rows were obtained, and the endpoint that reproduces them. */
+  ci_history: CiHistoryProvenance;
+  /** Every run of the workflow, derived from the Actions API. Newest first. */
+  workflow_runs: CiWorkflowRun[];
   runs: CiRunEntry[];
 }
 
 export const CI_RUNS_FILE = "ci-runs.json";
+
+const NEVER_RECONCILED: CiHistoryProvenance = {
+  outcome: "not_attempted",
+  endpoint: null,
+  repository: null,
+  workflow: null,
+  fetched_at: null,
+  api_total: null,
+  pages: 0,
+  detail: "no reconcile has run against this file yet",
+};
 
 /**
  * CI provenance from the runner environment.
@@ -81,23 +121,114 @@ function readJsonOr<T>(path: string, fallback: T): T {
   }
 }
 
-/** Merge one run into runs/ci-runs.json (newest first, one entry per run_id) and write it back. */
+function newestFirst<T>(rows: T[], key: (row: T) => string): T[] {
+  return [...rows].sort((a, b) => {
+    const ka = key(a);
+    const kb = key(b);
+    return ka < kb ? 1 : ka > kb ? -1 : 0;
+  });
+}
+
+/**
+ * Derive the headline tally.
+ *
+ * Prefer the reconciled workflow runs: they are what GitHub says happened, they include ticks that
+ * predate this ledger, and they survive the branch rewrites this project does. Fall back to the
+ * pipeline's own records only when there is nothing reconciled, and say so in `by_event_source` so
+ * a reader is never invited to mistake "what this clone saw" for "what happened".
+ */
+function deriveTally(workflowRuns: CiWorkflowRun[], runs: CiRunEntry[]): Pick<CiRunLedger, "by_event" | "by_event_conclusion" | "by_event_source"> {
+  const byEvent: Record<string, number> = {};
+  const byEventConclusion: Record<string, Record<string, number>> = {};
+  if (workflowRuns.length > 0) {
+    for (const r of workflowRuns) {
+      byEvent[r.event] = (byEvent[r.event] ?? 0) + 1;
+      // A run still in flight has no conclusion, so its live status is the honest label for it.
+      const outcome = r.conclusion ?? r.status;
+      const bucket = (byEventConclusion[r.event] ??= {});
+      bucket[outcome] = (bucket[outcome] ?? 0) + 1;
+    }
+    return { by_event: byEvent, by_event_conclusion: byEventConclusion, by_event_source: "actions_api" };
+  }
+  for (const r of runs) {
+    const key = r.ci_event ?? "local";
+    byEvent[key] = (byEvent[key] ?? 0) + 1;
+    const bucket = (byEventConclusion[key] ??= {});
+    bucket[r.status] = (bucket[r.status] ?? 0) + 1;
+  }
+  return { by_event: byEvent, by_event_conclusion: byEventConclusion, by_event_source: "local_records" };
+}
+
+/**
+ * Write the ledger from both layers at once.
+ *
+ * Two processes touch this file in one CI job (the ingestion run, then the consolidation pass, then
+ * the reconcile step), so every writer reads the whole file and preserves the layer it is not
+ * responsible for. Nothing here truncates.
+ */
+function writeLedger(
+  file: string,
+  workflowRuns: CiWorkflowRun[],
+  runs: CiRunEntry[],
+  ciHistory: CiHistoryProvenance,
+): CiRunLedger {
+  const ledger: CiRunLedger = {
+    county: COUNTY.key,
+    updated_at: new Date().toISOString(),
+    ...deriveTally(workflowRuns, runs),
+    ci_history: ciHistory,
+    workflow_runs: workflowRuns,
+    runs,
+  };
+  writeFileSync(file, JSON.stringify(ledger, null, 2));
+  return ledger;
+}
+
+function readLedger(file: string): { workflowRuns: CiWorkflowRun[]; runs: CiRunEntry[]; ciHistory: CiHistoryProvenance } {
+  const existing = readJsonOr<Partial<CiRunLedger>>(file, {});
+  return {
+    workflowRuns: Array.isArray(existing.workflow_runs) ? existing.workflow_runs.filter((r) => typeof r?.ci_run_id === "string") : [],
+    runs: Array.isArray(existing.runs) ? existing.runs.filter((r) => typeof r?.run_id === "string") : [],
+    ciHistory: existing.ci_history ?? NEVER_RECONCILED,
+  };
+}
+
+/** Merge one pipeline run into runs/ci-runs.json (newest first, one entry per run_id). */
 export function recordCiRun(paths: Paths, entry: CiRunEntry): { file: string; ledger: CiRunLedger } {
   mkdirSync(paths.runsDir, { recursive: true });
   const file = join(paths.runsDir, CI_RUNS_FILE);
-  const existing = readJsonOr<Partial<CiRunLedger>>(file, {});
-  const previous = Array.isArray(existing.runs) ? existing.runs.filter((r) => typeof r?.run_id === "string") : [];
-  const runs = [entry, ...previous.filter((r) => r.run_id !== entry.run_id)].sort((a, b) =>
-    a.started_at < b.started_at ? 1 : a.started_at > b.started_at ? -1 : 0,
-  );
-  const by_event: Record<string, number> = {};
-  for (const r of runs) {
-    const key = r.ci_event ?? "local";
-    by_event[key] = (by_event[key] ?? 0) + 1;
-  }
-  const ledger: CiRunLedger = { county: COUNTY.key, updated_at: new Date().toISOString(), by_event, runs };
-  writeFileSync(file, JSON.stringify(ledger, null, 2));
-  return { file, ledger };
+  const { workflowRuns, runs, ciHistory } = readLedger(file);
+  const merged = newestFirst([entry, ...runs.filter((r) => r.run_id !== entry.run_id)], (r) => r.started_at);
+  return { file, ledger: writeLedger(file, workflowRuns, merged, ciHistory) };
+}
+
+/**
+ * Replace the reconciled CI history with what the Actions API just reported.
+ *
+ * The API rows win on a collision because they are the authority for a workflow run's event,
+ * branch and conclusion. Rows already on disk that the API did not return are KEPT rather than
+ * dropped: the fetch is capped at a few pages, so an old tick that has rolled out of that window
+ * must not disappear from the file just because we stopped asking about it.
+ *
+ * A fetch that failed carries an empty `runs` list and a non-`reconciled` outcome. In that case the
+ * existing rows stand untouched and only the provenance is updated, so the file records that the
+ * reconcile was attempted and could not be completed instead of quietly looking authoritative.
+ */
+export function recordCiWorkflowRuns(
+  paths: Paths,
+  reconciled: { runs: CiWorkflowRun[]; provenance: CiHistoryProvenance },
+): { file: string; ledger: CiRunLedger; added: number } {
+  mkdirSync(paths.runsDir, { recursive: true });
+  const file = join(paths.runsDir, CI_RUNS_FILE);
+  const { workflowRuns, runs, ciHistory } = readLedger(file);
+  const known = new Set(workflowRuns.map((r) => r.ci_run_id));
+  const byId = new Map<string, CiWorkflowRun>();
+  for (const r of workflowRuns) byId.set(r.ci_run_id, r);
+  for (const r of reconciled.runs) byId.set(r.ci_run_id, r);
+  const merged = newestFirst([...byId.values()], (r) => r.run_started_at ?? "");
+  const provenance = reconciled.provenance.outcome === "reconciled" ? reconciled.provenance : { ...reconciled.provenance, detail: reconciled.provenance.detail ?? ciHistory.detail };
+  const added = reconciled.runs.filter((r) => !known.has(r.ci_run_id)).length;
+  return { file, ledger: writeLedger(file, merged, runs, provenance), added };
 }
 
 // ---------------------------------------------------------------------------- table high-water marks

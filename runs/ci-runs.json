@@ -1,9 +1,255 @@
 {
   "county": "duval",
-  "updated_at": "2026-08-21T23:46:43.584Z",
+  "updated_at": "2026-08-22T00:51:34.910Z",
   "by_event": {
-    "workflow_dispatch": 2
+    "schedule": 3,
+    "workflow_dispatch": 17
   },
+  "by_event_conclusion": {
+    "schedule": {
+      "failure": 1,
+      "success": 1,
+      "cancelled": 1
+    },
+    "workflow_dispatch": {
+      "success": 11,
+      "cancelled": 3,
+      "failure": 3
+    }
+  },
+  "by_event_source": "actions_api",
+  "ci_history": {
+    "outcome": "reconciled",
+    "endpoint": "https://api.github.com/repos/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/workflows/pipeline.yml/runs?per_page=100",
+    "repository": "m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl",
+    "workflow": "pipeline.yml",
+    "fetched_at": "2026-08-22T00:51:34.908Z",
+    "api_total": 20,
+    "pages": 1,
+    "detail": null
+  },
+  "workflow_runs": [
+    {
+      "ci_run_id": "32540470084",
+      "event": "schedule",
+      "status": "completed",
+      "conclusion": "failure",
+      "head_branch": "main",
+      "head_sha": "d7156bf848060545375c0424f5e99d8cfe8edb7f",
+      "run_attempt": 1,
+      "run_started_at": "2026-08-22T00:28:42Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/32540470084"
+    },
+    {
+      "ci_run_id": "32535179300",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "success",
+      "head_branch": "main",
+      "head_sha": "f0e5e6859a5f12cd62abb038bf78050f003287de",
+      "run_attempt": 1,
+      "run_started_at": "2026-08-21T22:59:16Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/32535179300"
+    },
+    {
+      "ci_run_id": "32528599964",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "success",
+      "head_branch": "main",
+      "head_sha": "63b8ec104881b1aac98a7cae74815f62665f7432",
+      "run_attempt": 1,
+      "run_started_at": "2026-08-21T21:27:39Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/32528599964"
+    },
+    {
+      "ci_run_id": "32526267906",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "success",
+      "head_branch": "main",
+      "head_sha": "08986656610c7d7570337fe9cd3d304442bc41c2",
+      "run_attempt": 1,
+      "run_started_at": "2026-08-21T20:58:46Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/32526267906"
+    },
+    {
+      "ci_run_id": "32522683899",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "success",
+      "head_branch": "main",
+      "head_sha": "cd3ceda2531d7c50a86b8a7d9188f030a0598f96",
+      "run_attempt": 1,
+      "run_started_at": "2026-08-21T20:16:02Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/32522683899"
+    },
+    {
+      "ci_run_id": "32514112176",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "success",
+      "head_branch": "feat/duval-oracle-pipeline",
+      "head_sha": "8f059dd5095e01c700bcd95fb546a33caf5bfc1d",
+      "run_attempt": 1,
+      "run_started_at": "2026-08-21T18:35:17Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/32514112176"
+    },
+    {
+      "ci_run_id": "32513420281",
+      "event": "schedule",
+      "status": "completed",
+      "conclusion": "success",
+      "head_branch": "main",
+      "head_sha": "1007a3d98674391ba4d5f7dabf64ed4cc12e5f27",
+      "run_attempt": 1,
+      "run_started_at": "2026-08-21T18:27:12Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/32513420281"
+    },
+    {
+      "ci_run_id": "32501574032",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "success",
+      "head_branch": "feat/duval-oracle-pipeline",
+      "head_sha": "5be287e52c628428eaaa72e10a3d71d22f6d3ec1",
+      "run_attempt": 1,
+      "run_started_at": "2026-08-21T16:10:42Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/32501574032"
+    },
+    {
+      "ci_run_id": "32490170675",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "success",
+      "head_branch": "feat/duval-oracle-pipeline",
+      "head_sha": "bde8a48a37fa16aa21e64a05b6a459368127ca4a",
+      "run_attempt": 1,
+      "run_started_at": "2026-08-21T14:04:22Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/32490170675"
+    },
+    {
+      "ci_run_id": "32481994197",
+      "event": "schedule",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "head_branch": "main",
+      "head_sha": "60e22c1bbec32c7ae1f19773c65d6ca054585033",
+      "run_attempt": 1,
+      "run_started_at": "2026-08-21T12:27:43Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/32481994197"
+    },
+    {
+      "ci_run_id": "32475509467",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "head_branch": "feat/duval-oracle-pipeline",
+      "head_sha": "21222e80af36303dabe988eddd5c54bb8a629531",
+      "run_attempt": 1,
+      "run_started_at": "2026-08-21T11:04:13Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/32475509467"
+    },
+    {
+      "ci_run_id": "32474704914",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "success",
+      "head_branch": "feat/duval-oracle-pipeline",
+      "head_sha": "60e22c1bbec32c7ae1f19773c65d6ca054585033",
+      "run_attempt": 1,
+      "run_started_at": "2026-08-21T10:53:46Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/32474704914"
+    },
+    {
+      "ci_run_id": "32471951259",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "success",
+      "head_branch": "feat/duval-oracle-pipeline",
+      "head_sha": "2d05dbf005c7cff89ce5e95352f6278acf9702e3",
+      "run_attempt": 1,
+      "run_started_at": "2026-08-21T10:17:24Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/32471951259"
+    },
+    {
+      "ci_run_id": "32469673797",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "failure",
+      "head_branch": "feat/duval-oracle-pipeline",
+      "head_sha": "29d113a0ee0bc663346340a9a80883e7e500e3ad",
+      "run_attempt": 1,
+      "run_started_at": "2026-08-21T09:48:53Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/32469673797"
+    },
+    {
+      "ci_run_id": "32466876779",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "failure",
+      "head_branch": "feat/duval-oracle-pipeline",
+      "head_sha": "07b1f722d508da780870f4f1962c5cd1dac9de13",
+      "run_attempt": 1,
+      "run_started_at": "2026-08-21T09:13:48Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/32466876779"
+    },
+    {
+      "ci_run_id": "32463641825",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "success",
+      "head_branch": "feat/duval-oracle-pipeline",
+      "head_sha": "73356d2d10253bca2936ec1cf33c4c59678c6d77",
+      "run_attempt": 1,
+      "run_started_at": "2026-08-21T08:32:21Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/32463641825"
+    },
+    {
+      "ci_run_id": "32463597713",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "head_branch": "feat/duval-oracle-pipeline",
+      "head_sha": "23a34ce8c1c0f11a980cca0b56ef9d9b848da0df",
+      "run_attempt": 1,
+      "run_started_at": "2026-08-21T08:31:45Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/32463597713"
+    },
+    {
+      "ci_run_id": "32463456281",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "head_branch": "feat/duval-oracle-pipeline",
+      "head_sha": "a56e979b36a20aa91b9b520f54baa5341ceb0e5f",
+      "run_attempt": 1,
+      "run_started_at": "2026-08-21T08:30:00Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/32463456281"
+    },
+    {
+      "ci_run_id": "32459111198",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "success",
+      "head_branch": "feat/duval-oracle-pipeline",
+      "head_sha": "d6204f2a3b14a06a11f656498d62994000d4a69e",
+      "run_attempt": 1,
+      "run_started_at": "2026-08-21T07:32:54Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/32459111198"
+    },
+    {
+      "ci_run_id": "32459037691",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "failure",
+      "head_branch": "feat/duval-oracle-pipeline",
+      "head_sha": "419cfabbe25301b37763e665a1e8bfab50ddca7c",
+      "run_attempt": 1,
+      "run_started_at": "2026-08-21T07:31:55Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/32459037691"
+    }
+  ],
   "runs": [
     {
       "run_id": "01M0KBA53DPMHRGXV66NQ0GRY5",

@@ -212,11 +212,17 @@ export default function PropertyPage() {
    * The fallback sale must come from last_sale_date_any, not last_sale_date.
    *
    * last_sale_date is the FDOR roll's own column and the roll carries only the two most recent
-   * transfers, so it is NULL on 352,233 of 404,023 parcels: falling back to it left the sales
-   * section empty on most properties even though the pipeline holds a recorded transfer for 99.5%
-   * of them. last_sale_date_any is the later of the roll sale and the City recorded sale, and
-   * tenure_basis names which one it was, so the row can say where the date came from instead of
-   * claiming a column that did not supply it.
+   * transfers, so it is NULL on 351,742 of 404,023 parcels: falling back to it left the sales
+   * section empty on most properties even though the pipeline holds a recorded transfer for
+   * 401,832 of them. last_sale_date_any is the later of the roll sale and the City recorded sale,
+   * and tenure_basis names which one it was, so the row can say where the date came from instead
+   * of claiming a column that did not supply it.
+   *
+   * Both counts are measured against the published artifact
+   * (bafybeidex5m2tzcbicfzjn4phgiudr2lpt7lgqf23ajz3gythipqdqhlri), not carried over from an
+   * earlier run. They are stated as counts rather than as a percentage because 401,832 / 404,023
+   * is 99.46%, and the "99.5%" this comment used to claim is the rounding up of a shortfall that
+   * formatRatioPercent exists to refuse.
    */
   const sales = useMemo(() => {
     const fromJson = readArray(openData?.document ?? null, "sales");

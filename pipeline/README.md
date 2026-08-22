@@ -8,12 +8,12 @@ stable IPNS names. Self-contained: no Neon, no Restate, no AWS. County key `duva
 
 ```
 GitHub Actions (cron every 6 h + dispatch)      Filebase S3 -> IPFS pins + IPNS (/v1/names)
-  pnpm run pipeline -- --tracks ...              oracle-query-table-duval      query-table.parquet
-    download (ETag / Last-Modified / sha256)      oracle-dataset-coverage-duval dataset-coverage.json
-    stage -> hash -> MERGE (ins/upd/unchanged)    duval-oracle-artifacts        artifacts-index.json
-    features -> parquet -> validation gate          (run-history.json, tables/*.parquet,
-    run_log + runs/<run_id>.json                     published-counties.json listed inside)
-  DuckDB file: DATA_DIR/duval.duckdb
+  pnpm run pipeline -- --tracks ...              oracle-query-table-duval       query-table.parquet
+    download (ETag / Last-Modified / sha256)      oracle-dataset-coverage-duval  dataset-coverage.json
+    stage -> hash -> MERGE (ins/upd/unchanged)    oracle-run-history-duval       run-history.json
+    features -> parquet -> validation gate        oracle-published-counties      published-counties.json
+    run_log + runs/<run_id>.json                  duval-oracle-artifacts         artifacts-index.json
+  DuckDB file: DATA_DIR/duval.duckdb              (ten tables/*.parquet keep CIDs, no name)
 ```
 
 ## Run it
@@ -23,7 +23,7 @@ cd pipeline
 pnpm install
 cp .env.example .env          # optional; everything has defaults, Filebase keys empty = dry-run
 
-pnpm run pipeline -- --tracks default --window 14d     # what the schedule runs: all 12 tracks; US-only ones self-skip outside the US
+pnpm run pipeline -- --tracks default --window 14d     # what the schedule runs: all 13 tracks; US-only ones self-skip outside the US
 pnpm run pipeline -- --tracks local                    # the 8 tracks reachable from anywhere
 pnpm run pipeline -- --tracks transit,water,places,businesses,links --window 14d
 pnpm run pipeline -- --tracks permits --window 300     # bounded permit enumeration (US egress)
@@ -38,7 +38,10 @@ pnpm run publish:open-data -- --publish                # upload <cid>.json files
 pnpm run pipeline -- --tracks pa_detail --window 300   # PA detail pilot (US egress): seed order, cursor, lexicon transform
 pnpm run status                                        # table counts + run history
 pnpm run query -- "SELECT owner_region_class, count(*) FROM derived.properties_features GROUP BY 1"
-pnpm test                                              # vitest: 11 files / 38 tests
+pnpm typecheck                                         # tsc --noEmit
+pnpm lint                                              # eslint . (pnpm lint:fix to autofix)
+pnpm format:check                                      # prettier --check (pnpm format to rewrite)
+pnpm test                                              # vitest: 33 files / 217 tests
 ```
 
 Flags for `pipeline`: `--tracks a,b|all|default|local`, `--window <w>` (Sunbiz days like `14d`, permit
@@ -67,9 +70,11 @@ index.json CID LAST, reads it back through the gateway (`x-ipfs-roots` + propert
 checkpoint keyed by CID so reruns skip content already pinned. MCP: `ORACLE_OPEN_DATA_IPNS_MAP={"duval":"<k51>"}`
 (printed by both publish commands once the name exists).
 
-Measured locally: 20,000 records in 46 s (87.9 MB, ~4.4 KB each, pretty-printed like the reference export); the
-full 404,023-property export is ~16 min and ~1.8 GB on disk (see the latest `runs/*.json` of track `consolidation`
-for the exact figures).
+Measured on the latest consolidation run, `01M0KBA53DPMHRGXV66NQ0GRY5`: the full 404,023-property export
+rendered in 196 s into 41 shards totalling 1,969,492,488 bytes on disk (about 4.9 KB per property,
+pretty-printed like the reference export). Incremental `--since changed` passes that re-render only what
+moved finish in 16 to 21 s. Every consolidation run record in `runs/*.json` carries its own
+`shards` / `totalBytes` / `ms`, so these are readable per run rather than taken from here.
 
 ### PA detail pilot (W4, US egress)
 
@@ -100,9 +105,21 @@ workspace; in Actions it is downloaded from Google Drive (`drive.usercontent.goo
 | `SOURCE_URL_NAL`, `SOURCE_URL_SDF`, `SOURCE_URL_PAR`, `SOURCE_URL_GTFS`, `SOURCE_URL_OVERTURE` | current FDOR 2026P / JTA / Overture 2026-08-19.0 | Override when a source rolls the year / release |
 | `SUNBIZ_HOST`, `SUNBIZ_USER`, `SUNBIZ_PASSWORD` | the public Sunbiz credentials (published by the FL Division of Corporations) | SFTP access |
 | `SUNBIZ_WINDOW_DAYS`, `SUNBIZ_MAX_FILES_PER_RUN` | 14, 30 | Daily files considered / fetched per run |
+| `SUNBIZ_BASE_SNAPSHOT` | unset (which means: off locally, on when `CI=true`) | `1`/`true`/`yes`/`on` loads the 1.8 GB Sunbiz quarterly base snapshot. This is the variable that turns `businesses` from a few thousand delta rows into the full 438,526-row Duval set, so a local run that leaves it unset will not reproduce the published business counts |
+| `SUNBIZ_BASE_MAX_ENTRIES` | 10 | Members of `cordata.zip` loaded per run. The archive has exactly 10, so the default loads it in one run; lower it to spread the load |
+| `SUNBIZ_KEEP_QUARTERLY_ZIP` | unset | `1` keeps the downloaded 1.8 GB quarterly zip instead of deleting it after extraction |
 | `PERMITS_WINDOW`, `PERMITS_YEAR`, `PERMITS_PREFIX`, `PERMITS_START_SEQ` | 300, current YY, B, 1 | JaxEPICS enumeration window and cursor start |
+| `PERMITS_KNOWN` | `B-25-279425.000` | The one real permit number the JaxEPICS discovery step fetches to find the Angular bundle and probe the API. Change it if that permit is ever withdrawn |
 | `PA_DETAIL_WINDOW` | 300 | PA detail pages per run (also `--window 300`) |
-| `COJ_MAX_PAGES`, `GEOMETRY_LIMIT`, `ALLOW_NEW_COLUMNS`, `LOG_LEVEL` | unset | Dev bounds / drift downgrade / log level |
+| `ALLOW_NEW_COLUMNS` | unset | `1` downgrades an unexpected new column in a source header from a run failure to a recorded limitation |
+| `LOG_LEVEL` | `info` | Minimum level for the structured JSON logs (`src/log.ts`) |
+| `COJ_MAX_PAGES`, `GEOMETRY_LIMIT` | unset | Dev bounds on the COJ paged pulls and the PAR shapefile read |
+
+`CI` and the `GITHUB_*` variables are read but never set by hand: GitHub Actions supplies them, and
+they only decide whether the quarterly snapshot runs and what CI provenance lands in the run record.
+
+`.env` and `.env.local` are both loaded from `pipeline/`, in that order, and neither overrides a
+variable already present in the environment.
 
 No secrets are read anywhere except `publish/filebase.ts` and `tracks/businesses.ts`; nothing prints them.
 
@@ -128,11 +145,35 @@ Every entity table carries `row_hash, source_system, source_url, source_artifact
 
 `parcels` (NAL roll, 1 row per PARCEL_ID, ~100 curated columns + centroid), `parcel_geometry` (PAR centroid lat/lon, area, bbox), `sales_history` (SDF + NAL SALE_*1/2, deduped), `transit_stops` (+ routes served, wheelchair) and `transit_routes`, `water_bodies` (COJ river polygons + NHD waterbody/area/flowline, WKB), `places` (Overture, `is_starbucks`), `businesses` + `business_events` (Sunbiz, Duval filter), `owners` (normalized name + mailing hash, parcel_count), `entity_links` (parcel->owner, business->parcel by situs address / owner name, coj_parcel/address_point/permit -> parcel), `coj_parcels`, `address_points`, `contractors`, `permits`, `pa_detail_buildings`, `pa_detail_sales` (US-egress tracks; filled from Actions), `consolidation_state`, `source_files` (Sunbiz journal), `track_state` (cursors: COJ `last_edit_date_iso`, permits `cursor_seq`, discovered API), `run_log`, `run_log_sources`, `derived.properties_features`, `derived.nn_transit`, `derived.nn_starbucks`, `derived.water_distance`, `derived.dor_use_codes`, `staging.*`.
 
-Current local load (2026-08-21): parcels 404,023 (0 dup / 0 null), parcel_geometry 405,716 (403,813 parcels with coordinates), sales_history 64,532, transit_stops 2,501 (45 routes: 43 bus, 1 people mover, 1 ferry), water_bodies 757 (COJ St Johns 10 + Jax_River 1, NHD waterbody 223 / area 9 / named flowline 514), places 3,084 (81 Starbucks), businesses 1,024 from 14 daily files (+ 17,919 event lines), owners 324,052, entity_links 404,681 (655 business->parcel by situs address, 3 by owner name; 577 parcels linked to a Sunbiz business).
+Table totals after the latest completed run, `01M0K8WH2MSEKV36HXKDF9A910` (2026-08-21T23:43Z on a US
+runner, so the US-egress tracks ran). These are the `totals` block of `runs/01M0K8WH2MSEKV36HXKDF9A910.json`,
+and they are what the published artifacts were built from:
+
+| Table | Rows | Notes |
+|---|---|---|
+| `parcels` | 404,023 | 0 duplicate / 0 null folios |
+| `parcel_geometry` | 405,716 | 403,813 parcels get coordinates; 210 NAL parcels have no shape |
+| `sales_history` | 71,802 | 64,532 staged by the SDF track, 7,270 folded in by `pa_detail` |
+| `transit_stops` | 2,501 | 45 routes: 43 bus, 1 people mover, 1 ferry |
+| `water_bodies` | 757 | COJ St Johns 10 + Jax_River 1, NHD waterbody 223 / area 9 / named flowline 514 |
+| `places` | 3,084 | 81 Starbucks |
+| `businesses` | 438,526 | Sunbiz quarterly base (10 `cordata*.txt` members, 12,808,196 records parsed, 437,502 kept for Duval) plus the daily-delta journal |
+| `business_events` | 17,919 | event lines |
+| `coj_parcels` | 407,985 | 407,986 features fetched over 204 pages; 403,714 matched to NAL |
+| `address_points` | 671,814 | 336 pages; 367,966 matched to NAL |
+| `contractors` | 4,050 | Duval, all trades; 516 roofing |
+| `permits` | 0 | constrained source, see below |
+| `pa_detail_buildings` | 1,109 | seed cursor 1,466 of 398,324 parcels; 32.6 pages/min, 0 errors this window |
+| `owners` | 323,925 | |
+| `entity_links` | 1,444,531 | 240,928 business->parcel by situs address, 27,900 by owner name; 116,696 parcels linked to a Sunbiz business |
+| `derived.properties_features` | 404,023 | 131 columns |
 
 ## Query table (`query-table.parquet`)
 
-37 canonical columns from `elephant-query-db` first (`property_id ... hoa_flag`), then the Duval extras:
+131 columns: the 37 canonical `elephant-query-db` columns first (`property_id ... hoa_flag`), then 94
+Duval extras. The published artifact
+(`bafybeidex5m2tzcbicfzjn4phgiudr2lpt7lgqf23ajz3gythipqdqhlri`) measures 404,023 rows x 131 columns,
+49,974,055 bytes. The extras are:
 `dor_uc, pa_uc, eff_year_built, taxable_value, assessed_value_school, homestead_flag, building_count, residential_units,
 legal_description, neighborhood_code, census_block, owner_mailing_address/city/state/zip, owner_region_class,
 last_sale_source/qual_cd/or_book/or_page, sale_count, last_sale_date_any, tenure_basis, years_since_last_sale,
@@ -141,15 +182,23 @@ roof_year_est, roof_age_basis, roof_age_years, water_view_flag, water_view_major
 water_body_type, water_basis, nearest_transit_stop_m/id/name, nearest_transit_route_types, nearest_transit_routes,
 near_transit_800m, nearest_starbucks_m/id/name, near_starbucks_800m, fld_zone, zoning, coj_last_sale_date,
 address_point_count, roof_structure, pa_actual_year_built, pa_building_count, coordinates_source, source_artifact,
-source_sha256, source_fetched_at, source_run_id, features_run_id, features_as_of, source_url, fetched_at, run_id`
-(the last three are the UI provenance contract). `property_cid` is filled from `consolidation_state` after
-`export:consolidation`.
+source_sha256, source_fetched_at, source_run_id, features_run_id, features_as_of, has_additional_owners,
+tenure_source, has_sale_on_record, source_systems, source_url, fetched_at, run_id`
+(the last three of those are the UI provenance contract), plus the twelve per-family provenance pairs
+`appraisal_source/_fetched_at, sales_*, geometry_*, structure_*, permit_*, business_*, contractor_*,
+transit_*, places_*, water_*, parcel_layer_*, address_*` (24 columns). `property_cid` is filled from
+`consolidation_state` after `export:consolidation`.
+
+Family coverage on the published artifact, measured as the share of the 404,023 rows whose
+`<family>_source` is non-null: appraisal 100%, business 100%, geometry / transit / places / water
+99.95% (403,813), parcel_layer 99.92% (403,714), address 59.72% (241,270), sales 12.94% (52,281),
+structure 0.23% (930), permit 0%, contractor 0%.
 
 Rules (TS and SQL twins in `src/features/rules.ts` and `src/features/normalize.ts`, both tested):
 
 - `owner_region_class`: LOCAL = mailing state FL and ZIP5 in the Duval set (32099, 32201-32258 except 32259, 32260, 32266, 32277; city-name fallback when no ZIP); REGIONAL = FL outside Duval, GA, SC, AL; NATIONAL = other US state/territory/military code; FOREIGN = non-US code; NULL = no mailing state.
-- Tenure: `last_sale_date_any` = latest of the FDOR roll/SDF sale and the COJ parcel layer `SALESL*` date; `tenure_basis` FDOR_SALE | COJ_SALESL; `years_since_last_sale` = floor((as_of - date) / 365.25 d); `no_sale_10y_flag` true when that date <= as_of - 10 y, NULL when no sale is known.
-- `roof_year_est` / `roof_age_basis`: `PERMIT` (latest re-roof permit year, `ROOF|RE-ROOF|REROOF|SHINGLE`) else `EFF_YR_BLT_PROXY` else `ACT_YR_BLT_PROXY`.
+- Tenure: `last_sale_date_any` = latest of the FDOR roll/SDF sale and the COJ parcel layer `SALESL*` date; `tenure_basis` FDOR_SALE | COJ_SALESL | NO_SALE_ON_RECORD; `years_since_last_sale` = floor((as_of - date) / 365.25 d); `no_sale_10y_flag` true when that date <= as_of - 10 y, NULL when no sale is known. Measured on the published artifact: COJ_SALESL 398,908, FDOR_SALE 2,924, NO_SALE_ON_RECORD 2,191. The FDOR side is not decorative: it wins on 2,924 parcels where the roll or a PA detail page records a later transfer than the COJ layer does.
+- `roof_year_est` / `roof_age_basis`: `PERMIT` (latest re-roof permit year, `ROOF|RE-ROOF|REROOF|SHINGLE`) else `EFF_YR_BLT_PROXY` else `ACT_YR_BLT_PROXY`. Only one of the three occurs on the published artifact: 359,129 rows are `EFF_YR_BLT_PROXY` and the other 44,894 have no basis at all (NULL, with `roof_year_est` and `roof_age_years` NULL beside it). `PERMIT` needs a harvested permit and none exists. `ACT_YR_BLT_PROXY` is reachable in the rule but unreachable in this roll: `EFF_YR_BLT > 0` and `ACT_YR_BLT > 0` hold on exactly the same 359,129 rows (0 rows have an actual year without an effective year), and the other 44,894 rows carry neither, so the third branch has never fired.
 - Transit / Starbucks: great-circle distance from the parcel centroid to the nearest JTA stop / Starbucks place; `near_*_800m` = <= 800 m.
 - Water: distance from the centroid to the nearest mapped shoreline vertex (COJ river polygons + NHD, simplified to ~10 m); `water_view_flag` = <= 150 m or parcel bbox within 30 m; `water_view_major_flag` restricts to the river / bay layers; `water_basis` names the feature and layer; distances beyond ~1 km are NULL (`water_basis` says so).
 - `owner_occupied` = mailing line 1 + ZIP5 equal the situs line 1 + ZIP5; `has_sunbiz_tenant` = a Sunbiz business linked by situs address.
@@ -202,16 +251,42 @@ froze the runs page at eight runs), and the catalog name is what lets an operato
 The two per-publish lines are printed by `publish-artifacts.yml` in its job summary, so the current
 values are one click away in the Actions tab without downloading anything.
 
-## The six questions: availability today (local run, before the US-only tracks)
+## The six questions: availability on the published artifact
+
+Every figure below was measured with DuckDB against the published query table
+(`bafybeidex5m2tzcbicfzjn4phgiudr2lpt7lgqf23ajz3gythipqdqhlri`, 404,023 rows), not against a local
+working set. Re-run any of them yourself: see "Verify these numbers" below.
 
 | Question | Parcels with the feature | Basis | Gap |
 |---|---|---|---|
-| Roof older than 15 years | 359,129 known; 296,902 with `roof_age_years > 15` | `EFF_YR_BLT_PROXY` | permits fill `PERMIT` basis from Actions |
-| Water view | 403,813 known; 89,588 flagged (83,084 on river/bay layers) | shoreline-vertex proximity proxy | not a sightline; creeks and >= 1 ha ponds included, filter by `water_view_major_flag` for rivers |
-| No ownership change in 10+ years | 51,022 tenure known, 0 flagged | FDOR 2026P carries only 2025-2026 sales | `coj_parcels` (SALESL*) in Actions fills `COJ_SALESL` basis for the rest |
-| Regional owners | 403,201 classified; 34,649 REGIONAL (333,851 LOCAL, 34,697 NATIONAL, 4 FOREIGN) | NAL mailing address | FOREIGN under-detected (blank OWN_STATE) |
+| Roof older than 15 years | 359,129 known; 298,314 with `roof_age_years >= 15` (296,902 strictly `> 15`) | `EFF_YR_BLT_PROXY` on all 359,129 | no `PERMIT` basis exists, because no permit was ever harvested |
+| Water view | 403,813 known; 89,588 flagged, of which 83,084 sit on a river/bay layer (`water_view_major_flag`) | shoreline-vertex proximity proxy | not a sightline; creeks and >= 1 ha ponds included, filter by `water_view_major_flag` for rivers |
+| No ownership change in 10+ years | 401,832 with a dated transfer on record; 153,242 flagged | `COJ_SALESL` on 398,908, `FDOR_SALE` on 2,924 | 2,191 parcels have no transfer in any source; they are `NO_SALE_ON_RECORD` and must not be read as long holds |
+| Regional owners | 403,201 classified; 34,649 REGIONAL (333,851 LOCAL, 34,697 NATIONAL, 4 FOREIGN, 822 unclassified) | NAL mailing address | FOREIGN under-detected (blank OWN_STATE) |
 | Walking distance to transit | 403,813 known; 326,112 within 800 m of a JTA stop | GTFS stops, haversine | straight-line, not network distance |
 | Walking distance to Starbucks | 403,813 known; 150,860 within 800 m | Overture places, haversine | name/brand match |
+
+Combined: 130,045 parcels satisfy `roof_age_years >= 15 AND no_sale_10y_flag`.
+
+### Verify these numbers
+
+Every figure in this file that describes the published data can be reproduced from the artifact
+itself, with no checkout and no credential. Any DuckDB (CLI, `@duckdb/node-api`, DuckDB-WASM in the
+`/query` page) will do:
+
+```sql
+INSTALL httpfs; LOAD httpfs;
+CREATE VIEW properties AS SELECT * FROM read_parquet(
+  'https://ipfs.filebase.io/ipfs/bafybeidex5m2tzcbicfzjn4phgiudr2lpt7lgqf23ajz3gythipqdqhlri');
+
+SELECT count(*) FROM properties;                                        -- 404,023
+SELECT count(*) FROM (DESCRIBE SELECT * FROM properties);               -- 131
+SELECT roof_age_basis, count(*) FROM properties GROUP BY 1;             -- EFF_YR_BLT_PROXY 359,129; NULL 44,894
+SELECT tenure_basis, count(*) FROM properties GROUP BY 1;               -- COJ_SALESL 398,908; FDOR_SALE 2,924; NO_SALE_ON_RECORD 2,191
+SELECT count(*) FROM properties WHERE last_sale_date IS NULL;           -- 351,742
+SELECT round(100.0 * count(*) FILTER (WHERE sales_source IS NOT NULL)
+             / count(*), 2) FROM properties;                            -- 12.94
+```
 
 ## Sources, where they run, limitations (recorded per run in `run_log_sources.limitations`)
 
@@ -223,7 +298,7 @@ values are one click away in the Actions tab without downloading anything.
 | transit | JTA GTFS (5.6 MB, redirect to a dated media file, ETag) | anywhere | no GTFS-RT; straight-line distances |
 | water | COJ stjohnsriver + Jax_River (AGO geojson) + USGS NHD HU4 0307 (97 MB FileGDB zip) | anywhere | proximity proxy; ponds < 1 ha and unnamed flowlines excluded; ~1 km search radius |
 | places | Overture Maps places 2026-08-19.0 (DuckDB httpfs, anonymous S3) | anywhere | ~2.5 min remote scan per run; name-based brand match |
-| businesses | Sunbiz SFTP daily corporate files (1,440-char records) + events | anywhere | no county filter (ZIP 322xx / JACKSONVILLE city); layout page was HTTP 522, offsets validated on live records; `get()` is ~6 KB/s on this server, `fastGet` ~250 KB/s |
+| businesses | Sunbiz SFTP: quarterly base `cordata.zip` (1,819,049,954 bytes, 10 members, 12,808,196 records) + daily corporate files (1,440-char records) + events | anywhere | no county filter (ZIP 322xx / JACKSONVILLE city, which kept 437,502 of 12.8 M base records); layout page was HTTP 522, offsets validated on live records; `get()` is ~6 KB/s on this server, `fastGet` ~250 KB/s; the base snapshot is off locally unless `SUNBIZ_BASE_SNAPSHOT` is set |
 | links | derived reconciliation | anywhere | exact normalized address match |
 | coj_parcels | COJ CityBiz/Parcels MapServer 0 (407,986 rows, 2000/page) | US egress (Actions) | locally `skipped: non-US egress (HTTP 0, fetch failed)` |
 | coj_addresses | COJ ERAT layer 41 address points (671,814; EDIT_DATE incremental) | US egress (Actions) | first run full pull; then `EDIT_DATE >= last` (falls back to full when the filter is rejected) |
@@ -240,7 +315,7 @@ country each run; the run record stores it too.
 - `.github/workflows/pipeline.yml`: cron every 6 h + dispatch; runs ALL tracks with `SUNBIZ_WINDOW_DAYS=14`, `PERMITS_WINDOW=300`, `PA_DETAIL_WINDOW=300`; then `export:consolidation --since changed`; caches the source zips, seed, PA pages, open-data export and the DuckDB file between runs; uploads `publish/duval/*` (minus the per-property files) and the discovered JaxEPICS API as workflow artifacts; commits `runs/*.json` back; publishes open data + query table when `FILEBASE_*` secrets exist.
 - `.github/workflows/pipeline-window.yml`: dispatch-only bounded run (tracks + window + force + optional publish) for ad-hoc permit / Sunbiz / COJ pulls.
 - `.github/workflows/probe-sources.yml`: reachability probe (unchanged).
-- `.github/workflows/publish-artifacts.yml`: dispatch-only re-publish of the ~10 runtime artifacts from the cached working set, without re-ingesting; prints `mcp-env.txt` into the job summary.
+- `.github/workflows/publish-artifacts.yml`: dispatch-only re-publish of the 15 runtime artifacts from the cached working set, without re-ingesting; prints `mcp-env.txt` into the job summary.
 - `.github/workflows/ci.yml`: push / PR tests for the whole repository. Three jobs: `pipeline` (tsc + vitest), `ui` (tsc + vitest) and `ui-e2e` (Playwright smoke, `continue-on-error` until the suite has been green for a few consecutive runs). Before this existed, only `pipeline/` was tested, inside the 40-minute ingestion workflow.
 
 ### What is committed back, and why
@@ -274,11 +349,18 @@ detail into the job summary. Dispatched runs do not alert, because a human is al
 
 ## Cost model ($0 standing)
 
-- Compute: GitHub Actions (free minutes; a warm all-tracks run is ~8 min, dominated by the Overture scan and the NN features; cold adds the 222 MB FDOR zips + 97 MB NHD once, then cached).
-- Storage: the query-table/coverage/entity set is ~120 MB; the per-property open-data set is ~1.8 GB for 404K properties (Filebase free tier is 5 GB / 1,000 pins: the per-property files count as pins, so the full open-data publish needs a paid Filebase plan or a bucket with raised pin limits; the dry-run prints the exact object count and bytes before anything is uploaded); IPFS gateways serve reads; IPNS names are free.
+- Compute: GitHub Actions (free minutes; the latest all-tracks run (01M0K8WH2MSEKV36HXKDF9A910) took 42 min wall clock, dominated by the water distance pass at 6.7 min and the pa_detail window at 8.2 min; cold adds the 222 MB FDOR zips + 97 MB NHD once, then cached).
+- Storage: the runtime set the publish uploads is 15 objects and 239.7 MB (query table 50.0 MB, ten entity tables 189.0 MB, coverage / run history / catalogs the rest); the per-property open-data set is 1.97 GB for 404,023 properties across 41 shards (Filebase free tier is 5 GB / 1,000 pins: the per-property files count as pins, so the full open-data publish needs a paid Filebase plan or a bucket with raised pin limits; the dry-run prints the exact object count and bytes before anything is uploaded); IPFS gateways serve reads; IPNS names are free.
 - Database: a DuckDB file, restored from the Actions cache or rebuilt; published parquet is the portable copy (DuckDB / DuckDB-WASM read it straight from the gateway with range requests).
 - Nothing runs when nobody runs it. No AWS, no Neon, no Restate.
 
 ## Engineering notes
 
-TypeScript / Node 22 / ESM, `@duckdb/node-api` (+ spatial, httpfs), `@aws-sdk/client-s3` (Filebase), `ssh2-sftp-client` (Sunbiz), `ipfs-only-hash` + `multiformats`, zod, vitest, tsx. Structured JSON logs (`src/log.ts`). Deviations from the team Golden Path: no CDK / Glue / PySpark because the requirement is zero standing infrastructure (Actions + DuckDB + IPFS); no PagerDuty, because there is no standing infrastructure to pay for one: a failed scheduled run instead opens a `pipeline-failure` GitHub issue (and posts to `ALERT_WEBHOOK_URL` when that secret is set), which is the same alerting contract at zero cost.
+TypeScript / Node 22 / ESM, `@duckdb/node-api` (+ spatial, httpfs), `@aws-sdk/client-s3` (Filebase), `ssh2-sftp-client` (Sunbiz), `ipfs-only-hash` + `multiformats`, zod, vitest, tsx. Structured JSON logs (`src/log.ts`).
+
+Deviations from the team Golden Path, stated rather than hidden:
+
+- **No CDK / Glue / PySpark**, because the requirement is zero standing infrastructure. Actions + DuckDB + IPFS instead.
+- **No PagerDuty**, because there is no standing infrastructure to pay for one. A failed scheduled run opens a `pipeline-failure` GitHub issue (and posts to `ALERT_WEBHOOK_URL` when that secret is set), which is the same alerting contract at zero cost.
+- **Linting is not uniform across the repository.** `pipeline/` has a flat ESLint config (`eslint.config.js`: `js.configs.recommended`, `typescript-eslint` recommended, `eslint-config-prettier`) wired to `pnpm lint`. `ui/` has no ESLint at all; its `pnpm lint` script runs `tsc --noEmit`, which is a type check and not a lint. That is a real gap, not a naming quirk, and it is written down here rather than left for a reviewer to find.
+- **`no-useless-assignment` is switched off in `pipeline/eslint.config.js`, deliberately.** `let x: T | null = null` ahead of a try/catch that assigns it is the clearest way to write a fallible step in this codebase, and the rule objects to the initialiser rather than to a defect. The reason is in a comment on the rule itself, so the next person does not have to guess.
