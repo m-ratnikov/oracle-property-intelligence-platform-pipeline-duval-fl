@@ -1,7 +1,7 @@
 {
   "county": "duval",
-  "run_id": "01M0K8WH2MSEKV36HXKDF9A910",
-  "updated_at": "2026-08-21T23:43:14.384Z",
+  "run_id": "01M0KNN2D0BD3XTCG6ZTG2DC07",
+  "updated_at": "2026-08-22T03:01:46.899Z",
   "state": [
     {
       "track": "coj_addresses",
@@ -13,16 +13,16 @@
     {
       "track": "pa_detail",
       "key": "seed_cursor",
-      "value": "1466",
-      "updated_at": "2026-08-21T23:42:39Z",
-      "run_id": "01M0K8WH2MSEKV36HXKDF9A910"
+      "value": "1766",
+      "updated_at": "2026-08-22T03:01:12Z",
+      "run_id": "01M0KNN2D0BD3XTCG6ZTG2DC07"
     },
     {
       "track": "permits",
       "key": "discovered_api",
       "value": "[]",
-      "updated_at": "2026-08-21T23:34:27Z",
-      "run_id": "01M0K8WH2MSEKV36HXKDF9A910"
+      "updated_at": "2026-08-22T02:53:00Z",
+      "run_id": "01M0KNN2D0BD3XTCG6ZTG2DC07"
     }
   ]
 }
