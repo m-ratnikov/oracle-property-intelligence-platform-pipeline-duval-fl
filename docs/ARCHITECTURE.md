@@ -9,7 +9,7 @@ tier to keep alive, and nothing consuming money when nobody is looking.
 | Parcels | 404,023, one row each |
 | Source systems | 13 tracks: 12 external, 1 derived (FDOR, City of Jacksonville, JTA, NHD, Overture, Sunbiz, DBPR) |
 | Refresh | every 6 h on GitHub Actions, incremental |
-| Query table | 49,974,055 byte parquet, 131 columns |
+| Query table | 50,090,904 byte parquet, 133 columns |
 | Addressing | 5 IPNS names for what moves, CIDs for what should not |
 | Runtime cost when idle | none: no server, no database |
 
@@ -127,7 +127,7 @@ sequenceDiagram
         P->>DB: INSERT run_log_sources (deltas, limitations)
     end
 
-    P->>DB: build derived.properties_features (131 columns)
+    P->>DB: build derived.properties_features (133 columns)
     P->>DB: COPY to query-table.parquet
     P->>P: validate - rows == distinct folios, no null keys
     Note over P: a failed gate keeps the last artifact that passed, and stops the job
@@ -220,7 +220,7 @@ flowchart LR
         links["entity resolution<br/><i>owners, parcel to business</i>"]
     end
 
-    feat[("derived.properties_features<br/>404,023 rows x 131 columns")]
+    feat[("derived.properties_features<br/>404,023 rows x 133 columns")]
     pq[/"query-table.parquet"/]
     cons[/"per-property JSON<br/>+ shards + index"/]
 

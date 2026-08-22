@@ -129,8 +129,8 @@ scores a runtime it cannot reach as zero, so the hosted URLs still have to exist
 
 `pnpm sample` writes `public/sample` from a fixed seed, so it is reproducible:
 
-- `query-table.parquet`, 480 parcels, 131 columns: the same schema as the published artifact (37
-  canonical Elephant query table columns plus 94 Duval extras), written through DuckDB with real
+- `query-table.parquet`, 480 parcels, 133 columns: the same schema as the published artifact (37
+  canonical Elephant query table columns plus 96 Duval extras), written through DuckDB with real
   column types and ZSTD compression
 - `run-history.json`, four runs across 13 sources with deltas and documented limitations
 - `dataset-coverage.json`, ingested against expected for all 13 sources

@@ -166,14 +166,14 @@ and they are what the published artifacts were built from:
 | `pa_detail_buildings` | 1,109 | seed cursor 1,466 of 398,324 parcels; 32.6 pages/min, 0 errors this window |
 | `owners` | 323,925 | |
 | `entity_links` | 1,444,531 | 240,928 business->parcel by situs address, 27,900 by owner name; 116,696 parcels linked to a Sunbiz business |
-| `derived.properties_features` | 404,023 | 131 columns |
+| `derived.properties_features` | 404,023 | 133 columns |
 
 ## Query table (`query-table.parquet`)
 
-131 columns: the 37 canonical `elephant-query-db` columns first (`property_id ... hoa_flag`), then 94
+133 columns: the 37 canonical `elephant-query-db` columns first (`property_id ... hoa_flag`), then 96
 Duval extras. The published artifact
-(`bafybeidex5m2tzcbicfzjn4phgiudr2lpt7lgqf23ajz3gythipqdqhlri`) measures 404,023 rows x 131 columns,
-49,974,055 bytes. The extras are:
+(`bafybeidmxru6kibvnvuuyytiaylu2ufuelc7nowi626ww6kfrg2ocud7uu`) measures 404,023 rows x 133 columns,
+50,090,904 bytes. The extras are:
 `dor_uc, pa_uc, eff_year_built, taxable_value, assessed_value_school, homestead_flag, building_count, residential_units,
 legal_description, neighborhood_code, census_block, owner_mailing_address/city/state/zip, owner_region_class,
 last_sale_source/qual_cd/or_book/or_page, sale_count, last_sale_date_any, tenure_basis, years_since_last_sale,
@@ -183,7 +183,17 @@ water_body_type, water_basis, nearest_transit_stop_m/id/name, nearest_transit_ro
 near_transit_800m, nearest_starbucks_m/id/name, near_starbucks_800m, fld_zone, zoning, coj_last_sale_date,
 address_point_count, roof_structure, pa_actual_year_built, pa_building_count, coordinates_source, source_artifact,
 source_sha256, source_fetched_at, source_run_id, features_run_id, features_as_of, has_additional_owners,
-tenure_source, has_sale_on_record, source_systems, source_url, fetched_at, run_id`
+tenure_source, tenure_quality, tenure_date_check, has_sale_on_record, source_systems, source_url, fetched_at, run_id`
+
+`tenure_quality` and `tenure_date_check` are the tenure judgement, published rather than computed in
+the browser so an MCP client inherits it instead of reading raw sentinel dates. `tenure_quality` is
+`PLAUSIBLE` on 388,448 parcels, `INSTITUTIONAL_OR_CIVIC` on 11,935, `NO_SALE_ON_RECORD` on 2,187 and
+`IMPLAUSIBLE_DATE` on 1,453, where the recorded sale predates 1901 and is filler in the City
+recorded-sales file rather than a transfer. Both cuts are fixed in the data rather than measured
+against the as-of date, because a duration threshold moves as the artifact ages. `tenure_date_check`
+carries no threshold at all: it compares each row's own sale date against its own `built_year` and
+reads `CONTRADICTED` where the sale is earlier, which is what separates a 1901 date on a house built
+in 1952 from a real long hold.
 (the last three of those are the UI provenance contract), plus the twelve per-family provenance pairs
 `appraisal_source/_fetched_at, sales_*, geometry_*, structure_*, permit_*, business_*, contractor_*,
 transit_*, places_*, water_*, parcel_layer_*, address_*` (24 columns). `property_cid` is filled from
