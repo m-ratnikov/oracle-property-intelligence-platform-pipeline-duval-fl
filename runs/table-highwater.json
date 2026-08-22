@@ -1,0 +1,135 @@
+{
+  "county": "duval",
+  "updated_at": "2026-08-21T23:43:14.388Z",
+  "tables": {
+    "parcels": {
+      "max": 404023,
+      "max_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "max_at": "2026-08-21T23:43:14.388Z",
+      "current": 404023,
+      "current_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "current_at": "2026-08-21T23:43:14.388Z"
+    },
+    "parcel_geometry": {
+      "max": 405716,
+      "max_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "max_at": "2026-08-21T23:43:14.388Z",
+      "current": 405716,
+      "current_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "current_at": "2026-08-21T23:43:14.388Z"
+    },
+    "sales_history": {
+      "max": 71802,
+      "max_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "max_at": "2026-08-21T23:43:14.388Z",
+      "current": 71802,
+      "current_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "current_at": "2026-08-21T23:43:14.388Z"
+    },
+    "permits": {
+      "max": 0,
+      "max_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "max_at": "2026-08-21T23:43:14.388Z",
+      "current": 0,
+      "current_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "current_at": "2026-08-21T23:43:14.388Z"
+    },
+    "contractors": {
+      "max": 4050,
+      "max_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "max_at": "2026-08-21T23:43:14.388Z",
+      "current": 4050,
+      "current_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "current_at": "2026-08-21T23:43:14.388Z"
+    },
+    "businesses": {
+      "max": 438526,
+      "max_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "max_at": "2026-08-21T23:43:14.388Z",
+      "current": 438526,
+      "current_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "current_at": "2026-08-21T23:43:14.388Z"
+    },
+    "business_events": {
+      "max": 17919,
+      "max_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "max_at": "2026-08-21T23:43:14.388Z",
+      "current": 17919,
+      "current_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "current_at": "2026-08-21T23:43:14.388Z"
+    },
+    "places": {
+      "max": 3084,
+      "max_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "max_at": "2026-08-21T23:43:14.388Z",
+      "current": 3084,
+      "current_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "current_at": "2026-08-21T23:43:14.388Z"
+    },
+    "transit_stops": {
+      "max": 2501,
+      "max_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "max_at": "2026-08-21T23:43:14.388Z",
+      "current": 2501,
+      "current_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "current_at": "2026-08-21T23:43:14.388Z"
+    },
+    "transit_routes": {
+      "max": 45,
+      "max_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "max_at": "2026-08-21T23:43:14.388Z",
+      "current": 45,
+      "current_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "current_at": "2026-08-21T23:43:14.388Z"
+    },
+    "water_bodies": {
+      "max": 757,
+      "max_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "max_at": "2026-08-21T23:43:14.388Z",
+      "current": 757,
+      "current_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "current_at": "2026-08-21T23:43:14.388Z"
+    },
+    "address_points": {
+      "max": 671814,
+      "max_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "max_at": "2026-08-21T23:43:14.388Z",
+      "current": 671814,
+      "current_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "current_at": "2026-08-21T23:43:14.388Z"
+    },
+    "coj_parcels": {
+      "max": 407985,
+      "max_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "max_at": "2026-08-21T23:43:14.388Z",
+      "current": 407985,
+      "current_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "current_at": "2026-08-21T23:43:14.388Z"
+    },
+    "owners": {
+      "max": 323925,
+      "max_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "max_at": "2026-08-21T23:43:14.388Z",
+      "current": 323925,
+      "current_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "current_at": "2026-08-21T23:43:14.388Z"
+    },
+    "entity_links": {
+      "max": 1444531,
+      "max_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "max_at": "2026-08-21T23:43:14.388Z",
+      "current": 1444531,
+      "current_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "current_at": "2026-08-21T23:43:14.388Z"
+    },
+    "derived.properties_features": {
+      "max": 404023,
+      "max_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "max_at": "2026-08-21T23:43:14.388Z",
+      "current": 404023,
+      "current_run_id": "01M0K8WH2MSEKV36HXKDF9A910",
+      "current_at": "2026-08-21T23:43:14.388Z"
+    }
+  },
+  "events": []
+}
