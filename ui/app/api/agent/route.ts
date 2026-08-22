@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { serverSelection, serverModelChoices, AgentNotConfiguredError } from "@/lib/agent/model";
-import { runAgent } from "@/lib/agent/run";
+import { runAgent, TOOL_ORDER } from "@/lib/agent/run";
 import { logAgent } from "@/lib/agent/log";
 import { readUserCredential, readModelChoice, KEY_HEADER, PROVIDER_HEADER, MODEL_HEADER } from "@/lib/agent/credentials";
 import {
@@ -402,7 +402,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       docs_url: provider.docsUrl,
       models: provider.models.map((model) => ({ id: model.id, label: model.label, free: model.free })),
     })),
-    tools: ["get_schema", "run_sql", "preset_question", "get_property", "get_run_history"],
+    tools: [...TOOL_ORDER],
     rate_limit: { scope: "per client address", note: "in process, per instance; see lib/agent/ratelimit.ts" },
     // What a stranger can spend on this deployment, reported rather than
     // claimed. Every number here is the one the code enforces, and every

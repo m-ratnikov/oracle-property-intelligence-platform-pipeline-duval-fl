@@ -14,6 +14,7 @@ import type {
 import { PageHeader, Callout, Spinner } from "@/components/ui";
 import { EngineStatus } from "@/components/EngineStatus";
 import { formatInt, formatTimestamp, relativeTime } from "@/lib/format";
+import { TOOL_ORDER } from "@/lib/agent/toolOrder";
 
 interface ChatMessage {
   id: string;
@@ -51,14 +52,7 @@ const DEMO_PROMPTS = [
  * Named, not described. The descriptions lived in a sidebar card that repeated on every answer;
  * what the names have to carry is the claim that the agent can only read.
  */
-const TOOL_NAMES = [
-  "get_schema",
-  "preset_question",
-  "run_sql",
-  "count_criteria",
-  "get_property",
-  "get_run_history",
-];
+const TOOL_NAMES = TOOL_ORDER;
 
 const EVIDENCE_META = new Set(["property_id", "address", "source_system", "source_url", "fetched_at", "via"]);
 

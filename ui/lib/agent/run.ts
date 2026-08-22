@@ -21,6 +21,9 @@ import { formatCountLedger, verifyAnswerTotals } from "./totals";
 import { logAgent } from "./log";
 import type { AgentChatMessage, AgentResponse, AgentUsage } from "./types";
 
+export { TOOL_ORDER } from "./toolOrder";
+import { TOOL_ORDER } from "./toolOrder";
+
 export const MAX_STEPS = 12;
 export const MAX_HISTORY_MESSAGES = 12;
 
@@ -112,7 +115,7 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentResponse>
     // count_criteria is appended rather than slotted in beside run_sql: the cached prompt prefix is
     // the tool list in order, so adding a tool at the end leaves every earlier schema byte for byte
     // where it was and the cache keeps hitting.
-    toolOrder: ["get_schema", "preset_question", "run_sql", "get_property", "get_run_history", "count_criteria"],
+    toolOrder: [...TOOL_ORDER],
     stopWhen: stepCountIs(options.maxSteps ?? MAX_STEPS),
     // Halved from 4096, which was the larger half of the worst case spend on a public route.
     //
