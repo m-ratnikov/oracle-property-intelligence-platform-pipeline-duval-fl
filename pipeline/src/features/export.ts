@@ -46,6 +46,8 @@ export const QUERY_TABLE_COLUMN_NOTES: Readonly<Record<string, string>> = {
   tenure_source: "The source system that published the tenure date named by tenure_basis. NULL when tenure_basis is NO_SALE_ON_RECORD.",
   tenure_quality:
     "DERIVED. Whether years_since_last_sale can honestly be read as an ownership hold. FILTER ANY TENURE QUESTION ON THIS COLUMN: 'WHERE tenure_quality = ''PLAUSIBLE''' is the honest population, and a row outside it must never be presented as a long hold without saying which value it carries. Never NULL. PLAUSIBLE (388,444 rows) = a tenure a reader can act on. IMPLAUSIBLE_DATE (1,454) = last_sale_date_any is before 1901 and is filler in the City recorded-sales file, not a transfer: 1899-12-30 on 842 rows, 1899-01-01 on 609, one 1800-01-01, which render as 126, 127 and 226 year holds. INSTITUTIONAL_OR_CIVIC (11,934) = the FDOR use code puts the parcel in the institutional (70-79), governmental (80-89) or miscellaneous (90-99) groups - churches, cemeteries, schools, parks, municipal and state land, utility and right-of-way - so the date is usually real but it dates a public or institutional holding, not a household sale. It does NOT claim the transfer was a plat dedication: the City parcel layer publishes the sale as a bare date with no deed type, and last_sale_qual_cd exists on only the 2,924 FDOR_SALE rows. NO_SALE_ON_RECORD (2,191) = no source records any transfer, matching tenure_basis and has_sale_on_record = false; the tenure columns are NULL for that reason and NOT because the property was held a long time.",
+  tenure_date_check:
+    "DERIVED. Whether the row's own two dates corroborate its tenure. Never NULL, and carries no threshold: it only compares last_sale_date_any against built_year. CONFIRMED (127,421 rows) = the sale is not earlier than the building, so the two agree. CONTRADICTED (4,799) = the sale year precedes built_year, so the transfer cannot be a sale of the building now standing: the 1901 dates on houses built in 1943, 1952 and 1956 land here, as does the 1925 F E C RAILWAY CO parcel whose structure is dated 1958. UNVERIFIABLE (10,858) = no built_year to check against, so neither column can settle it. Read this beside tenure_quality, not instead of it: tenure_quality is drawn from the use code and therefore leaves a railway or utility parcel with an industrial or agricultural code marked PLAUSIBLE, and this column is what separates those from a genuine long hold. Counts are for rows matching the ten year tenure rule.",
   has_sale_on_record:
     "False when no source records any transfer for the parcel. Never NULL. This is the column that separates 'no sale on record' from 'held a long time'; years_since_last_sale is NULL in both directions only when this is false.",
   years_since_last_sale:
@@ -75,8 +77,9 @@ export const QUERY_TABLE_COLUMN_FAMILY: ReadonlyMap<string, string> = new Map<st
 /**
  * Bump when the published column set or the provenance contract changes.
  * 3: adds tenure_quality (131 -> 132 columns), the demotion that used to live only in the UI.
+ * 4: adds tenure_date_check (132 -> 133), so a client sees the contradiction behind the ordering.
  */
-export const QUERY_TABLE_SCHEMA_VERSION = "3";
+export const QUERY_TABLE_SCHEMA_VERSION = "4";
 
 export interface QueryTableSchemaMetadata {
   county: string;

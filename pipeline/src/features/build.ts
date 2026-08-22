@@ -93,6 +93,26 @@ export const NON_MARKET_DOR_GROUPS = ["INSTITUTIONAL", "GOVERNMENTAL", "MISCELLA
  * @param saleDateExpr the DATE expression behind last_sale_date_any; NULL means no sale on record
  * @param dorUcCol     the parcels DOR use-code column
  */
+/**
+ * `tenure_date_check`, the second half of the tenure judgement.
+ *
+ * `tenure_quality` is drawn from the use code, so a railway, utility or farm parcel with an
+ * industrial or agricultural code stays PLAUSIBLE however civic it looks: F E C RAILWAY CO reads
+ * 048 and CSX TRANSPORTATION reads 055. This column carries no threshold and no classification. It
+ * only compares the row's own two dates, which is a question the row can always answer for itself.
+ *
+ * CONTRADICTED means the sale year precedes built_year, so the transfer cannot be a sale of the
+ * building now standing, which is what separates a 1901 date on a house built in 1952 from a
+ * genuine long hold. It is published rather than left in the browser because the classification is
+ * useless to an MCP client that can see the label and not the contradiction behind the ordering.
+ */
+export function tenureDateCheckSql(saleDateExpr: string, builtYearExpr: string): string {
+  return `CASE
+    WHEN (${builtYearExpr}) IS NULL OR (${saleDateExpr}) IS NULL THEN 'UNVERIFIABLE'
+    WHEN TRY_CAST(substr(CAST((${saleDateExpr}) AS VARCHAR), 1, 4) AS INTEGER) < (${builtYearExpr}) THEN 'CONTRADICTED'
+    ELSE 'CONFIRMED' END`;
+}
+
 export function tenureQualitySql(saleDateExpr: string, dorUcCol: string): string {
   const groups = NON_MARKET_DOR_GROUPS.map((g) => `'${g}'`).join(", ");
   return `CASE
@@ -261,7 +281,8 @@ export const COLUMN_FAMILIES: readonly ColumnFamily[] = [
     note: "Each of these names its own evidence in a sibling column (roof_age_basis, tenure_basis, water_basis).",
     columns: [
       "source_systems", "roof_year_est", "roof_age_basis", "roof_age_years",
-      "last_sale_date_any", "tenure_basis", "tenure_source", "tenure_quality", "has_sale_on_record",
+      "last_sale_date_any", "tenure_basis", "tenure_source", "tenure_quality", "tenure_date_check",
+      "has_sale_on_record",
       "years_since_last_sale", "no_sale_10y_flag",
     ],
   },
@@ -561,6 +582,8 @@ export async function buildFeatures(
       ${tenureSource}                               AS tenure_source,
       -- whether that tenure can be read as an ownership hold at all; see tenureQualitySql
       ${tenureQuality}                              AS tenure_quality,
+      -- whether the row's own two dates corroborate that tenure; see tenureDateCheckSql
+      ${tenureDateCheckSql(`(${anySaleExpr})`, "CASE WHEN p.act_yr_blt > 0 THEN p.act_yr_blt END")} AS tenure_date_check,
       ((${anySaleExpr}) IS NOT NULL)                AS has_sale_on_record,
       ${yearsSince}                                 AS years_since_last_sale,
       CASE WHEN (${anySaleExpr}) IS NULL THEN NULL
