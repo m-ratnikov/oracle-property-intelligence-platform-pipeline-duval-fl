@@ -324,11 +324,22 @@ country each run; the run record stores it too.
 branch-scoped Actions cache that GitHub evicts after seven days without a hit, so `run_log` cannot
 be trusted to remember anything. Alongside `runs/<run_id>.json` the pipeline commits:
 
-- `runs/ci-runs.json` - one entry per run with the GitHub event that started it (`schedule`,
-  `workflow_dispatch`, ...), the workflow run id and a link to it, plus a `by_event` tally. The
-  consolidation pass keeps `trigger: "consolidation"` because that is the run KIND the UI groups
+- `runs/ci-runs.json` - two independently merged layers. `workflow_runs` is a projection of the
+  GitHub Actions API, rebuilt on every run, and `runs` holds this pipeline's own records. The
+  `by_event` tally is derived from the API layer, and `by_event_source` states which layer it came
+  from, so nobody reads the tally without knowing what produced it. `ci_history` carries the exact
+  endpoint and fetch time, so a reader can re-issue the request and diff the answer.
+  `jq .by_event runs/ci-runs.json` answers "is the cron actually running".
+
+  It is derived rather than appended because appending could not survive our own branch handling: a
+  scheduled run committed its record, and a later force-push of the feature branch over `main`
+  destroyed it, leaving a tally that read zero scheduled runs while the cron had in fact fired. A
+  deleted file is now repaired by the next run; a failed fetch keeps every existing row and records
+  `outcome: "api_unreachable"` rather than looking authoritative.
+
+  The consolidation pass keeps `trigger: "consolidation"` because that is the run KIND the UI groups
   on, so the CI event is recorded here instead and a scheduled consolidation is as provable as a
-  scheduled ingestion run. `jq .by_event runs/ci-runs.json` answers "is the cron actually running".
+  scheduled ingestion run.
 - `runs/table-highwater.json` - the largest each table has ever been on this lineage, the current
   value, and an event log of every time a total went backwards. A run whose totals are below the
   marks fails before it publishes; `--allow-regression --regression-note "<why>"` re-bases the
