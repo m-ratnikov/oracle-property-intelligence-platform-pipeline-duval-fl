@@ -126,7 +126,7 @@ const PUBLISHED_COLUMN_PROVENANCE =
   ",\"sourceSystem\":\"coj_address_points\"},\"source_systems\":{\"family\":\"derived\",\"sourceSystem\":null},\"roof_year_est" +
   "\":{\"family\":\"derived\",\"sourceSystem\":null},\"roof_age_basis\":{\"family\":\"derived\",\"sourceSystem\":null},\"roof_age" +
   "_years\":{\"family\":\"derived\",\"sourceSystem\":null},\"last_sale_date_any\":{\"family\":\"derived\",\"sourceSystem\":null}" +
-  ",\"tenure_basis\":{\"family\":\"derived\",\"sourceSystem\":null},\"tenure_source\":{\"family\":\"derived\",\"sourceSystem\":nu" +
+  ",\"tenure_basis\":{\"family\":\"derived\",\"sourceSystem\":null},\"tenure_quality\":{\"family\":\"derived\",\"sourceSystem\":null},\"tenure_date_check\":{\"family\":\"derived\",\"sourceSystem\":null},\"tenure_source\":{\"family\":\"derived\",\"sourceSystem\":nu" +
   "ll},\"has_sale_on_record\":{\"family\":\"derived\",\"sourceSystem\":null},\"years_since_last_sale\":{\"family\":\"derived\"," +
   "\"sourceSystem\":null},\"no_sale_10y_flag\":{\"family\":\"derived\",\"sourceSystem\":null},\"property_cid\":{\"family\":\"pip" +
   "eline\",\"sourceSystem\":null},\"features_run_id\":{\"family\":\"pipeline\",\"sourceSystem\":null},\"features_as_of\":{\"fam" +
@@ -184,7 +184,9 @@ describe("the map the artifact publishes", () => {
     const result = await db.query("SELECT * FROM properties LIMIT 1");
     const unmapped = result.columns.filter((column) => map.columns[column] === undefined);
     expect(unmapped, "columns the published map does not place in a family").toEqual([]);
-    expect(result.columns.length).toBe(131);
+    // 133 since tenure_quality and tenure_date_check were published: the demotion the tenure card
+    // applies now ships in the data, so an MCP client inherits it instead of seeing raw sentinels.
+    expect(result.columns.length).toBe(133);
   });
 
   it("declares a source column and a fetch column for each fetched family", () => {

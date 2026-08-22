@@ -123,21 +123,35 @@ const SUBDIVISIONS = [
 ];
 
 /**
- * The FDOR DOR use codes, with the published Duval row counts as weights.
+ * The FDOR DOR use codes, with the published Duval row counts as weights and the description each
+ * one resolves to, mirroring DOR_USE_CODES in pipeline/src/features/rules.ts.
  *
- * The roll publishes them zero padded to three characters ("001"), and the pipeline's description
- * table is keyed on the two character form ("01"), so `coalesce(uc.description, p.dor_uc)` misses
- * on every Duval row and `property_usage_type` publishes the CODE rather than a description. That
- * is what the published parquet carries, so it is what this writes; inventing descriptions here
- * would make the sample read better than the artifact it stands in for.
+ * The descriptions are carried here because the pipeline join used to miss: the roll publishes the
+ * code zero padded to three characters ("001") and the description table is keyed on two ("01"), so
+ * `coalesce(uc.description, p.dor_uc)` fell through on every row and `property_usage_type` published
+ * the CODE. The sample faithfully reproduced that. The join now normalises through an integer, so
+ * the artifact carries descriptions and so must this: a sample that still wrote bare codes would
+ * misrepresent the artifact in the other direction.
  */
 const DOR_USE_CODES = [
-  ["001", 297220], ["004", 26989], ["000", 20251], ["002", 9287], ["009", 7774],
-  ["008", 5171], ["080", 4826], ["017", 3660], ["010", 3383], ["096", 2891],
-  ["048", 2880], ["071", 1321], ["099", 1500], ["011", 900], ["003", 800],
-  ["040", 800], ["028", 700], ["041", 600], ["091", 500], ["070", 400],
-  ["039", 400], ["012", 300], ["021", 300], ["027", 300],
+  ["001", 297220, "Single Family"], ["004", 26989, "Condominiums"],
+  ["000", 20251, "Vacant Residential"], ["002", 9287, "Mobile Homes"],
+  ["009", 7774, "Residential Common Elements/Areas"],
+  ["008", 5171, "Multi-family less than 10 units"],
+  ["080", 4826, "Undefined / vacant governmental"], ["017", 3660, "Office buildings, one story"],
+  ["010", 3383, "Vacant Commercial"], ["096", 2891, "Sewage disposal, waste lands"],
+  ["048", 2880, "Warehousing, distribution terminals"], ["071", 1321, "Churches"],
+  ["099", 1500, "Acreage not zoned agricultural"], ["011", 900, "Stores, one story"],
+  ["003", 800, "Multi-family 10 units or more"], ["040", 800, "Vacant Industrial"],
+  ["028", 700, "Parking lots, mobile home parks"], ["041", 600, "Light manufacturing"],
+  ["091", 500, "Utility"], ["070", 400, "Vacant Institutional"],
+  ["039", 400, "Hotels, motels"],
+  ["012", 300, "Mixed use (store and office or residential)"],
+  ["021", 300, "Restaurants, cafeterias"], ["027", 300, "Auto sales, repair, storage"],
 ];
+
+/** code -> description, so the generator resolves it the way the features join now does. */
+const DOR_USE_DESCRIPTIONS = new Map(DOR_USE_CODES.map(([code, , desc]) => [code, desc]));
 
 /** Use codes with no building on the parcel, so built_year / eff_year_built are absent. */
 const VACANT_USE_CODES = new Set(["000", "010", "040", "070", "080", "096", "099"]);
@@ -440,9 +454,9 @@ function makeRow(index) {
   const dorUc = weighted(DOR_USE_CODES);
   const paUc = weighted(PA_USE_CODES);
   const propertyType = dorUseGroup(dorUc);
-  // coalesce(uc.description, p.dor_uc): the description table is keyed on two characters and the
-  // roll publishes three, so the published value is the code. See DOR_USE_CODES above.
-  const propertyUsageType = dorUc;
+  // coalesce(uc.description, p.dor_uc), with the join normalising the three character code onto the
+  // two character key, so the published value is the description. See DOR_USE_CODES above.
+  const propertyUsageType = DOR_USE_DESCRIPTIONS.get(dorUc) ?? dorUc;
 
   const hasBuilding = !VACANT_USE_CODES.has(dorUc) && chance(0.97);
   const builtYear = hasBuilding ? intBetween(1900, 2025) : null;
@@ -512,9 +526,21 @@ function makeRow(index) {
   if (hasParcelLayer) {
     // The recorded sales file carries placeholder dates for transfers that predate the digital
     // record. They arrive as tenures of 127 and 226 years and must not read as findings.
+    // A recorded transfer normally postdates the building it conveys, so the window is bounded by
+    // built_year rather than drawn freely across 46 years. Without that bound a house built in 2010
+    // could draw a 1985 sale, and tenure_date_check read CONTRADICTED on 16.9 percent of the sample
+    // against 3.1 percent of the published artifact, which would have made the sample teach a
+    // reader the wrong thing about how often the two dates disagree.
+    //
+    // The 3 percent that ignore the bound are deliberate: the roll really does carry sales that
+    // predate their own structure, and the column exists to surface them.
+    const maxYearsAgo =
+      builtYear === null || chance(0.03) ? 46 : Math.min(46, Math.max(0.3, CURRENT_YEAR - builtYear));
     cojSaleDate = chance(0.012)
       ? pick(["1800-01-01", "1899-01-01"])
-      : new Date(NOW.getTime() - between(0.3, 46) * 365.25 * 86400_000).toISOString().slice(0, 10);
+      : new Date(NOW.getTime() - between(0.3, maxYearsAgo) * 365.25 * 86400_000)
+          .toISOString()
+          .slice(0, 10);
   }
   const lastSaleDate = rollSaleDate;
   const lastSalePrice = rollSaleDate === null ? null : Math.round(marketValue * between(0.35, 1.05));
@@ -540,6 +566,32 @@ function makeRow(index) {
   if (tenureBasis === null) tenureBasis = "NO_SALE_ON_RECORD";
   const tenureSource =
     tenureBasis === "FDOR_SALE" ? "fdor_sdf" : tenureBasis === "COJ_SALESL" ? "coj_parcels" : null;
+
+  // How far the tenure date can be trusted, mirroring tenureQualitySql and tenureDateCheckSql in
+  // pipeline/src/features/build.ts. Both cuts are fixed in the data rather than measured from the
+  // as-of date, because a duration threshold moves as the artifact ages and was what let 1925 plat
+  // dates read as household ownership.
+  //
+  // The published mix is 96.14 percent PLAUSIBLE, 2.95 INSTITUTIONAL_OR_CIVIC, 0.54
+  // NO_SALE_ON_RECORD and 0.36 IMPLAUSIBLE_DATE. This sample is drawn from real dates and real use
+  // code weights, so the mix falls out of those rather than being imposed here, and 480 rows will
+  // not reliably contain an IMPLAUSIBLE_DATE at 0.36 percent. That is honest: the sample says what
+  // the columns mean and never claims to reproduce a tail this small.
+  const useCodeNumber = Number.parseInt(dorUc, 10);
+  const tenureQuality =
+    tenureBasis === "NO_SALE_ON_RECORD"
+      ? "NO_SALE_ON_RECORD"
+      : lastSaleDateAny !== null && lastSaleDateAny.slice(0, 4) < "1901"
+        ? "IMPLAUSIBLE_DATE"
+        : Number.isFinite(useCodeNumber) && useCodeNumber >= 70
+          ? "INSTITUTIONAL_OR_CIVIC"
+          : "PLAUSIBLE";
+  const tenureDateCheck =
+    builtYear === null || lastSaleDateAny === null
+      ? "UNVERIFIABLE"
+      : Number.parseInt(lastSaleDateAny.slice(0, 4), 10) < builtYear
+        ? "CONTRADICTED"
+        : "CONFIRMED";
 
   // Roof. The permit source ingests nothing, so no row can carry a PERMIT basis and every populated
   // row is the appraiser's effective year built standing in, exactly as the published parquet has
@@ -719,6 +771,8 @@ function makeRow(index) {
     last_sale_date_any: lastSaleDateAny,
     tenure_basis: tenureBasis,
     tenure_source: tenureSource,
+    tenure_quality: tenureQuality,
+    tenure_date_check: tenureDateCheck,
     has_sale_on_record: lastSaleDateAny !== null,
     years_since_last_sale: yearsSinceLastSale,
     no_sale_10y_flag: yearsSinceLastSale === null ? null : yearsSinceLastSale >= 10,
@@ -844,6 +898,8 @@ const CASTS = [
   ["last_sale_date_any", "VARCHAR"],
   ["tenure_basis", "VARCHAR"],
   ["tenure_source", "VARCHAR"],
+  ["tenure_quality", "VARCHAR"],
+  ["tenure_date_check", "VARCHAR"],
   ["has_sale_on_record", "BOOLEAN"],
   ["years_since_last_sale", "INTEGER"],
   ["no_sale_10y_flag", "BOOLEAN"],
