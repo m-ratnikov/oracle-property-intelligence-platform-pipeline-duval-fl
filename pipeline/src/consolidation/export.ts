@@ -184,6 +184,7 @@ function recordSql(opts: { permits: boolean; businesses: boolean; links: boolean
           roofYearEst := f.roof_year_est, roofAgeBasis := f.roof_age_basis, roofPermitCount := f.roof_permit_count, lastRoofPermitYear := f.last_roof_permit_year,
           waterViewFlag := f.water_view_flag, waterViewMajorFlag := f.water_view_major_flag, waterDistM := f.water_dist_m, waterBodyName := f.water_body_name, waterBodyType := f.water_body_type, waterBasis := f.water_basis,
           lastSaleDateAny := f.last_sale_date_any, tenureBasis := f.tenure_basis, tenureSource := f.tenure_source,
+          tenureQuality := f.tenure_quality,
           hasSaleOnRecord := f.has_sale_on_record, cojLastSaleDate := f.coj_last_sale_date,
           ownerRegionClass := f.owner_region_class,
           nearestTransitStopM := f.nearest_transit_stop_m, nearestTransitStopName := f.nearest_transit_stop_name, nearestTransitRouteTypes := f.nearest_transit_route_types, nearTransit800m := f.near_transit_800m,

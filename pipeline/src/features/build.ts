@@ -19,6 +19,90 @@ export interface FeatureBuildStats {
 export const WALK_M = 800;
 
 /**
+ * The four values of `tenure_quality`, the column that says whether a row's tenure can honestly be
+ * read as an ownership hold. Never NULL.
+ */
+export const TENURE_QUALITY_VALUES = [
+  "PLAUSIBLE",
+  "IMPLAUSIBLE_DATE",
+  "INSTITUTIONAL_OR_CIVIC",
+  "NO_SALE_ON_RECORD",
+] as const;
+
+export type TenureQuality = (typeof TENURE_QUALITY_VALUES)[number];
+
+/**
+ * The first date the county's transfer record can be read as real, measured rather than chosen.
+ *
+ * Dated `last_sale_date_any` values form a smooth attrition curve backwards through the record:
+ * 193,923 in the 2020s, 108,027 in the 2010s, 56,290 in the 2000s, then 26,251 / 11,018 / 4,348 /
+ * 233 / 149 / 50 / 23 / 24 / 16 / 27 per decade back to the 1900s. Before 1901 the curve does not
+ * continue, it spikes: 1,453 rows sitting on two values (1899-12-30 on 842 rows, 1899-01-01 on
+ * 609) plus a single 1800-01-01, which is 50x the adjacent decade. That is filler in the City
+ * recorded-sales file, not surviving Victorian conveyances, so 1901-01-01 is where a date stops
+ * being evidence.
+ *
+ * Two thresholds were tried and rejected. The UI's `> 100 years` cut is as-of dependent, so a row
+ * changes label as the artifact ages and never because the source changed, and it let 1925/1926
+ * municipal, railway and cemetery dates through at exactly 100 years. A "sale predates the
+ * structure" rule adds nothing: of the 946 rows whose sale is more than 50 years before
+ * `built_year`, 932 are already before 1901.
+ */
+export const TENURE_RECORD_EPOCH = "1901-01-01";
+
+/**
+ * DOR use-code groups whose parcels are not held in a household market.
+ *
+ * FDOR use codes 70-79 (churches, private schools, hospitals, cemeteries, clubs), 80-89 (military,
+ * parks, county/state/federal/municipal land) and 90-99 (leaseholds on public land, utility,
+ * right-of-way, submerged land, waste land, centrally assessed) cover 13,413 of the 404,023 Duval
+ * parcels. Their `last_sale_date_any` is usually a real date, so it is NOT an implausible date; it
+ * is the date a public body or institution took the land and has held it since. Read as an
+ * ownership tenure it is a category error, which is why it gets its own value rather than sharing
+ * PLAUSIBLE.
+ */
+export const NON_MARKET_DOR_GROUPS = ["INSTITUTIONAL", "GOVERNMENTAL", "MISCELLANEOUS"] as const;
+
+/**
+ * `tenure_quality`, published so every consumer of the parquet inherits the same judgement.
+ *
+ * This demotion used to live only in the UI's SQL, which meant the website ranked sentinel dates
+ * last while every MCP client and everyone reading the published parquet still got a 1800-01-01
+ * rendered as a 226-year ownership hold. The data product is the parquet, so the judgement belongs
+ * in the parquet.
+ *
+ * Order matters and is deliberate: an absent date beats a bad date beats a real date on a parcel
+ * that does not change hands. A row that is both a 1899 sentinel and a City park is reported as
+ * IMPLAUSIBLE_DATE (313 rows), because the wrong number is the more actionable defect.
+ *
+ * INSTITUTIONAL_OR_CIVIC is keyed on the appraiser's own use code and nothing else. Owner-name
+ * matching was measured and rejected: patterns for CITY / STATE / RAILWAY / CEMETERY and the like
+ * add 1,965 rows, and the additions are dominated by false positives that the roll's 30-character
+ * OWN_NAME truncation makes impossible to separate out - FORESTAR USA REAL ESTATE GROUP (345
+ * rows), MCP RIVER CITY LP (134), TPG AG EHC III LEN MULTI STATE (107), RUBBER CITY PARTNERS,
+ * CITY NATIONAL BANK OF FLORIDA, UNITED STATES GYPSUM COMPANY. The use code is the appraiser's
+ * published classification of the parcel and is present on all 404,023 rows.
+ *
+ * Nothing here claims to know the transfer INSTRUMENT. The City parcel layer publishes the sale as
+ * three bare numbers (SALESLYY / SALESLMM / SALESLDD) with no deed type, no price and no
+ * qualification code, and it is the basis for 398,908 of the 404,023 rows. `last_sale_qual_cd`,
+ * which would name a government or charitable conveyance, exists only on the 2,924 FDOR_SALE rows.
+ * So the value says the PARCEL is civic or institutional, which the roll does support, and does
+ * not say the transfer was a plat dedication, which no ingested column carries.
+ *
+ * @param saleDateExpr the DATE expression behind last_sale_date_any; NULL means no sale on record
+ * @param dorUcCol     the parcels DOR use-code column
+ */
+export function tenureQualitySql(saleDateExpr: string, dorUcCol: string): string {
+  const groups = NON_MARKET_DOR_GROUPS.map((g) => `'${g}'`).join(", ");
+  return `CASE
+      WHEN ${saleDateExpr} IS NULL THEN 'NO_SALE_ON_RECORD'
+      WHEN ${saleDateExpr} < DATE '${TENURE_RECORD_EPOCH}' THEN 'IMPLAUSIBLE_DATE'
+      WHEN ${dorUseGroupSql(dorUcCol)} IN (${groups}) THEN 'INSTITUTIONAL_OR_CIVIC'
+      ELSE 'PLAUSIBLE' END`;
+}
+
+/**
  * A group of query-table columns that all come from one source system.
  *
  * WHY THIS EXISTS. `source_system` is one of the 37 canonical Elephant columns and it is a single
@@ -177,8 +261,8 @@ export const COLUMN_FAMILIES: readonly ColumnFamily[] = [
     note: "Each of these names its own evidence in a sibling column (roof_age_basis, tenure_basis, water_basis).",
     columns: [
       "source_systems", "roof_year_est", "roof_age_basis", "roof_age_years",
-      "last_sale_date_any", "tenure_basis", "tenure_source", "has_sale_on_record", "years_since_last_sale",
-      "no_sale_10y_flag",
+      "last_sale_date_any", "tenure_basis", "tenure_source", "tenure_quality", "has_sale_on_record",
+      "years_since_last_sale", "no_sale_10y_flag",
     ],
   },
   {
@@ -378,6 +462,8 @@ export async function buildFeatures(
       WHEN ${cojSale} IS NOT NULL THEN ${cojParcelsLoaded ? "cj.source_system" : "NULL::VARCHAR"}
       END`;
 
+  const tenureQuality = tenureQualitySql(`(${anySaleExpr})`, "p.dor_uc");
+
   const ownerRegion = ownerRegionSql("p");
   const yearsSince = yearsSinceSql(`(${anySaleExpr})`, opts.asOf);
 
@@ -473,6 +559,8 @@ export async function buildFeatures(
       (${anySaleExpr})::VARCHAR                     AS last_sale_date_any,
       ${tenureBasis}                                AS tenure_basis,
       ${tenureSource}                               AS tenure_source,
+      -- whether that tenure can be read as an ownership hold at all; see tenureQualitySql
+      ${tenureQuality}                              AS tenure_quality,
       ((${anySaleExpr}) IS NOT NULL)                AS has_sale_on_record,
       ${yearsSince}                                 AS years_since_last_sale,
       CASE WHEN (${anySaleExpr}) IS NULL THEN NULL
@@ -533,7 +621,12 @@ export async function buildFeatures(
       p.fetched_at                                  AS fetched_at,
       ${q(opts.runId)}                              AS run_id
     FROM parcels p
-    LEFT JOIN derived.dor_use_codes uc ON uc.code = p.dor_uc
+    -- DOR_USE_CODES is keyed on the two digit code ("01"), and the NAL roll writes it zero padded
+    -- to three characters ("001"), so a direct equality never matched and coalesce fell back to the
+    -- raw code on every row: property_usage_type published "001" rather than "Single Family" on all
+    -- 404,023 parcels. Normalising through an integer handles both widths and yields NULL on a non
+    -- numeric code, which the coalesce below still turns into the raw value.
+    LEFT JOIN derived.dor_use_codes uc ON uc.code = lpad(TRY_CAST(p.dor_uc AS INTEGER)::VARCHAR, 2, '0')
     LEFT JOIN last_sale ls ON ls.parcel_id = p.parcel_id
     ${permitJoin}
     ${sunbizJoin}

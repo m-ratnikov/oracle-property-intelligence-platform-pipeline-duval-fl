@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { all, openDb } from "../src/db.js";
 import {
+  DOR_USE_CODES,
   classifyOwnerRegion,
   dorUseGroup,
   dorUseGroupSql,
@@ -91,6 +92,37 @@ describe("DOR use code grouping", () => {
       `SELECT c, ${dorUseGroupSql("c")} AS g FROM (VALUES ('01'),('11'),('48'),('55'),('71'),('86'),('95')) t(c)`,
     );
     for (const r of rows) expect(r.g).toBe(dorUseGroup(r.c));
+    await db.close();
+  });
+
+  // The NAL roll writes dor_uc zero padded to three characters ("001"), and DOR_USE_CODES is keyed
+  // on the two digit code ("01"). The features join compared them directly, so it never matched and
+  // property_usage_type published the raw code on all 404,023 published parcels rather than a
+  // description. The join now normalises through an integer; this asserts the normalisation lands on
+  // a key the map actually holds, for both widths and for the codes that were wrong in production.
+  it("resolves a three character dor_uc to a use code description", async () => {
+    const db = await openDb(":memory:");
+    const rows = await all<{ c: string; k: string }>(
+      db.conn,
+      `SELECT c, lpad(TRY_CAST(c AS INTEGER)::VARCHAR, 2, '0') AS k
+       FROM (VALUES ('001'),('004'),('000'),('080'),('017'),('01'),('80'),('XX')) t(c)`,
+    );
+    const key = (c: string) => rows.find((r) => r.c === c)?.k;
+
+    expect(key("001")).toBe("01");
+    expect(DOR_USE_CODES[key("001") as string]).toBe("Single Family");
+    expect(DOR_USE_CODES[key("000") as string]).toBe("Vacant Residential");
+    expect(DOR_USE_CODES[key("080") as string]).toBeDefined();
+    expect(key("017")).toBe("17");
+
+    // The two character form already worked and must keep working.
+    expect(key("01")).toBe("01");
+    expect(key("80")).toBe("80");
+
+    // A non numeric code yields NULL, which the coalesce in the features build turns back into the
+    // raw value rather than dropping it.
+    expect(key("XX")).toBeNull();
+
     await db.close();
   });
 });

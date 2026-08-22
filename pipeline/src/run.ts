@@ -1,14 +1,27 @@
 import { execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { DuckDBConnection } from "@duckdb/node-api";
 import { ulid } from "ulid";
 import { COUNTY, getPaths, type Paths } from "./config.js";
 import { all, ensureSchema, one, openDb, q, type Db } from "./db.js";
 import { buildFeatures } from "./features/build.js";
-import { describeQueryTableArtifact, exportEntityTables, exportQueryTable, formatValidation, validateQueryTable, type ValidationReport } from "./features/export.js";
+import {
+  describeQueryTableArtifact,
+  exportEntityTables,
+  exportQueryTable,
+  formatValidation,
+  QUERY_TABLE_OBJECT,
+  validateQueryTable,
+  type ExportResult,
+  type QueryTableArtifact,
+  type ValidationReport,
+} from "./features/export.js";
 import { log as rootLog, type Logger } from "./log.js";
 import { computeFileCid } from "./publish/cid.js";
 import { buildCoverageSnapshot } from "./publish/coverage.js";
+import { missingFilebaseEnv, readFilebaseEnv } from "./publish/filebase.js";
+import { promoteQueryTable, type GateOutcome } from "./publish/gate.js";
 import { insertRunSource, rehydrateRunLog } from "./runLog.js";
 import { SOURCES, type TrackName } from "./sources.js";
 import { probeUrl } from "./tracks/http.js";
@@ -236,6 +249,96 @@ export async function writeRunHistoryFiles(db: Db, paths: Paths, runId: string):
   return { runFile, historyFile };
 }
 
+/** The staging name the gate builds into. Never published: planPublish enumerates objects by name. */
+export const QUERY_TABLE_STAGING_OBJECT = "query-table.staging.parquet";
+
+/** The published query table for a publish directory. The only place this path is spelled. */
+export function queryTablePath(publishDir: string): string {
+  return join(publishDir, QUERY_TABLE_OBJECT);
+}
+
+/** Where a query-table build lands before it has earned the published name. */
+export function stagedQueryTablePath(publishDir: string): string {
+  return join(publishDir, QUERY_TABLE_STAGING_OBJECT);
+}
+
+export interface GatedQueryTable {
+  /** What this build produced, at the path it now lives at (published on a pass, staged on a fail). */
+  exported: ExportResult;
+  validation: ValidationReport;
+  gate: GateOutcome;
+  /** The published-object record for the run log, computed from the bytes that were actually built. */
+  artifact: QueryTableArtifact;
+}
+
+/**
+ * Build the query table, gate it, and promote it. The ONLY way to produce `query-table.parquet`.
+ *
+ * Three call sites used to spell "export to publishDir/query-table.parquet, then validate": the
+ * ingestion run, `pnpm run features`, and the consolidation pass. Two of them exported straight onto
+ * the published path and validated afterwards, so by the time the gate had an opinion the last
+ * artifact that passed had already been overwritten - which is the opposite of what the gate is for.
+ * Only the consolidation pass staged first.
+ *
+ * Gating inside the one function that knows how to export is what makes the guarantee structural
+ * rather than a rule every caller has to remember. A caller cannot obtain a query table without the
+ * gate having run, because there is no other exported way to get one: `exportQueryTable` is called
+ * here and nowhere else in src (test/query-table-gate.test.ts fails the build if that stops being
+ * true), and the two path helpers above are the only place either filename appears.
+ *
+ * A failed build is left at the staging path on purpose. It is evidence - an operator can open the
+ * parquet the gate rejected - and it is unpublishable, because planPublish uploads a fixed list of
+ * object names that does not include it. The next build overwrites it.
+ */
+export async function exportGatedQueryTable(conn: DuckDBConnection, publishDir: string): Promise<GatedQueryTable> {
+  const publishPath = queryTablePath(publishDir);
+  const stagedPath = stagedQueryTablePath(publishDir);
+  const stagedExport = await exportQueryTable(conn, stagedPath);
+  const stagedReport = await validateQueryTable(conn, stagedPath);
+  const gate = promoteQueryTable({ stagedPath, publishPath, ok: stagedReport.ok });
+  const exported: ExportResult = { ...stagedExport, path: gate.builtPath };
+  const validation: ValidationReport = { ...stagedReport, parquetPath: gate.builtPath };
+  return { exported, validation, gate, artifact: await describeQueryTableArtifact(exported, validation) };
+}
+
+/**
+ * What a `--publish` flag actually means for this invocation.
+ *
+ * A publish that was ASKED to upload and cannot is a FAILED publish, not a dry run. The artifact
+ * publish command learned that; `publish-open-data` did not, so a run with a missing or misspelled
+ * Filebase secret printed a dry-run plan, uploaded nothing, and exited 0 from a step called
+ * "Publish to Filebase / IPFS". The operator's evidence that 404k open-data files reached IPFS was
+ * a green step that had never opened a socket.
+ *
+ * Both commands resolve their intent here so the two cannot drift again. `refused` is a hard stop
+ * with a reason, never a quiet downgrade to a dry run.
+ *
+ * This lives in run.ts rather than cli.ts because cli.ts executes `main()` on import and so cannot
+ * be imported by a test.
+ */
+export type PublishMode =
+  | { mode: "publish" }
+  | { mode: "dry-run" }
+  | { mode: "refused"; reason: string; missing: string[] };
+
+export function resolvePublishMode(flags: ReadonlyMap<string, string>, env: NodeJS.ProcessEnv): PublishMode {
+  const requested = flags.get("publish") === "true";
+  const dryRunRequested = flags.get("dry-run") === "true";
+  if (!requested) return { mode: "dry-run" };
+  if (dryRunRequested) {
+    return {
+      mode: "refused",
+      reason: "--publish and --dry-run were both given, so what this run was meant to do is not knowable; pass one of them",
+      missing: [],
+    };
+  }
+  if (readFilebaseEnv(env) === null) {
+    const missing = missingFilebaseEnv(env);
+    return { mode: "refused", reason: `publish requested but Filebase settings are missing: ${missing.join(", ")}`, missing };
+  }
+  return { mode: "publish" };
+}
+
 /**
  * One pipeline run: run_id -> run_log(start) -> each track (download, stage, merge, deltas) ->
  * features -> query-table parquet + validation gate -> entity parquet -> coverage snapshot ->
@@ -337,14 +440,20 @@ export async function runPipeline(opts: RunOptions): Promise<{ run: RunRecord; v
       const asOf = new Date().toISOString().slice(0, 10);
       const fs = await buildFeatures(db.conn, { asOf, runId });
       logger.info("features_built", { ...fs });
-      const qtPath = join(paths.publishDir, "query-table.parquet");
-      const exp = await exportQueryTable(db.conn, qtPath);
-      validation = await validateQueryTable(db.conn, qtPath);
+      const gated = await exportGatedQueryTable(db.conn, paths.publishDir);
+      validation = gated.validation;
       process.stdout.write(formatValidation(validation) + "\n");
-      artifacts.queryTable = await describeQueryTableArtifact(exp, validation);
-      if (!validation.ok) {
-        logger.error("query_table_validation_failed", { problems: validation.problems });
-        runError = `query table validation failed: ${validation.problems.join("; ")}`;
+      artifacts.queryTable = gated.artifact;
+      if (gated.gate.promoted) {
+        logger.info("query_table_gate_passed", { path: gated.gate.publishPath, rows: gated.exported.rows });
+      } else {
+        logger.error("query_table_validation_failed", {
+          problems: validation.problems,
+          built: gated.gate.builtPath,
+          published: gated.gate.publishPath,
+          keptPrevious: gated.gate.keptPrevious,
+        });
+        runError = `query table validation failed: ${validation.problems.join("; ")} (${gated.gate.message})`;
       }
       const tables = await exportEntityTables(db.conn, join(paths.publishDir, "tables"));
       const tableArtifacts: Record<string, unknown> = {};

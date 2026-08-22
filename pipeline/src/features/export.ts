@@ -44,6 +44,8 @@ export const QUERY_TABLE_COLUMN_NOTES: Readonly<Record<string, string>> = {
   tenure_basis:
     "Which column last_sale_date_any, years_since_last_sale and no_sale_10y_flag were computed from. FDOR_SALE = last_sale_date; COJ_SALESL = coj_last_sale_date; NO_SALE_ON_RECORD = no transfer in any source, and the three tenure columns are NULL for that reason, NOT because the property was held a long time. Never NULL.",
   tenure_source: "The source system that published the tenure date named by tenure_basis. NULL when tenure_basis is NO_SALE_ON_RECORD.",
+  tenure_quality:
+    "DERIVED. Whether years_since_last_sale can honestly be read as an ownership hold. FILTER ANY TENURE QUESTION ON THIS COLUMN: 'WHERE tenure_quality = ''PLAUSIBLE''' is the honest population, and a row outside it must never be presented as a long hold without saying which value it carries. Never NULL. PLAUSIBLE (388,444 rows) = a tenure a reader can act on. IMPLAUSIBLE_DATE (1,454) = last_sale_date_any is before 1901 and is filler in the City recorded-sales file, not a transfer: 1899-12-30 on 842 rows, 1899-01-01 on 609, one 1800-01-01, which render as 126, 127 and 226 year holds. INSTITUTIONAL_OR_CIVIC (11,934) = the FDOR use code puts the parcel in the institutional (70-79), governmental (80-89) or miscellaneous (90-99) groups - churches, cemeteries, schools, parks, municipal and state land, utility and right-of-way - so the date is usually real but it dates a public or institutional holding, not a household sale. It does NOT claim the transfer was a plat dedication: the City parcel layer publishes the sale as a bare date with no deed type, and last_sale_qual_cd exists on only the 2,924 FDOR_SALE rows. NO_SALE_ON_RECORD (2,191) = no source records any transfer, matching tenure_basis and has_sale_on_record = false; the tenure columns are NULL for that reason and NOT because the property was held a long time.",
   has_sale_on_record:
     "False when no source records any transfer for the parcel. Never NULL. This is the column that separates 'no sale on record' from 'held a long time'; years_since_last_sale is NULL in both directions only when this is false.",
   years_since_last_sale:
@@ -70,8 +72,11 @@ export const QUERY_TABLE_COLUMN_FAMILY: ReadonlyMap<string, string> = new Map<st
   ]),
 ]);
 
-/** Bump when the published column set or the provenance contract changes. */
-export const QUERY_TABLE_SCHEMA_VERSION = "2";
+/**
+ * Bump when the published column set or the provenance contract changes.
+ * 3: adds tenure_quality (131 -> 132 columns), the demotion that used to live only in the UI.
+ */
+export const QUERY_TABLE_SCHEMA_VERSION = "3";
 
 export interface QueryTableSchemaMetadata {
   county: string;

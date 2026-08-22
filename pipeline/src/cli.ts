@@ -5,11 +5,10 @@ import { CONSOLIDATION_TRACK, consolidationArtifacts, consolidationSourceRecord,
 import { formatOpenDataResult, publishOpenData } from "./publish/openData.js";
 import { all, ensureSchema, openDb, q } from "./db.js";
 import { buildFeatures } from "./features/build.js";
-import { exportEntityTables, exportQueryTable, formatValidation, validateQueryTable } from "./features/export.js";
+import { exportEntityTables, formatValidation, validateQueryTable } from "./features/export.js";
 import { log } from "./log.js";
 import { executePublish, formatManifest, formatPlan, planPublish } from "./publish/index.js";
-import { missingFilebaseEnv, readFilebaseEnv } from "./publish/filebase.js";
-import { discardStagedQueryTable, promoteQueryTable } from "./publish/gate.js";
+import { readFilebaseEnv } from "./publish/filebase.js";
 import {
   formatRegressions,
   readCiEnv,
@@ -18,7 +17,16 @@ import {
   snapshotTrackState,
   type TrackStateRow,
 } from "./publish/ledger.js";
-import { loadRunHistory, previousTotal, runPipeline, tableTotals, writeRunHistoryFiles } from "./run.js";
+import {
+  exportGatedQueryTable,
+  loadRunHistory,
+  previousTotal,
+  queryTablePath,
+  resolvePublishMode,
+  runPipeline,
+  tableTotals,
+  writeRunHistoryFiles,
+} from "./run.js";
 import { insertRunSource, rehydrateRunLog } from "./runLog.js";
 import { parseTracks } from "./sources.js";
 
@@ -58,6 +66,7 @@ const HELP = `duval oracle pipeline
   pnpm run features                      rebuild derived.properties_features + query-table.parquet + validate
   pnpm run validate                      re-run the query-table validation gate against the DB
   pnpm run publish:ipfs -- [--publish]   dry-run by default; --publish uploads to Filebase + re-points IPNS
+                                         --publish without readable Filebase settings FAILS; it never becomes a dry run
   pnpm run export:consolidation -- [--since all|changed|<run_id>] [--shard-size 10000] [--limit N] [--out-dir DIR]
   pnpm run publish:open-data -- [--publish]   per-property open-data files + shards + index; IPNS oracle-open-data-duval
   pnpm run status                        table counts + run history summary
@@ -153,38 +162,40 @@ async function main(): Promise<void> {
       const asOf = new Date().toISOString().slice(0, 10);
       const stats = await buildFeatures(db.conn, { asOf, runId: "features-cli" });
       log.info("features_built", { ...stats });
-      const qt = join(paths.publishDir, "query-table.parquet");
-      const exp = await exportQueryTable(db.conn, qt);
-      log.info("query_table_exported", { ...exp });
-      const report = await validateQueryTable(db.conn, qt);
-      process.stdout.write(formatValidation(report) + "\n");
+      // Same gate, same staging, same promotion as every other pass that writes the parquet.
+      const gated = await exportGatedQueryTable(db.conn, paths.publishDir);
+      log.info("query_table_exported", { ...gated.exported, promoted: gated.gate.promoted });
+      process.stdout.write(formatValidation(gated.validation) + "\n");
       const tables = await exportEntityTables(db.conn, join(paths.publishDir, "tables"));
       log.info("entity_tables_exported", { tables });
       await db.close();
-      if (!report.ok) process.exitCode = 1;
+      if (!gated.gate.promoted) {
+        process.stdout.write(`\nGATE FAILED: ${gated.gate.message}\n`);
+        process.exitCode = 1;
+      }
       return;
     }
     case "validate": {
       const db = await openDb(paths.dbPath, { readOnly: true });
-      const report = await validateQueryTable(db.conn, join(paths.publishDir, "query-table.parquet"));
+      const report = await validateQueryTable(db.conn, queryTablePath(paths.publishDir));
       process.stdout.write(formatValidation(report) + "\n");
       await db.close();
       if (!report.ok) process.exitCode = 1;
       return;
     }
     case "publish": {
-      const publish = args.flags.get("publish") === "true" && args.flags.get("dry-run") !== "true";
+      const intent = resolvePublishMode(args.flags, env);
+      if (intent.mode === "refused") {
+        process.stdout.write(`PUBLISH REFUSED: ${intent.reason}\nNothing was uploaded.\n`);
+        log.error("publish_refused", { command: "publish", reason: intent.reason, missing: intent.missing });
+        process.exitCode = 1;
+        return;
+      }
+      const publish = intent.mode === "publish";
       if (!publish) {
         const fb = readFilebaseEnv(env);
         const plan = await planPublish(paths);
         process.stdout.write(formatPlan(plan, fb?.bucket ?? null, fb?.gateway ?? "https://ipfs.filebase.io") + "\n\n");
-      }
-      // A publish that was ASKED to upload and could not read its credentials is a failed publish,
-      // not a dry run. It used to print a dry-run manifest and exit 0 inside a step called "Publish".
-      if (args.flags.get("publish") === "true" && args.flags.get("dry-run") !== "true" && readFilebaseEnv(env) === null) {
-        process.stdout.write(`publish requested but Filebase settings are missing: ${missingFilebaseEnv(env).join(", ")}\n`);
-        process.exitCode = 1;
-        return;
       }
       const manifest = await executePublish({ paths, env, publish, logger: log });
       process.stdout.write(formatManifest(manifest) + "\n");
@@ -218,22 +229,12 @@ async function main(): Promise<void> {
         // refresh the query table so property_cid is filled from consolidation_state
         const asOf = new Date().toISOString().slice(0, 10);
         await buildFeatures(db.conn, { asOf, runId });
-        // The SAME gate the ingestion run applies, applied here too - and applied to a STAGED file.
-        // This pass runs after the gated ingestion run and rewrites query-table.parquet, so it is
-        // the code path that actually produces the artifact we publish. It used to compute the
-        // validation report and never look at `ok`, which made "a failed gate aborts before
-        // anything is published" false for the only pass that mattered. Writing to a staging path
-        // and promoting only on a pass means a failed gate cannot even replace the good file on
-        // disk, let alone reach the publish step.
-        const qt = join(paths.publishDir, "query-table.parquet");
-        const staged = join(paths.publishDir, "query-table.staging.parquet");
-        const stagedExport = await exportQueryTable(db.conn, staged);
-        const stagedReport = await validateQueryTable(db.conn, staged);
-        const gate = promoteQueryTable({ stagedPath: staged, publishPath: qt, ok: stagedReport.ok });
-        if (gate.promoted) log.info("consolidation_gate_passed", { path: gate.publishPath, rows: stagedReport.rows });
-        else log.error("consolidation_gate_failed", { problems: stagedReport.problems, rows: stagedReport.rows, kept: gate.publishPath });
-        const exported = { ...stagedExport, path: gate.builtPath };
-        const report = { ...stagedReport, parquetPath: gate.builtPath };
+        // The SAME gate the ingestion run applies, because it is the same function. This pass runs
+        // after the ingestion run and rewrites query-table.parquet, so it is a code path that
+        // produces the artifact we publish, and every such path stages, validates, then promotes.
+        const { exported, validation: report, gate } = await exportGatedQueryTable(db.conn, paths.publishDir);
+        if (gate.promoted) log.info("consolidation_gate_passed", { path: gate.publishPath, rows: report.rows });
+        else log.error("consolidation_gate_failed", { problems: report.problems, rows: report.rows, kept: gate.publishPath });
         // Record the parquet this pass just republished as a published object, under the same name
         // and CID shape the ingestion run uses, so it joins the published artifacts index.
         const artifacts = await consolidationArtifacts({ outDir, stats, exported, validation: report });
@@ -284,7 +285,6 @@ async function main(): Promise<void> {
         process.stdout.write(formatValidation(report) + "\n");
         process.stdout.write(`\n=== CONSOLIDATION ${runId} ===\ncandidates ${stats.candidates}, exported ${stats.exported}, unchanged ${stats.unchanged}, in state ${stats.totalInState}, shards ${stats.shards}, bytes ${stats.totalBytes}, index cid ${stats.indexCid}, ${Math.round(stats.ms / 1000)} s\n`);
         if (!gate.promoted) {
-          discardStagedQueryTable(staged);
           process.stdout.write(`\nGATE FAILED: ${gate.message}\n`);
           process.exitCode = 1;
         }
@@ -297,10 +297,26 @@ async function main(): Promise<void> {
       return;
     }
     case "publish-open-data": {
-      const publish = args.flags.get("publish") === "true" && args.flags.get("dry-run") !== "true";
+      // Refuse BEFORE planning: a dry-run plan printed under a `--publish` invocation is the exact
+      // output that made an unpublished run look published. See resolvePublishMode in run.ts.
+      const intent = resolvePublishMode(args.flags, env);
+      if (intent.mode === "refused") {
+        process.stdout.write(`OPEN DATA PUBLISH REFUSED: ${intent.reason}\nNothing was uploaded.\n`);
+        log.error("publish_refused", { command: "publish-open-data", reason: intent.reason, missing: intent.missing });
+        process.exitCode = 1;
+        return;
+      }
+      const publish = intent.mode === "publish";
       const fb = readFilebaseEnv(env);
       const result = await publishOpenData({ paths, env, publish, logger: log });
       process.stdout.write(formatOpenDataResult(result, fb?.bucket ?? null, fb?.gateway ?? "https://ipfs.filebase.io") + "\n");
+      // Belt and braces for the same class of defect one layer down: whatever else went wrong,
+      // an invocation that asked to publish and came back describing a dry run published nothing.
+      if (publish && result.mode !== "published") {
+        process.stdout.write(`OPEN DATA PUBLISH DEGRADED: --publish was given but the run reported mode "${result.mode}"; nothing was uploaded.\n`);
+        log.error("publish_degraded_to_dry_run", { command: "publish-open-data", mode: result.mode });
+        process.exitCode = 1;
+      }
       return;
     }
     case "status": {
