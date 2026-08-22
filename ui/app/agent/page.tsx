@@ -13,6 +13,7 @@ import type {
 } from "@/lib/agent/types";
 import { PageHeader, Callout, Spinner } from "@/components/ui";
 import { EngineStatus } from "@/components/EngineStatus";
+import { ProvenanceCell, useColumnProvenance } from "@/components/DataTable";
 import { formatInt, formatTimestamp, relativeTime } from "@/lib/format";
 import { TOOL_ORDER } from "@/lib/agent/toolOrder";
 
@@ -106,6 +107,13 @@ function cellText(value: unknown): string {
   return String(value);
 }
 
+/**
+ * Pinned to the right edge, for the reason DataTable pins its own provenance column: this table
+ * scrolls sideways inside a 420px box, and a stack of source badges in its last column is exactly
+ * what the container edge slices.
+ */
+const STICKY_PROVENANCE = "md:sticky md:right-0 md:border-l md:border-border md:bg-surface";
+
 function EvidenceTable({ rows }: { rows: AgentEvidenceRow[] }) {
   const matched = new Set<string>();
   for (const row of rows) for (const key of Object.keys(row)) if (!EVIDENCE_META.has(key)) matched.add(key);
@@ -114,6 +122,20 @@ function EvidenceTable({ rows }: { rows: AgentEvidenceRow[] }) {
   // never make the whole page scroll sideways, and 25 rows of evidence should not push the
   // assumptions below it off the screen.
   const columns = [...matched].slice(0, 14);
+  /*
+   * The same column to family map the results grid reads, from the same parquet footer. The engine
+   * is already attached on this page (EngineStatus boots it), so this is a footer read against an
+   * open file, and a failure resolves to null and degrades the cell rather than breaking the table.
+   */
+  const provenance = useColumnProvenance(rows.length > 0);
+  /*
+   * What the provenance names is the provenance OF THE VALUES ON SCREEN, so it resolves over the
+   * columns this table actually renders. Evidence rows carry no `<family>_source` columns at all
+   * (lib/agent/tools.ts strips every provenance column out of the matched set), which is precisely
+   * why the map is needed: without it there is nothing on the row to attribute a Starbucks distance
+   * to, and the cell falls back to the appraisal roll spine that was the bug.
+   */
+  const provenanceColumns = ["property_id", ...columns];
   return (
     <div className="overflow-auto" style={{ maxHeight: 420 }}>
       <table className="w-full text-[11.5px]" style={{ minWidth: 720 }}>
@@ -126,7 +148,7 @@ function EvidenceTable({ rows }: { rows: AgentEvidenceRow[] }) {
                 {column}
               </th>
             ))}
-            <th className="px-2 py-1 font-semibold">source</th>
+            <th className={`px-2 py-1 font-semibold ${STICKY_PROVENANCE}`}>provenance</th>
           </tr>
         </thead>
         <tbody>
@@ -143,14 +165,8 @@ function EvidenceTable({ rows }: { rows: AgentEvidenceRow[] }) {
                   {cellText(row[column])}
                 </td>
               ))}
-              <td className="px-2 py-1 whitespace-nowrap">
-                <span className="badge badge-neutral">{row.source_system ?? "unknown"}</span>{" "}
-                {row.source_url ? (
-                  <a className="mono" href={row.source_url} target="_blank" rel="noreferrer">
-                    source
-                  </a>
-                ) : null}
-                <div className="mono text-faint">{formatTimestamp(row.fetched_at ?? null)}</div>
+              <td className={`px-2 py-1 whitespace-nowrap md:z-[1] ${STICKY_PROVENANCE}`}>
+                <ProvenanceCell row={row} columns={provenanceColumns} map={provenance} />
               </td>
             </tr>
           ))}

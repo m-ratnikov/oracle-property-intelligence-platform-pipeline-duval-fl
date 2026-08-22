@@ -21,7 +21,9 @@ import {
   COMBINED_QUESTIONS,
   PRESETS,
   SIX_QUESTIONS,
-  TENURE_PLAUSIBLE_MAX_YEARS,
+  TENURE_RECORD_STARTS,
+  TENURE_QUALITY_VALUES,
+  SCHEMA_LOADING,
   VIEW_NAME,
   loadedSchema,
   measureAlias,
@@ -171,19 +173,17 @@ describe("the tenure rule", () => {
     }
   });
 
-  it("never leads with a date that predates the digital record", async () => {
+  it("never leads with a date that predates the recorded index", async () => {
     /*
-     * The card used to open on STATE OF FLORIDA at 226 years, then twelve rows of 127. Sentinel
+     * The card used to open on STATE OF FLORIDA at 226 years, then twelve rows of 127. Placeholder
      * dates satisfy the rule and stay in the count, but a reader meets the strongest evidence
-     * first or the whole answer reads as fabricated. 1800-01-01 and 1899-01-01 are 226 and 127
-     * years, both past the placeholder line, so neither can reach the top of the page.
+     * first or the whole answer reads as fabricated.
      */
     const result = await db.query(preset.sql(20));
     for (const row of result.rows) {
       const date = String(row.last_sale_date_any);
-      expect(date.slice(0, 4), `${date} leads the result set`).not.toBe("1800");
-      expect(date.slice(0, 4), `${date} leads the result set`).not.toBe("1899");
-      expect(row.tenure_quality).toBe("recorded_transfer");
+      expect(date >= TENURE_RECORD_STARTS, `${date} leads the result set`).toBe(true);
+      expect(row.tenure_quality).toBe("PLAUSIBLE");
     }
   });
 
@@ -202,32 +202,106 @@ describe("the tenure rule", () => {
     expect(Number(counts.matched)).toBe(0);
   });
 
-  it("puts a plausible tenure first and a placeholder date last", async () => {
+  it("groups the rows by label, best evidence first, without dropping any of them", async () => {
+    /*
+     * The ordering contract, asserted as a partition rather than as a threshold. The previous
+     * version of this test compared years against a 100 year cut, which is the rule that failed:
+     * rows at exactly 100.0 years satisfied it and led the card.
+     */
     const result = await db.query(preset.sql(200));
-    const tenures = result.rows.map((row) => Number(row.years_since_last_sale));
-    expect(tenures[0]).toBeLessThanOrEqual(TENURE_PLAUSIBLE_MAX_YEARS);
-
-    // Placeholders may still be in the result - they satisfy the rule - but never above a real one.
-    const firstPlaceholder = tenures.findIndex((years) => years > TENURE_PLAUSIBLE_MAX_YEARS);
-    if (firstPlaceholder !== -1) {
-      const after = tenures.slice(firstPlaceholder);
-      expect(after.every((years) => years > TENURE_PLAUSIBLE_MAX_YEARS)).toBe(true);
-    }
+    const rank = (row: Record<string, unknown>) => {
+      if (row.tenure_quality !== "PLAUSIBLE") return 2;
+      return row.tenure_date_check === "CONFIRMED" ? 0 : 1;
+    };
+    const ranks = result.rows.map(rank);
+    expect(ranks[0], "the first row is not the strongest evidence available").toBe(0);
+    expect(
+      [...ranks].sort((a, b) => a - b),
+      "a weaker row sorted above a stronger one",
+    ).toEqual(ranks);
   });
 
-  it("labels each row as a recorded transfer or a placeholder date", async () => {
+  it("gives every row one of the four contract values, never null", async () => {
+    // The values are shared with the pipeline, which publishes the same column on the artifact.
+    // Drifting from them here would make the screen and every MCP client disagree.
     const result = await db.query(preset.sql(200));
     expect(result.columns).toContain("tenure_quality");
     for (const row of result.rows) {
-      const years = Number(row.years_since_last_sale);
-      expect(row.tenure_quality).toBe(
-        years > TENURE_PLAUSIBLE_MAX_YEARS ? "placeholder_date" : "recorded_transfer",
-      );
+      expect(TENURE_QUALITY_VALUES).toContain(row.tenure_quality as string);
     }
   });
 
-  it("warns about placeholder dates rather than letting a 226 year hold read as a finding", () => {
-    expect(preset.assumptions.join(" ")).toMatch(/placeholder/i);
+  it("computes the contract identically to the published column when it is absent", async () => {
+    /*
+     * The artifact does not carry tenure_quality yet, so the UI computes it. This pins that
+     * computation against the pipeline's rules, restated independently here: a sale before the
+     * recorded index, or an institutional, governmental or miscellaneous use code.
+     */
+    const result = await db.query(
+      `SELECT tenure_quality, last_sale_date_any,
+              TRY_CAST(property_usage_type AS INTEGER) AS use_code
+       FROM (${preset.sql(500)})`,
+    );
+    expect(result.rows.length).toBeGreaterThan(0);
+    for (const row of result.rows) {
+      const useCode = row.use_code === null ? null : Number(row.use_code);
+      const expected =
+        String(row.last_sale_date_any) < TENURE_RECORD_STARTS
+          ? "IMPLAUSIBLE_DATE"
+          : useCode !== null && useCode >= 70 && useCode <= 99
+            ? "INSTITUTIONAL_OR_CIVIC"
+            : "PLAUSIBLE";
+      expect(row.tenure_quality, `${row.last_sale_date_any} / use ${row.use_code}`).toBe(expected);
+    }
+  });
+
+  it("cannot label a matching row NO_SALE_ON_RECORD, because the rule already excluded those", async () => {
+    // The fourth contract value is unreachable inside this preset by construction, and that is a
+    // property worth pinning: if it ever appears, the rule and the label have stopped agreeing.
+    const result = await db.query(preset.sql(500));
+    for (const row of result.rows) {
+      expect(row.tenure_quality).not.toBe("NO_SALE_ON_RECORD");
+    }
+  });
+
+  it("never calls a tenure confirmed when the sale predates the building it would convey", async () => {
+    /*
+     * The signal that keeps the municipal and railway rows off the top of the card, since the use
+     * code does not reach them: F E C RAILWAY CO reads 048 and CSX TRANSPORTATION 055, so both
+     * stay PLAUSIBLE, and only their own dates give them away.
+     */
+    const result = await db.query(preset.sql(500));
+    for (const row of result.rows) {
+      const builtYear = row.built_year === null ? null : Number(row.built_year);
+      const saleYear = Number(String(row.last_sale_date_any).slice(0, 4));
+      if (builtYear === null) {
+        expect(row.tenure_date_check).toBe("UNVERIFIABLE");
+      } else {
+        expect(row.tenure_date_check, `sold ${saleYear}, built ${builtYear}`).toBe(
+          saleYear < builtYear ? "CONTRADICTED" : "CONFIRMED",
+        );
+      }
+    }
+  });
+
+  it("states the labels it sorts by, and claims no instrument the roll does not carry", () => {
+    const assumptions = preset.assumptions.join(" ");
+    expect(assumptions).toMatch(/IMPLAUSIBLE_DATE/);
+    expect(assumptions).toMatch(/INSTITUTIONAL_OR_CIVIC/);
+    expect(assumptions).toMatch(/tenure_date_check/);
+    /*
+     * The roll carries no deed type, price or qualification code for 98.7 percent of rows, so the
+     * copy may say a PARCEL is civic and may not say a TRANSFER was a plat or a dedication. This
+     * assertion is what stops the wording drifting back into claiming the instrument.
+     */
+    expect(assumptions).toMatch(/not that the transfer was a plat/i);
+  });
+
+  it("does not let the stated cut drift away from the one the SQL runs", () => {
+    // The defect was a documented threshold that the rows on screen did not obey. Whatever the
+    // copy names, the statement has to contain it.
+    expect(preset.assumptions.join(" ")).toContain(TENURE_RECORD_STARTS);
+    expect(preset.sql(10)).toContain(TENURE_RECORD_STARTS);
   });
 
   it("applies the same ordering and columns to the combined roof and hold preset", async () => {
@@ -235,9 +309,31 @@ describe("the tenure rule", () => {
     const result = await db.query(combined.sql(200));
     expect(result.columns).toContain("last_sale_date_any");
     expect(result.columns).toContain("tenure_basis");
+    expect(result.columns).toContain("tenure_quality");
+    expect(result.columns).toContain("tenure_date_check");
     expect(result.columns).not.toContain("last_sale_date");
-    const tenures = result.rows.map((row) => Number(row.years_since_last_sale));
-    expect(tenures[0]).toBeLessThanOrEqual(TENURE_PLAUSIBLE_MAX_YEARS);
+    expect(result.rows[0].tenure_quality).toBe("PLAUSIBLE");
+    expect(result.rows[0].tenure_date_check).toBe("CONFIRMED");
+  });
+
+  it("reads the published column instead of recomputing it once the artifact carries one", () => {
+    /*
+     * The pipeline is adding tenure_quality to the artifact. Until that republish lands the UI has
+     * to work against the 131 column one, so the preset has to do both, and which one it did must
+     * be invisible to everything downstream.
+     */
+    const withoutColumn = preset.sql(10, loadedSchema(["years_since_last_sale"]));
+    expect(withoutColumn).toContain("AS tenure_quality");
+    expect(withoutColumn).toContain("CASE");
+
+    const withColumn = preset.sql(10, loadedSchema(["years_since_last_sale", "tenure_quality"]));
+    expect(withColumn).not.toContain("AS tenure_quality");
+    expect(withColumn).toContain("tenure_quality");
+
+    // A schema that is merely unknown must behave like an artifact without the column, never like
+    // one that has it: naming a column that is not there does not degrade, it fails to bind.
+    expect(preset.sql(10, SCHEMA_LOADING)).toBe(withoutColumn);
+    expect(preset.sql(10)).toBe(withoutColumn);
   });
 });
 
@@ -532,8 +628,26 @@ describe("the agent and the Questions page state one rule", () => {
     expect(SYSTEM_PROMPT).toContain("has_additional_owners");
   });
 
-  it("the system prompt says a century long tenure is a placeholder", () => {
-    expect(SYSTEM_PROMPT).toContain(String(TENURE_PLAUSIBLE_MAX_YEARS));
-    expect(SYSTEM_PROMPT).toMatch(/placeholder date/i);
+  it("the system prompt routes tenure through the published columns, not a duration cut", () => {
+    /*
+     * Deliberately does not pin any number. A duration threshold was the defect: it moved with the
+     * as-of date and let 1925 and 1926 plat dates through at exactly 100.0 years. What the prompt
+     * owes the model is the two published columns and what their values mean, so this asserts the
+     * contract rather than a sentence.
+     */
+    for (const value of [
+      "PLAUSIBLE",
+      "IMPLAUSIBLE_DATE",
+      "INSTITUTIONAL_OR_CIVIC",
+      "NO_SALE_ON_RECORD",
+    ]) {
+      expect(SYSTEM_PROMPT).toContain(value);
+    }
+    expect(SYSTEM_PROMPT).toContain("tenure_date_check");
+    expect(SYSTEM_PROMPT).toMatch(/CONTRADICTED/);
+    // The warning itself survives the rewrite: a pre-1901 date is filler, not a century long hold.
+    expect(SYSTEM_PROMPT).toMatch(/placeholder/i);
+    // And the prompt must not reintroduce the cut it replaced.
+    expect(SYSTEM_PROMPT).toMatch(/no threshold on years_since_last_sale separates a placeholder/i);
   });
 });

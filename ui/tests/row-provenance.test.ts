@@ -15,6 +15,9 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { openPropertyDb, SAMPLE_PARQUET_PATH, type PropertyDb } from "@/lib/agent/db";
+import { createAgentTools, newTrace } from "@/lib/agent/tools";
+import type { PresetName } from "@/lib/agent/schema";
+import type { AgentEvidenceRow } from "@/lib/agent/types";
 import { PRESETS } from "@/lib/sql";
 import { SOURCE_FAMILIES, SPINE_PROVENANCE_COLUMNS } from "@/lib/columns";
 import {
@@ -443,5 +446,128 @@ describe("an artifact with no published map", () => {
   it("returns nothing when the row names no system at all", () => {
     expect(fallbackRowSources(FAMILY_KEYS, ["property_id"], { property_id: "1" })).toEqual([]);
     expect(rowSources(null, ["property_id"], { property_id: "1" })).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------------- *
+ * The Agent page's evidence table
+ * ------------------------------------------------------------------------- */
+
+/**
+ * The agent's evidence rows are NOT preset rows, and that is what made this the surface the fix
+ * missed. lib/agent/tools.ts strips every provenance column out of the matched set before an
+ * evidence row is built (SKIP_IN_EVIDENCE spreads PROVENANCE_COLUMNS), so an evidence row carries
+ * the three spine columns and nothing else that names a system. `fallbackRowSources` therefore has
+ * nothing to work with on this surface: the published column to family map is the ONLY thing that
+ * can say a walking distance came from Overture, which is why the Agent page reads the same map the
+ * results grid does instead of printing `row.source_system` on its own.
+ *
+ * The rows are produced by running the real agent tool over the sample parquet, not written by
+ * hand, so a change to what the tool puts in an evidence row shows up here.
+ */
+describe("the agent's evidence rows name the systems behind their values", () => {
+  /** Mirrors EvidenceTable in app/agent/page.tsx: meta columns are the source cell, not data. */
+  const EVIDENCE_META = new Set([
+    "property_id",
+    "address",
+    "source_system",
+    "source_url",
+    "fetched_at",
+    "via",
+  ]);
+  const EVIDENCE_COLUMN_CAP = 14;
+
+  function evidenceRowsFor(name: PresetName): Promise<AgentEvidenceRow[]> {
+    const trace = newTrace();
+    const tools = createAgentTools({ db, env: {} }, trace);
+    const execute = tools.preset_question.execute as (
+      input: unknown,
+      options: unknown,
+    ) => Promise<unknown>;
+    return execute({ name, limit: 5 }, { toolCallId: "test", messages: [] } as never).then(
+      () => trace.evidence,
+    );
+  }
+
+  /** The columns the Agent page actually renders, and therefore claims provenance for. */
+  function displayedColumns(rows: AgentEvidenceRow[]): string[] {
+    const matched = new Set<string>();
+    for (const row of rows) {
+      for (const key of Object.keys(row)) if (!EVIDENCE_META.has(key)) matched.add(key);
+    }
+    return ["property_id", ...[...matched].slice(0, EVIDENCE_COLUMN_CAP)];
+  }
+
+  it.each([
+    ["near_starbucks", "nearest_starbucks_m", "overture_places"],
+    ["near_transit", "nearest_transit_stop_m", "jta_gtfs"],
+    ["water_view", "water_dist_m", "coj_nhd_hydrography"],
+  ] as [PresetName, string, string][])(
+    "%s credits %s to %s rather than to the appraisal roll",
+    async (name, evidence, expected) => {
+      const rows = await evidenceRowsFor(name);
+      expect(rows.length, `${name} produced no evidence`).toBeGreaterThan(0);
+
+      const columns = displayedColumns(rows);
+      expect(columns, `${name} does not show ${evidence}`).toContain(evidence);
+
+      const sources = rowSources(map, columns, rows[0]);
+      // The defect: one badge reading source_system, which is duval_appraiser on every row.
+      expect(systemsOf(sources).length).toBeGreaterThan(1);
+      expect(systemsOf(sources)).toContain(expected);
+      expect(entryFor(sources, expected)?.columns).toContain(evidence);
+      expect(entryFor(sources, "duval_appraiser")?.columns).not.toContain(evidence);
+      // The spine still reads first: the row is keyed on the roll and says so.
+      expect(sources[0]?.system).toBe("duval_appraiser");
+    },
+  );
+
+  it("carries no per family source column, so the map is the only attribution it has", async () => {
+    const rows = await evidenceRowsFor("near_starbucks");
+    const familySourceColumns = FAMILY_KEYS.map((family) => `${family}_source`);
+    for (const column of [...familySourceColumns, "source_systems", "tenure_source"]) {
+      expect(Object.keys(rows[0]), `evidence unexpectedly carries ${column}`).not.toContain(column);
+    }
+    // Which is exactly why the fallback cannot help here, and must not be mistaken for coverage.
+    const columns = displayedColumns(rows);
+    expect(systemsOf(fallbackRowSources(FAMILY_KEYS, columns, rows[0]))).toEqual([
+      "duval_appraiser",
+    ]);
+  });
+
+  it("resolves a row that carries only a couple of family columns", () => {
+    /*
+     * A get_property or count_criteria answer can put two columns on a row. The cell has to name
+     * the systems behind those two and claim nothing else, rather than needing a full preset row.
+     */
+    const sources = rowSources(map, ["property_id", "nearest_transit_stop_m", "zoning"], {
+      property_id: "0707810100R",
+      address: "1 MAIN ST, JACKSONVILLE",
+      nearest_transit_stop_m: 214,
+      zoning: "RLD-60",
+      source_system: "duval_appraiser",
+      source_url: "https://example.invalid/roll",
+      fetched_at: "2026-08-21T13:58:56Z",
+      via: "preset_question:near-transit",
+    });
+    expect(systemsOf(sources)).toEqual(["duval_appraiser", "coj_parcels", "jta_gtfs"]);
+    expect(entryFor(sources, "jta_gtfs")?.columns).toEqual(["nearest_transit_stop_m"]);
+    expect(entryFor(sources, "coj_parcels")?.columns).toEqual(["zoning"]);
+    expect(entryFor(sources, "duval_appraiser")?.columns).toEqual(["property_id"]);
+  });
+
+  it("does not attribute the row's own meta columns to anyone", () => {
+    /*
+     * `address` and `via` are the Agent page's own fields, not published columns: `address` is
+     * joined from three roll columns by the tool and `via` names the tool that returned the row.
+     * The map has never heard of either, and inventing a source for them would be the same class of
+     * false claim this whole module exists to stop.
+     */
+    const sources = rowSources(map, ["address", "via"], {
+      address: "1 MAIN ST, JACKSONVILLE",
+      via: "run_sql",
+      source_system: "duval_appraiser",
+    });
+    expect(sources).toEqual([]);
   });
 });

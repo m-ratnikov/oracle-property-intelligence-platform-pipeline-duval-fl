@@ -39,7 +39,9 @@ import { PRESET_NAME_LIST, presetFor } from "@/lib/agent/schema";
 import {
   aggregateValueShape,
   classifyCountShape,
+  findPopulationClaims,
   formatCountLedger,
+  harvestNumbers,
   MIN_POPULATION_COUNT,
   REMOVED_TOTAL,
   verifyAnswerTotals,
@@ -582,4 +584,299 @@ describe("demo prompts A and B are unaffected", () => {
       }
     });
   }
+});
+
+/**
+ * The three ways the defect could come back, found by adversarial review of the gate rather than by
+ * the live site.
+ *
+ * None of these ever fired in production, which is exactly why they need tests: a deployed answer
+ * cannot tell anyone whether a hole is shut, only that nothing walked through it that day. Each
+ * assertion below was first run against the version of totals.ts that shipped the live fix, where
+ * the numeral was not removed because it was never inspected.
+ *
+ * What the gate now guarantees, in one sentence with two load bearing halves: a numeral the answer
+ * presents as a population count is one this turn computed AS a population count. The first half is
+ * detection, which now fails closed; the second is backing, which is now separated by role.
+ */
+describe("the gate closes the class, not three instances", () => {
+  /** Hole 1. A measured `357,350` reached the reader verbatim because code spans were skipped. */
+  it("reads a bare numeral in backticks as a claim, because backticks are not a receipt", () => {
+    const result = verifyAnswerTotals("The population is `357,350` on this reading.", [], new Set());
+    expect(result.unverified).toEqual(["357,350"]);
+    expect(result.answer).toContain(REMOVED_TOTAL);
+  });
+
+  it("still leaves quoted SQL and column names alone, which is what skipping code was ever for", () => {
+    // The reason to skip a code span is that SQL and identifiers must not be rewritten. That is a
+    // different question from whether a bare number in backticks is a claim, so a span is now
+    // skipped only when it carries evidence of being code.
+    for (const text of [
+      "I ran `SELECT COUNT(*) FROM properties WHERE x > 357350 properties`.",
+      "The threshold column is `nearest_transit_stop_m <= 800`.",
+      "```sql\nSELECT property_id FROM properties WHERE market_value > 357350\n```",
+    ]) {
+      expect(verifyAnswerTotals(text, [], new Set()).answer, text).toBe(text);
+    }
+  });
+
+  /** Hole 2. Detection keyed on phrasings it recognised, so an unanticipated sentence was unguarded. */
+  it("fails closed on phrasings nobody anticipated", () => {
+    // There is no finite list of ways to say "N of them", so the gate stopped trying to keep one.
+    for (const text of [
+      "The scored population is 357,350.",
+      "Roughly 357,350 fall into this bucket.",
+      "That leaves 357,350 after the score threshold is applied.",
+      "Population: 357,350",
+      "357,350 is the size of the group.",
+    ]) {
+      expect(verifyAnswerTotals(text, [], new Set()).unverified, text).toEqual(["357,350"]);
+    }
+  });
+
+  /** Hole 3. Any number a tool emitted anywhere was allowed, per row cell values included. */
+  it("refuses a per row cell value as backing for a population claim", () => {
+    // 200 rows times many numeric columns is a lot of chances for a fabricated total to collide
+    // with some cell. A market_value of 357,350 is a real number the turn saw; it is not a count of
+    // parcels, and the old allow list could not tell those apart.
+    const seen = new Set<number>();
+    harvestNumbers(
+      {
+        columns: ["property_id", "market_value", "total_value"],
+        rows: [{ property_id: "1760825000R", market_value: 357350, total_value: 357350 }],
+        row_count: 1,
+        count_shape: "conjunction",
+      },
+      seen,
+    );
+    expect(seen.has(357350)).toBe(false);
+    expect(verifyAnswerTotals("Total matched: 357,350 properties meet these criteria.", [], seen).unverified).toEqual([
+      "357,350",
+    ]);
+  });
+
+  it("refuses a literal the model aliased as a count, because only an aggregate computes one", () => {
+    // "SELECT 357350 AS total_matched" puts a fabricated number under a count name. It is not an
+    // aggregate, and the shape is decided by the code reading the statement, never by the alias.
+    const seen = new Set<number>();
+    harvestNumbers({ rows: [{ total_matched: 357350 }], row_count: 1, count_shape: "unfiltered" }, seen);
+    expect(seen.has(357350)).toBe(false);
+  });
+
+  it("keeps a grouped count, so a breakdown table is still printable", () => {
+    // "SELECT owner_region_class, COUNT(*) AS n ... GROUP BY 1" returns counts inside rows, and
+    // 34,649 REGIONAL parcels is a number a reader may legitimately be told. What makes the column
+    // name trustworthy here and untrustworthy above is that the enclosing statement was classified
+    // as an aggregate by classifyCountShape, which no alias can bring about on its own.
+    const seen = new Set<number>();
+    harvestNumbers(
+      {
+        columns: ["owner_region_class", "n"],
+        rows: [{ owner_region_class: "REGIONAL", n: 34649 }],
+        count_shape: "aggregate",
+      },
+      seen,
+    );
+    expect(seen.has(34649)).toBe(true);
+  });
+
+  it("does not let an echoed statement vouch for the numbers inside it", () => {
+    // count_sql is the model's own text handed back as a receipt. Treating a literal in it as a
+    // number the tool asserted would let the model launder any value through a WHERE clause.
+    const seen = new Set<number>();
+    harvestNumbers(
+      { count_sql: "SELECT COUNT(*) AS total FROM properties WHERE market_value > 357350", row_count: 1 },
+      seen,
+    );
+    expect(seen.has(357350)).toBe(false);
+  });
+
+  it("lets the model repeat a dataset fact a tool stated in words", () => {
+    // The same reading is applied to tool prose and to the answer, so anything a tool said as a
+    // count the model may say back. This is what keeps get_schema's notes citable now that the
+    // allow list is no longer "every numeral anywhere".
+    const note = "roof_age_basis is EFF_YR_BLT_PROXY on 359,129 of 404,023 rows and NULL on the other 44,894.";
+    const seen = new Set<number>();
+    harvestNumbers({ notes: [note] }, seen);
+    expect([...seen].sort((a, b) => a - b)).toEqual([44894, 359129, 404023]);
+    expect(verifyAnswerTotals(note, [], seen).unverified).toEqual([]);
+  });
+
+  it("removes a number the turn derived by arithmetic rather than computed", () => {
+    // 404,023 minus 130,043 is true and still not a computed count, and recognising the sentence
+    // that carries it is precisely the game the gate stopped playing. Failing closed here is the
+    // deliberate price of not losing to the next unanticipated phrasing.
+    const total: CountClaim = {
+      value: 130043,
+      counts: "parcels matching the roof-and-long-hold rule",
+      sql: "SELECT COUNT(*) AS total FROM properties WHERE roof AND hold",
+      shape: "conjunction",
+      tool: "preset_question",
+    };
+    const result = verifyAnswerTotals(
+      "130,043 meet both rules and the remaining 273,980 do not.",
+      [total],
+      new Set([130043, 404023]),
+    );
+    expect(result.answer).toContain("130,043");
+    expect(result.unverified).toEqual(["273,980"]);
+  });
+});
+
+/**
+ * False positives, checked against the shapes real answers actually have.
+ *
+ * The fixtures below are the deployed answers to demo prompts A, B and C re-rendered as the
+ * markdown the model emits: a headline, an evidence table, a prose example row, a provenance line
+ * and an assumptions list. Their numbers are the measured ones from the published artifact
+ * (bafybeidex5m2tzcbicfzjn4phgiudr2lpt7lgqf23ajz3gythipqdqhlri, 404,023 rows, 131 columns):
+ * A matches 130,043, B matches 26,917, C's four way AND is 5,441 against 381,275 meeting at least
+ * one, and the score histogram is 5,441 / 120,570 / 173,577 / 81,687 / 22,748, which sums to the
+ * 404,023 row universe.
+ *
+ * A stricter gate is only worth having if it leaves a correct answer intact, so these assert that
+ * every house number, year, postcode, distance, market value and quoted statement survives while
+ * every population count in the same text is still checked.
+ */
+describe("a correct answer is left intact", () => {
+  const schemaNotes = [
+    "Ownership tenure comes from last_sale_date_any (401,832 of 404,023 rows) with tenure_basis and tenure_source naming where it came from, never from last_sale_date (NULL on 351,742 rows).",
+    "roof_age_basis is EFF_YR_BLT_PROXY on 359,129 of 404,023 rows and NULL on the other 44,894.",
+  ];
+
+  function counted(value: number, shape: CountClaim["shape"], counts: string): CountClaim {
+    return { value, shape, counts, sql: `SELECT COUNT(*) AS total FROM properties -- ${counts}`, tool: "test" };
+  }
+
+  const ANSWER_A = `**130,043 properties meet the rule; showing 8.**
+
+There are 130,043 properties in Duval County with roofs older than 15 years (roof_year_est <= current year - 15) and that have not exchanged ownership in more than 10 years (years_since_last_sale >= 10). Of the 404,023 parcels on the roll, 130,043 meet both rules.
+
+| property_id | address_street | address_city | built_year | roof_year_est | roof_age_years | years_since_last_sale | market_value |
+| --- | --- | --- | --- | --- | --- | ---: | ---: |
+| 1760825000R | 829 S 1ST ST | JACKSONVILLE BEACH | 1900 | 1900 | 126 | 127 | 251,000 |
+| 1029170000R | 2400 JAMMES RD | JACKSONVILLE | 1903 | 1903 | 123 | 127 | 1,250,400 |
+| 0694020000R | 4212 IRVINGTON AVE | JACKSONVILLE | 1921 | 1921 | 105 | 127 | 84,900 |
+
+One example parcel is 1760825000R at 829 S 1ST ST, JACKSONVILLE BEACH FL 32250, whose market_value is 251,000 and whose nearest transit stop is 194.5 m away. Its assessed value is 316,700.
+
+Provenance: Duval County Property Appraiser (duval_appraiser), fetched at 2026-08-21 13:58:56 from https://floridarevenue.com/property/dataportal/Documents/PTO%20Data%20Portal/NAL/2026P/Duval%2026%20Preliminary%20NAL%202026.zip.
+
+## Assumptions and missing data
+- roof_age_basis is EFF_YR_BLT_PROXY on all 359,129 rows that carry one and PERMIT on zero rows.
+- last_sale_date is NULL on 351,742 of 404,023 rows, so tenure comes from last_sale_date_any (401,832 of 404,023 rows).
+- 44,894 rows carry no roof year at all.
+`;
+
+  const ANSWER_B = `**26,917 properties meet the rule; showing 8.**
+
+There are 26,917 properties near public transportation (nearest_transit_stop_m <= 800 m) with owner_region_class = REGIONAL. Only 8 of 26,917 matching properties are shown; the remaining retrieved rows are in the evidence panel.
+
+| property_id | address_street | nearest_transit_stop_m | owner_region_class |
+| --- | --- | ---: | --- |
+| 0038090206R | 6765 DUNN AVE 322-330 | 1.8 | REGIONAL |
+| 1671980000R | 13642 ATLANTIC BLVD | 3.7 | REGIONAL |
+| 0465520900R | 1989 W 13TH ST | 4 | REGIONAL |
+
+The universe is 404,023 parcels, of which 34,649 are REGIONAL.
+`;
+
+  const ANSWER_C = `5,441 parcels meet all four criteria, out of 404,023. 381,275 meet at least one, which is a different question.
+
+| Criteria met | Parcels |
+| ---: | ---: |
+| 4 | 5,441 |
+| 3 | 120,570 |
+| 2 | 173,577 |
+| 1 | 81,687 |
+| 0 | 22,748 |
+
+The transit leg alone is 326,112 and the regional leg alone is 34,649. The parcel at 6765 DUNN AVE scores 4 of 4.
+`;
+
+  it("prompt A keeps 130,043 and every per row value around it", () => {
+    const seen = new Set<number>([130043]);
+    harvestNumbers({ notes: schemaNotes, row_count: 404023 }, seen);
+    const claims = [counted(130043, "conjunction", "parcels matching the roof-and-long-hold rule")];
+    const result = verifyAnswerTotals(ANSWER_A, claims, seen);
+    expect(result.unverified).toEqual([]);
+    expect(result.answer).toContain("130,043 properties meet the rule");
+    // The numbers a reader can check on the page: house numbers, years, a postcode, a distance and
+    // three money amounts, none of which is a population and none of which the gate may touch.
+    for (const value of [
+      "829 S 1ST ST",
+      "4212 IRVINGTON AVE",
+      "FL 32250",
+      "251,000",
+      "1,250,400",
+      "316,700",
+      "194.5 m",
+    ]) {
+      expect(result.answer, value).toContain(value);
+    }
+    expect(result.cited.map((entry) => entry.value)).toEqual([130043]);
+  });
+
+  it("prompt B keeps 26,917, and the county universe beside it is still checked", () => {
+    const seen = new Set<number>([26917]);
+    harvestNumbers({ notes: schemaNotes, row_count: 404023 }, seen);
+    harvestNumbers(
+      {
+        columns: ["owner_region_class", "n"],
+        rows: [{ owner_region_class: "REGIONAL", n: 34649 }],
+        count_shape: "aggregate",
+      },
+      seen,
+    );
+    const claims = [counted(26917, "conjunction", "parcels matching the transit-and-regional rule")];
+    const result = verifyAnswerTotals(ANSWER_B, claims, seen);
+    expect(result.unverified).toEqual([]);
+    expect(result.answer).toContain("26,917 properties meet the rule");
+    expect(result.answer).toContain("34,649 are REGIONAL");
+    expect(result.answer).toContain("6765 DUNN AVE 322-330");
+    // 404,023 and 34,649 were read as claims rather than skipped: withdraw their backing and both
+    // go, which is what says the surviving pair above is a verification and not an oversight.
+    expect(verifyAnswerTotals(ANSWER_B, claims, new Set([26917])).unverified).toEqual(["404,023", "34,649"]);
+  });
+
+  it("prompt C keeps 5,441 and labels the at-least-one count beside it", () => {
+    const claims = [
+      counted(404023, "aggregate", "rows in the published properties view"),
+      counted(5441, "conjunction", "parcels meeting ALL 4 criteria"),
+      counted(381275, "disjunction", "parcels meeting AT LEAST ONE of the 4 criteria"),
+      counted(326112, "conjunction", "parcels meeting criterion 3 on its own"),
+      counted(34649, "conjunction", "parcels meeting criterion 4 on its own"),
+      ...[120570, 173577, 81687, 22748].map((value, index) =>
+        counted(value, "scored", `parcels meeting exactly ${3 - index} of the 4 criteria`),
+      ),
+    ];
+    const seen = new Set(claims.map((entry) => entry.value));
+    const result = verifyAnswerTotals(ANSWER_C, claims, seen);
+    expect(result.unverified).toEqual([]);
+    expect(result.answer).toContain("5,441 parcels meet all four criteria");
+    // The at-least-one number survives because it was computed, and cannot be read apart from the
+    // predicate that produced it. This is the sentence the original defect got wrong.
+    expect(result.answer).toMatch(/381,275 \(rows selected by a predicate containing OR/);
+    // The score breakdown is a summary table, so its Parcels column is gated like any other count.
+    expect(result.cited.map((entry) => entry.value)).toContain(120570);
+  });
+
+  it("checks a count in a Parcels column but not a value in a market_value column", () => {
+    // The header decides. A parcel table is per row evidence printed next to the parcel it belongs
+    // to; a summary table's Parcels column is a population and gets the same treatment as prose.
+    const table = [
+      "| property_id | market_value |",
+      "| --- | ---: |",
+      "| 1760825000R | 357,350 |",
+      "",
+      "| Criteria met | Parcels |",
+      "| ---: | ---: |",
+      "| 4 | 357,350 |",
+    ].join("\n");
+    expect(findPopulationClaims(table)).toHaveLength(1);
+    const result = verifyAnswerTotals(table, [], new Set());
+    expect(result.unverified).toEqual(["357,350"]);
+    // The market_value cell is untouched, so the evidence table still reads.
+    expect(result.answer).toContain("| 1760825000R | 357,350 |");
+  });
 });

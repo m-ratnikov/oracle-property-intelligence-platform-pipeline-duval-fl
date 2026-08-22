@@ -24,6 +24,28 @@ import { REGISTERED_FILE, runQuery } from "@/lib/duckdb";
 import { queryTableParquetUrl } from "@/lib/config";
 
 const PROVENANCE_SET = new Set<string>(["source_system", "source_url", "fetched_at"]);
+
+/**
+ * The provenance column is pinned to the right edge of the scrolling grid.
+ *
+ * It is the last column of a table that is routinely wider than the card holding it. On the
+ * transit and Starbucks cards at 1440px the scrollport was 1316px against a 1512px table, so 94px
+ * of a 290px column was on screen: DUVAL_APPRAISER (110px) and OVERTURE_PLACES (111px) were sliced
+ * by the container edge and FDOR_PAR (66px), the shortest badge, was the only system that rendered
+ * whole. A reader saw one system and had to discover a horizontal scroll to learn there were three.
+ * Pinning costs no width anywhere else and is inert when the table already fits.
+ *
+ * The background has to be opaque or the columns scroll through it, and it is a class rather than
+ * an inline style so `table.grid tbody tr:hover td` still wins and the pinned cell highlights with
+ * the rest of its row. The header keeps the z-index globals.css gives every `thead th`, which is
+ * above this, so it stays on top when the grid is scrolled in both directions at once.
+ *
+ * From `md` up only. A 290px column pinned inside a 322px phone scrollport would leave 32px for the
+ * data it is meant to explain, and the partial-column illusion this fixes does not arise there: at
+ * that width the column is not on screen at all until the reader scrolls to the end of the table,
+ * and at the end of the table it is already whole.
+ */
+const STICKY_PROVENANCE = "md:sticky md:right-0 md:border-l md:border-border";
 const FAMILY_KEYS = SOURCE_FAMILIES.map((family) => family.key);
 const LINK_COLUMNS = new Set(["property_id"]);
 const NUMERIC_HINTS = /(_m|_value|_price|_year|_count|_area|_sqft|_acre|latitude|longitude|rows|delta)$/;
@@ -141,7 +163,7 @@ function loadColumnProvenance(): Promise<ColumnProvenanceMap | null> {
   return provenanceLoad;
 }
 
-function useColumnProvenance(enabled: boolean): ColumnProvenanceMap | null {
+export function useColumnProvenance(enabled: boolean): ColumnProvenanceMap | null {
   const [map, setMap] = useState<ColumnProvenanceMap | null>(provenanceMap);
   useEffect(() => {
     if (!enabled || map !== null) return;
@@ -234,8 +256,13 @@ function SourceLine({
  * was wrong for most of the values beside it. Every contributing system is now named, resolved per
  * displayed column through the map the artifact publishes, and each carries its own fetch time
  * rather than borrowing the roll's.
+ *
+ * Exported because the Agent page renders the same cell over its evidence rows. Three surfaces
+ * showing provenance must show the SAME provenance, and a second implementation is a second thing
+ * to keep in step: the Agent page was the copy that never got the fix and went on crediting the
+ * county property appraiser for Overture and JTA GTFS values.
  */
-function ProvenanceCell({
+export function ProvenanceCell({
   row,
   columns,
   map,
@@ -342,7 +369,7 @@ export function DataTable({
                   {column}
                 </th>
               ))}
-              {hasProvenance ? <th>provenance</th> : null}
+              {hasProvenance ? <th className={STICKY_PROVENANCE}>provenance</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -357,7 +384,7 @@ export function DataTable({
                   </td>
                 ))}
                 {hasProvenance ? (
-                  <td>
+                  <td className={`${STICKY_PROVENANCE} md:z-[1] md:bg-surface`}>
                     <ProvenanceCell row={row} columns={displayColumns} map={provenance} />
                   </td>
                 ) : null}

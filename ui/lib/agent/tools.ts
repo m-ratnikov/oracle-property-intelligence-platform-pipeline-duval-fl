@@ -248,15 +248,28 @@ function noteDataCaveats(trace: ToolTrace, rows: Row[]) {
       `${noSaleOnRecord} of ${rows.length} returned rows have has_sale_on_record = false (tenure_basis NO_SALE_ON_RECORD). No source records any transfer for those parcels, so their tenure columns are NULL for that reason and not because the property was held a long time.`,
     );
   }
-  const placeholderTenure = rows.filter(
-    (row) =>
-      typeof row.years_since_last_sale === "number" &&
-      row.years_since_last_sale > THRESHOLDS.tenure_plausible_max_years,
-  ).length;
-  if (placeholderTenure > 0) {
+  // Read from the published judgement rather than from a cut on years_since_last_sale. An age cut
+  // was what let 1925 and 1926 plat dates through at exactly 100.0 years, and it moved with the
+  // as-of date; tenure_quality is fixed in the data. The date fallback covers an artifact published
+  // before the column existed, and it uses the same 1901 boundary the column is built on rather
+  // than reintroducing a duration threshold.
+  const implausibleTenure = rows.filter((row) => {
+    const quality = row.tenure_quality;
+    if (typeof quality === "string") return quality === "IMPLAUSIBLE_DATE";
+    const sale = row.last_sale_date_any;
+    return typeof sale === "string" && sale.slice(0, 4) < "1901";
+  }).length;
+  if (implausibleTenure > 0) {
     addAssumption(
       trace,
-      `${placeholderTenure} of ${rows.length} returned rows report a tenure longer than ${THRESHOLDS.tenure_plausible_max_years} years. Those are placeholder dates in the City recorded sales file (1899 and 1800 arrive as 127 and 226), not century long holds. They satisfy the rule and stay in the count, but do not present one as an example.`,
+      `${implausibleTenure} of ${rows.length} returned rows carry tenure_quality = 'IMPLAUSIBLE_DATE': the recorded sale predates 1901 and is filler in the City recorded sales file, not a transfer (1899 and 1800 arrive as 127 and 226 year holds). They satisfy the rule and stay in the count, but do not present one as an example.`,
+    );
+  }
+  const contradictedTenure = rows.filter((row) => row.tenure_date_check === "CONTRADICTED").length;
+  if (contradictedTenure > 0) {
+    addAssumption(
+      trace,
+      `${contradictedTenure} of ${rows.length} returned rows carry tenure_date_check = 'CONTRADICTED': the recorded sale year precedes the parcel's own built_year, so it cannot be a transfer of the building now standing. Report the tenure as unconfirmed rather than as a long hold.`,
     );
   }
 }

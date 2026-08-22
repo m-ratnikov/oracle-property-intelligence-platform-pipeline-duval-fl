@@ -28,35 +28,111 @@ export const WATER_VIEW_DIST_M = 150;
 export const WATER_BBOX_DIST_M = 30;
 
 /**
- * Above this many years a tenure is not evidence a reader can act on.
+ * The first date Duval's recorded index actually covers.
  *
- * The City of Jacksonville recorded sales file carries dates that predate the digital record, and
- * they arrive here as centuries long tenures: 1899-12-30 as 126 years, 1899-01-01 as 127, and
- * 1800-01-01 as 226. They still satisfy "no ownership change in 10 years" - a parcel with such a
- * date has not changed hands recently either - so the rule keeps counting them, but they are
- * ordered last and labelled, because a 226 year hold read as the first evidence on screen makes a
- * correct answer look fabricated.
- *
- * The cut is deliberately blunt rather than a sentinel list. Measured on the published artifact,
- * the 153,240 matching parcels hold 1,508 tenures over 100 years: the great majority are the 1899
- * and 1800 dates above, and the rest are scattered genuine looking deeds from 1901 to 1925. A
- * sentinel list would pass those through as findings; an age cut does not, and neither kind is
- * something a reader should act on. Below the line the oldest surviving tenures are exactly 100
- * years - 1925 and 1926 conveyances of municipal land, a railway right of way and a cemetery -
- * which are plausible enough to lead the result set.
+ * Measured, not chosen: the decade before it holds fifty times the parcels of the decade after,
+ * on two repeated values. That is filler in the City recorded sales file, not deed dates.
  */
-export const TENURE_PLAUSIBLE_MAX_YEARS = 100;
+export const TENURE_RECORD_STARTS = "1901-01-01";
 
 /**
- * The one derived column the tenure questions add: says whether the sale date behind
- * years_since_last_sale is a real recorded transfer or a placeholder.
+ * The four values of tenure_quality. VARCHAR, never null.
+ *
+ * This is a contract shared with the pipeline, which publishes the same column on the artifact so
+ * that an MCP client sees the same demotion the screen does. The values and the rules behind them
+ * are the pipeline's; this file implements them identically for the artifact that does not carry
+ * the column yet, and must be changed with it, never on its own.
  */
-const TENURE_QUALITY = `CASE
-    WHEN years_since_last_sale > ${TENURE_PLAUSIBLE_MAX_YEARS} THEN 'placeholder_date'
-    ELSE 'recorded_transfer' END AS tenure_quality`;
+export const TENURE_QUALITY_VALUES = [
+  "PLAUSIBLE",
+  "IMPLAUSIBLE_DATE",
+  "INSTITUTIONAL_OR_CIVIC",
+  "NO_SALE_ON_RECORD",
+] as const;
 
-/** Plausible tenures first, so a sentinel date is never the first evidence on screen. */
-const TENURE_ORDER = `(years_since_last_sale <= ${TENURE_PLAUSIBLE_MAX_YEARS}) DESC, years_since_last_sale DESC`;
+export type TenureQuality = (typeof TENURE_QUALITY_VALUES)[number];
+
+/**
+ * The published contract, computed locally for the artifact that predates it.
+ *
+ * Verified against the published artifact: these branches reproduce the pipeline's own populations
+ * exactly, 388,444 / 11,934 / 2,191 / 1,454, summing to all 404,023 rows, and 143,078 / 8,708 / 0 /
+ * 1,454 inside the ten year rule, summing to its 153,240 matches. So the column partitions the
+ * flagship result set rather than changing what it counts.
+ *
+ * INSTITUTIONAL_OR_CIVIC is the FDOR use code being institutional (70 to 79), governmental (80 to
+ * 89) or miscellaneous (90 to 99). It says the PARCEL is civic or institutional, which the roll
+ * does support, and deliberately says nothing about the instrument: the COJ parcel layer, the
+ * basis for 398,908 of 404,023 rows, publishes a sale as bare numbers with no deed type, no price
+ * and no qualification code. last_sale_qual_cd, which would name a government or charitable
+ * conveyance, exists on 2,924 rows, 0.72 percent. Calling any of these a plat dedication or a tax
+ * deed would be inventing an instrument the data does not carry.
+ *
+ * It is applied regardless of tenure length on purpose, so the label describes the row rather than
+ * the reading date, and cannot drift as the artifact ages.
+ *
+ * TRY_CAST rather than CAST on the use code: a code that is not a number is not evidence a parcel
+ * is civic, and it must not take the statement down with it.
+ */
+const TENURE_QUALITY_COMPUTED = `CASE
+    WHEN has_sale_on_record IS NOT TRUE OR years_since_last_sale IS NULL THEN 'NO_SALE_ON_RECORD'
+    WHEN CAST(last_sale_date_any AS VARCHAR) < '${TENURE_RECORD_STARTS}' THEN 'IMPLAUSIBLE_DATE'
+    WHEN TRY_CAST(property_usage_type AS INTEGER) BETWEEN 70 AND 99 THEN 'INSTITUTIONAL_OR_CIVIC'
+    ELSE 'PLAUSIBLE' END`;
+
+/**
+ * tenure_quality, preferring the published column over the local copy.
+ *
+ * The pipeline is adding this column so the demotion stops existing only on this screen. Until
+ * that republish lands (132 columns, schema version 3) the UI has to work against the 131 column
+ * artifact, so the column is optional in both directions: published, it is read; absent, the same
+ * rule is computed here under the same name, and nothing downstream can tell which one it got.
+ */
+function tenureQualityColumn(schema?: SchemaState): string {
+  return publishes(schema, "tenure_quality")
+    ? "tenure_quality"
+    : `${TENURE_QUALITY_COMPUTED} AS tenure_quality`;
+}
+
+/**
+ * Whether the row's own two dates agree, which is what decides the ORDER inside PLAUSIBLE.
+ *
+ * tenure_quality classifies the parcel, and it does that well, but on its own it does not fix the
+ * reported defect. Measured under the contract alone, the rows that lead the ten year card are
+ * CSX TRANSPORTATION at "125 years" (use code 055, so not civic), TINDAL FLORA B ESTATE at "125
+ * years" on a house built in 1952, two SEABOARD COASTLINE parcels, CITY OF JACKSONVILLE BEACH,
+ * CITY OF NEPTUNE BEACH and F E C RAILWAY CO (use code 048, industrial, so also not civic, and
+ * dated 1925 on a structure built in 1958). Of the 44 PLAUSIBLE tenures over 75 years, 20 are
+ * dated before their own building and 18 have no building date at all; 6 are internally
+ * consistent.
+ *
+ * So this is a second, separate signal, and it is deliberately NOT folded into tenure_quality:
+ * that column belongs to the pipeline and must mean the same thing in both places. This one says
+ * only what the row says about itself, with no threshold anywhere in it:
+ *
+ *   CONFIRMED     the sale year is not earlier than built_year. 127,421 of the 143,078 plausible
+ *                 long holds.
+ *   UNVERIFIABLE  no built_year, so there is nothing to check against. 10,858. Not a finding
+ *                 either way, which is why it sorts between the other two rather than last.
+ *   CONTRADICTED  the sale predates the building it would have conveyed. 4,799.
+ *
+ * With this as the second sort key the card leads with use code 001 estates dated 1930, 1936 and
+ * 1946, no row above 100 years and two above 80, and every row on screen supports the label it
+ * carries.
+ */
+const TENURE_DATE_CHECK = `CASE
+    WHEN built_year IS NULL OR last_sale_date_any IS NULL THEN 'UNVERIFIABLE'
+    WHEN TRY_CAST(substr(CAST(last_sale_date_any AS VARCHAR), 1, 4) AS INTEGER) < built_year THEN 'CONTRADICTED'
+    ELSE 'CONFIRMED' END AS tenure_date_check`;
+
+/**
+ * Tenures a reader can act on first, and inside those the ones the row itself corroborates.
+ *
+ * Ordering by the two labels rather than by age means the first screen answers the question that
+ * was asked, and nothing is dropped: the civic parcels and the placeholder dates are still counted
+ * and still reachable, they just stop being the first evidence a reader sees.
+ */
+const TENURE_ORDER = `(tenure_quality = 'PLAUSIBLE') DESC, (tenure_date_check = 'CONFIRMED') DESC, (tenure_quality = 'INSTITUTIONAL_OR_CIVIC') DESC, years_since_last_sale DESC`;
 
 /**
  * The three canonical Elephant provenance columns, carried inline on every preset row.
@@ -112,7 +188,16 @@ export interface QuestionPreset {
   evidence: string[];
   /** Combined presets are listed separately on the questions page. */
   combined?: boolean;
-  sql: (limit?: number) => string;
+  /**
+   * The row query.
+   *
+   * `schema` is optional and only ever an optimisation of honesty: a caller that has already
+   * described the artifact lets a preset read a column the artifact publishes instead of
+   * recomputing it. Every caller that passes nothing still gets a statement that runs against the
+   * artifact as published today, which is why the parameter could be added without touching one
+   * call site.
+   */
+  sql: (limit?: number, schema?: SchemaState) => string;
 }
 
 function limitOf(limit: number | undefined): number {
@@ -203,11 +288,20 @@ LIMIT ${limitOf(limit)}`,
     label: "No ownership change in 10+ years",
     question: "Which properties have not exchanged ownership in more than 10 years?",
     rule: `Keep a parcel where years_since_last_sale is ${OWNERSHIP_HOLD_YEARS} or more. years_since_last_sale is measured from last_sale_date_any, the later of the two sale dates the pipeline has for a folio: the FDOR roll and SDF sale, and the City of Jacksonville recorded sales file. tenure_basis names which column it came from (FDOR_SALE, COJ_SALESL, or NO_SALE_ON_RECORD when neither has one) and tenure_source names the system. The roll's own last_sale_date column is deliberately NOT the basis and is not shown here: the roll and SDF cover only the two most recent transfers, so that column is NULL on 87 percent of parcels and would read "not available" on almost every row of a rule it does not drive.`,
-    requires: ["years_since_last_sale", "last_sale_date_any", "tenure_basis", "has_sale_on_record"],
+    requires: [
+      "years_since_last_sale",
+      "last_sale_date_any",
+      "tenure_basis",
+      "has_sale_on_record",
+      "property_usage_type",
+      "built_year",
+    ],
     assumptions: [
       "Parcels with no transfer on record are excluded, not counted as long held. has_sale_on_record is false for them, tenure_basis reads NO_SALE_ON_RECORD, and years_since_last_sale is NULL for that reason rather than because the property was held a long time. No transfer on record and a long hold are different findings and this rule reports only the second.",
-      `The recorded sales file carries dates for transfers that predate the digital record, and they arrive as tenures of a century or more: last_sale_date_any of 1899-12-30, 1899-01-01 and 1800-01-01 read as 126, 127 and 226 years. They still satisfy the rule, so they stay in the count, but they sort last and tenure_quality marks them placeholder_date. The cut is blunt on purpose: every tenure over ${TENURE_PLAUSIBLE_MAX_YEARS} years is labelled and demoted, whether it is an obvious 1899 sentinel or a genuine looking 1921 deed, because neither is a tenure a reader can act on.`,
-      "Non arms length transfers (quit claims, deeds between related parties) still count as an ownership change if the county recorded them.",
+      `tenure_quality labels every row and none of them is dropped from the count. IMPLAUSIBLE_DATE means the sale date is before ${TENURE_RECORD_STARTS}, where the recorded index begins: 1,454 parcels, of which 1,451 carry one of two repeated values, 1899-12-30 and 1899-01-01. That is filler in the City recorded sales file, and the threshold is measured rather than chosen, because the decade before it holds fifty times the parcels of the decade after. INSTITUTIONAL_OR_CIVIC means the FDOR use code is institutional, governmental or miscellaneous (70 to 99): 11,934 parcels, 8,708 of them inside this rule. It says the PARCEL is civic, not that the transfer was a plat or a dedication; the roll carries no deed type or qualification code for 98.7 percent of rows, so the instrument is not something this dataset knows.`,
+      "A second column, tenure_date_check, compares the row's own two dates and decides the order inside each label. CONTRADICTED means the sale year is earlier than built_year, so it cannot be a transfer of the building now standing: 4,799 rows here, including the 1901 dates on houses built in 1943, 1952 and 1956, and the 1925 F E C RAILWAY CO parcel built in 1958. UNVERIFIABLE means no built_year to check against, 10,858 rows. CONFIRMED means the two dates agree, 127,421 rows, and those lead the card.",
+      "Neither label is a completeness claim, and the classification is known to be partial. It is drawn from the use code, so a railway, a utility or a farm parcel with an industrial or agricultural code stays PLAUSIBLE however civic it looks: F E C RAILWAY CO reads 048, CSX TRANSPORTATION reads 055. What keeps those off the top of the card is tenure_date_check, not tenure_quality, and where a parcel has no built_year neither column can settle it. PLAUSIBLE says a tenure can be read as an ownership hold, never that it has been confirmed as one.",
+      "Non arms length transfers (quit claims, deeds between related parties) still count as an ownership change if the county recorded them, and a parcel whose deed was never re-recorded will read as a longer hold than it was.",
     ],
     evidence: [
       "last_sale_date_any",
@@ -215,18 +309,22 @@ LIMIT ${limitOf(limit)}`,
       "tenure_source",
       "years_since_last_sale",
       "tenure_quality",
+      "tenure_date_check",
     ],
-    sql: (limit) => `SELECT
+    sql: (limit, schema) => `SELECT
   property_id,
   parcel_identifier,
   address_street,
   address_city,
   owner_name,
+  property_usage_type,
+  built_year,
   last_sale_date_any,
   tenure_basis,
   tenure_source,
   years_since_last_sale,
-  ${TENURE_QUALITY},
+  ${tenureQualityColumn(schema)},
+  ${TENURE_DATE_CHECK},
   ${PROVENANCE}
 FROM ${VIEW_NAME}
 WHERE ${HOLD_PREDICATE}
@@ -326,7 +424,15 @@ LIMIT ${limitOf(limit)}`,
     question:
       "Which properties have roofs older than 15 years and have not exchanged ownership in more than 10 years?",
     rule: `Both rules at once: roof_year_est is ${ROOF_AGE_YEARS} or more years old and years_since_last_sale is ${OWNERSHIP_HOLD_YEARS} or more. roof_age_basis is EFF_YR_BLT_PROXY on every row that carries it, so the roof year here is the appraiser's effective year built standing in for a roof date, never a permit date. The tenure comes from last_sale_date_any, with tenure_basis naming the column it came from. This is the first agent prompt in the demo transcript.`,
-    requires: ["roof_year_est", "roof_age_basis", "years_since_last_sale", "last_sale_date_any", "tenure_basis"],
+    requires: [
+      "roof_year_est",
+      "roof_age_basis",
+      "years_since_last_sale",
+      "last_sale_date_any",
+      "tenure_basis",
+      "property_usage_type",
+      "built_year",
+    ],
     measures: [
       {
         key: "permit_basis",
@@ -336,7 +442,7 @@ LIMIT ${limitOf(limit)}`,
       },
     ],
     assumptions: [
-      "Inherits every assumption of the two rules it combines: the roof basis is a year built proxy and not a roof date, and a placeholder sale date can inflate the tenure.",
+      "Inherits every assumption of the two rules it combines: the roof basis is a year built proxy and not a roof date, and a sale date that predates the building or the recorded index can inflate the tenure. tenure_quality carries the same four values here and orders the rows the same way, so a parcel that leads this card is one where both halves of the claim are readable.",
       "Requires both signals to be present, so parcels with no roof year, or with no transfer on record, drop out entirely rather than being counted either way.",
     ],
     evidence: [
@@ -347,11 +453,12 @@ LIMIT ${limitOf(limit)}`,
       "tenure_basis",
     ],
     combined: true,
-    sql: (limit) => `SELECT
+    sql: (limit, schema) => `SELECT
   property_id,
   parcel_identifier,
   address_street,
   address_city,
+  property_usage_type,
   built_year,
   roof_year_est,
   ${CURRENT_YEAR} - roof_year_est AS roof_age_years,
@@ -360,7 +467,8 @@ LIMIT ${limitOf(limit)}`,
   tenure_basis,
   tenure_source,
   years_since_last_sale,
-  ${TENURE_QUALITY},
+  ${tenureQualityColumn(schema)},
+  ${TENURE_DATE_CHECK},
   owner_name,
   ${PROVENANCE}
 FROM ${VIEW_NAME}
@@ -473,6 +581,18 @@ export function loadedSchema(columns: Iterable<string>): SchemaState {
 }
 
 /**
+ * Whether the artifact is KNOWN to publish a column.
+ *
+ * Undefined and still loading both answer false, which is the safe direction for an optional
+ * column: the caller computes the value locally instead of selecting one that may not be there.
+ * A statement that names a missing column does not degrade, it fails to bind.
+ */
+export function publishes(schema: SchemaState | undefined, column: string): boolean {
+  if (!schema || schema.status !== "loaded") return false;
+  return schema.columns.some((name) => name.toLowerCase() === column.toLowerCase());
+}
+
+/**
  * Whether a card can answer, cannot answer, or does not yet know - one value, so a caller cannot
  * render the "cannot answer" branch without having proved the schema was loaded first.
  */
@@ -569,25 +689,188 @@ const IO_FUNCTION_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /(^|[^a-z0-9_])(load_aws_credentials|which_secret|duckdb_secrets)\s*\(/, label: "credential helpers" },
   // process and environment access
   { pattern: /(^|[^a-z0-9_])(getenv|shell|system)\s*\(/, label: "process and environment access" },
+  /*
+   * query() runs SQL built from a string and query_table() opens a name that the replacement scan
+   * resolves, so both read a file while naming no reader: `FROM query('SELECT * FROM ''/etc/passwd''')`
+   * was measured returning rows. The position rule below already refuses both, because their
+   * argument sits inside a FROM clause. This pattern is the belt to that rule's braces, kept
+   * because these two are demonstrated rather than imagined.
+   */
+  { pattern: /(^|[^a-z0-9_])query(_table)?\s*\(/, label: "query() and query_table()" },
 ];
 
 /**
- * A bare string literal where a table name belongs. This is a file read with no reader named.
+ * A string constant where a table name belongs. This is a file read with no reader named.
  *
- * DuckDB's replacement scan turns `FROM '<anything>'` into an implicit read of that path or URL, so
- * `SELECT * FROM '/etc/passwd'` and `SELECT * FROM 'https://evil.example.com/x.parquet'` are the
- * same attack as `read_parquet(...)` with the function elided. Both walked through every rule above
- * until this one existed, which is why the comment on the scheme list below no longer claims that
- * refusing readers refuses remote fetches.
+ * DuckDB's replacement scan turns `FROM <string>` into an implicit read of that path or URL:
+ * `FROM '/etc/passwd'` IS `read_parquet('/etc/passwd')` with the function elided. Every rule above
+ * looks for a function call, so none of them sees it.
  *
- * Matched against the masked form, where every string literal has been emptied, so only the
- * POSITION of the literal matters and nothing inside it can dodge the rule.
+ * The first version of this rule was a regex over the raw text, `(from|join)\s*\(?\s*'`, and it
+ * closed the two forms that had been reported. A reviewer then produced four more that it allowed,
+ * and measuring against a real engine (tests/sql-guard-literals.test.ts) turned up four more again
+ * that nobody had reported, including `DESCRIBE '/etc/passwd'`, which needs no FROM at all. The
+ * lesson is that the SPELLING of the string and the KEYWORD in front of it are not the variable
+ * worth tracking, and a rule that chases them is always one form behind.
  *
- * Known and accepted false positive: `EXTRACT(YEAR FROM '1899-01-01')` puts a literal in the same
- * position and is refused. The fix is the better spelling anyway - `EXTRACT(YEAR FROM DATE
+ * What is actually true of every one of those forms is POSITION: a string constant sitting where a
+ * table reference may appear. So the guard reasons about position, in two independent steps, and
+ * neither step knows any attack by name:
+ *
+ *   1. `readSqlForms` recognises a string constant in every spelling DuckDB's scanner accepts and
+ *      masks all of them to one indistinguishable token. After that pass `'/etc/passwd'`,
+ *      `E'/etc/passwd'`, `$$/etc/passwd$$` and `$tag$/etc/passwd$tag$` are the same three
+ *      characters, so a spelling nobody has met yet is a scanner change in ONE place rather than a
+ *      new rule.
+ *   2. `hasStringInTableReference` walks the masked tokens and refuses a masked string that sits
+ *      anywhere a table reference may appear: after any introducer, at any parenthesis depth, in
+ *      any comma separated slot, through any alias or join type.
+ *
+ * It fails closed by construction, and that is the answer to "how do you know this is complete
+ * rather than one form further along". The walk does not enumerate the shapes that ARE reads. It
+ * enumerates the keywords that END a table reference list and treats everything in between as
+ * still being in table position. A form nobody anticipated - a join type added in a later release,
+ * a table function this app has never heard of - is not on the ending list, so it stays inside the
+ * clause and its string argument is refused. Being wrong about a keyword costs a false refusal
+ * with a message that says how to rewrite, never a silent file read.
+ *
+ * The one thing the rule genuinely depends on is that step 1 agrees with DuckDB about where a
+ * string ENDS. That is not taken on trust: the literal spellings are pinned against a live engine
+ * in tests/sql-guard-literals.test.ts, including the case that separates them (`E'a\'b'` is one
+ * literal because a backslash escapes there, `'a\'b'` is not because it does not).
+ *
+ * Known and accepted false positive, unchanged: `EXTRACT(YEAR FROM '1899-01-01')` puts a string in
+ * this position and is refused. The fix is the better spelling anyway - `EXTRACT(YEAR FROM DATE
  * '1899-01-01')`, or a cast - and the refusal message says so, so nobody is left guessing.
  */
-const STRING_IN_TABLE_POSITION = /(^|[^a-z0-9_])(from|join)\s*\(?\s*'/;
+const TABLE_REFERENCE_INTRODUCERS = new Set([
+  "from",
+  "join",
+  // These take a table reference with no FROM in sight, and DESCRIBE, SUMMARIZE and SHOW are all
+  // in ALLOWED_STARTS: `DESCRIBE '/etc/passwd'` returns that file's schema on an unsealed engine.
+  "describe",
+  "summarize",
+  "show",
+  "table",
+  "pivot",
+  "unpivot",
+]);
+
+/**
+ * Keywords that end a table reference list.
+ *
+ * This list is the whole safety argument, so it is the one to be generous with: anything NOT here
+ * leaves the walk inside the clause, which refuses. Under-listing costs a false refusal that the
+ * reader can see and rewrite. Over-listing would open a hole, so nothing goes in that cannot
+ * appear where a table reference has genuinely finished.
+ */
+const TABLE_REFERENCE_ENDS = new Set([
+  "select",
+  "with",
+  "where",
+  "group",
+  "having",
+  "qualify",
+  "window",
+  "order",
+  "limit",
+  "offset",
+  "union",
+  "except",
+  "intersect",
+  "on",
+  "using",
+  "values",
+  "returning",
+  "fetch",
+  "into",
+  "tablesample",
+  "prepare",
+  "execute",
+  "explain",
+  "pragma",
+  "call",
+  "set",
+]);
+
+/** Masked tokens the walk cares about: a masked string, a word, or one of `( ) ,`. */
+const MASKED_TOKEN = /''|[a-z_][a-z0-9_]*|[(),]/g;
+
+/**
+ * Whether a string constant sits anywhere a table reference may appear.
+ *
+ * Reads the masked form only, so what is INSIDE a string can never reach this decision and a
+ * keyword that is only ever data cannot be mistaken for code.
+ */
+function hasStringInTableReference(masked: string): boolean {
+  // One flag per parenthesis level: whether that level is currently in table position.
+  const inTableReference: boolean[] = [false];
+  MASKED_TOKEN.lastIndex = 0;
+  let previousWord = "";
+  let previousToken = "";
+
+  let match: RegExpExecArray | null;
+  while ((match = MASKED_TOKEN.exec(masked)) !== null) {
+    const token = match[0];
+    const depth = inTableReference.length - 1;
+
+    if (token === "''") {
+      /*
+       * A string that IS a table reference is always preceded by the introducer, a comma or an
+       * open parenthesis. A string preceded by a bare WORD is a typed literal or an operand -
+       * `DATE '1899-01-01'` - and never reaches the replacement scan. That is measured, not
+       * assumed: every `FROM <word> '<path>'` shape is a parser error on a live engine while the
+       * bare form reads the file, which tests/sql-guard-literals.test.ts pins.
+       *
+       * Without this the guard refused `EXTRACT(YEAR FROM DATE '1899-01-01')`, which is the exact
+       * rewrite its own refusal message tells the reader to use.
+       */
+      const couldBeTableReference =
+        previousToken === "," || previousToken === "(" || TABLE_REFERENCE_INTRODUCERS.has(previousToken);
+      if (inTableReference[depth] && couldBeTableReference) return true;
+      previousToken = token;
+      continue;
+    }
+    if (token === "(") {
+      /*
+       * A parenthesis opened in table position is either a subquery or a parenthesised table
+       * reference, and only the subquery leaves table position - which its own SELECT, WITH or
+       * VALUES announces on the very next token. So the level INHERITS, and `(('/etc/passwd'))`
+       * is still a read at any depth, while `FROM (SELECT ... WHERE x LIKE '%a%')` is not.
+       */
+      inTableReference.push(inTableReference[depth]);
+      previousToken = token;
+      continue;
+    }
+    if (token === ")") {
+      if (inTableReference.length > 1) inTableReference.pop();
+      previousToken = token;
+      continue;
+    }
+    // A comma is the next slot in the same list, which is what `FROM properties, '/etc/passwd'`
+    // relies on, so it changes nothing.
+    if (token === ",") {
+      previousToken = token;
+      continue;
+    }
+
+    /*
+     * `IS DISTINCT FROM 'x'` is a comparison operator that happens to be spelled with FROM, and
+     * treating its FROM as an introducer refused `WHERE property_type IS DISTINCT FROM
+     * 'RESIDENTIAL'`, which is an ordinary query over this dataset. Suppressing the introducer is
+     * safe in a way that adding DISTINCT to the ENDS list would not be: it only stops this FROM
+     * SETTING the flag and can never clear one, so a literal already inside a table reference is
+     * still refused.
+     */
+    const isComparisonFrom = token === "from" && previousWord === "distinct";
+    if (!isComparisonFrom && TABLE_REFERENCE_INTRODUCERS.has(token)) inTableReference[depth] = true;
+    else if (TABLE_REFERENCE_ENDS.has(token)) inTableReference[depth] = false;
+    previousWord = token;
+    previousToken = token;
+  }
+
+  return false;
+}
 
 /**
  * URL schemes that only ever appear in an attempt to make the engine fetch something.
@@ -629,18 +912,60 @@ interface SqlForms {
   /** `code`, case folded, identifier quotes removed so `"read_text"(` cannot hide behind them. */
   folded: string;
   /**
-   * `folded` with every string literal emptied to `''`. Structural rules read this one, so a
-   * keyword or a semicolon that is only ever DATA - `WHERE owner_name LIKE '%COPY%'`,
-   * `WHERE legal_description LIKE '%LOT 3; BLK 2%'` - cannot be mistaken for code.
+   * `folded` with every string constant emptied to `''`, in EVERY spelling. Structural rules read
+   * this one, so a keyword or a semicolon that is only ever DATA - `WHERE owner_name LIKE
+   * '%COPY%'`, `WHERE legal_description LIKE '%LOT 3; BLK 2%'` - cannot be mistaken for code, and
+   * a string cannot dodge a rule by changing how it is quoted.
    */
   masked: string;
 }
 
+/**
+ * Opens a dollar quote. The tag is required to be an identifier so `$1` stays a bind parameter,
+ * which is what DuckDB does with it, rather than being read as an unterminated quote.
+ */
+const DOLLAR_QUOTE_OPEN = /^\$([A-Za-z_][A-Za-z0-9_]*)?\$/;
+
+/** A name that needs no quotes. Anything else, in table position, is naming something else. */
+const PLAIN_IDENTIFIER = /^[a-z0-9_]+$/;
+
+/** True where an `E` may begin an escape string rather than end an identifier such as `LIKE`. */
+function atTokenBoundary(sql: string, index: number): boolean {
+  if (index === 0) return true;
+  return !/[A-Za-z0-9_"]/.test(sql[index - 1]);
+}
+
+/**
+ * The one place that decides where a comment, a string constant or a quoted name starts and ends.
+ *
+ * Every spelling here was verified against a live DuckDB in tests/sql-guard-literals.test.ts, not
+ * recalled from the documentation, because the guard is only as closed as this function's
+ * agreement with the engine's own scanner:
+ *
+ *   '...'          doubled `''` is the only escape; a backslash is data
+ *   E'...'         backslash escapes AS WELL AS `''`, so `E'a\'b'` is ONE literal
+ *   $$...$$        no escape at all
+ *   $tag$...$tag$  tag is an identifier
+ *   "..."          a name, but the replacement scan reads it too: `FROM "/etc/passwd"` is a file
+ *
+ * B'...', X'...', R'...' and U&'...' are deliberately absent: each one is a parse error or an
+ * unimplemented path in table position, so DuckDB will not read a file through them.
+ *
+ * Adjacent string constants concatenate (`'a' 'b'`) and need no rule of their own: each masks to
+ * the same token, and in table position the first one already decides.
+ */
 function readSqlForms(sql: string): SqlForms {
   let code = "";
   let folded = "";
   let masked = "";
   let i = 0;
+
+  /** Keep the caller's text byte for byte, fold it for the reader rules, hide it from the walk. */
+  const pushConstant = (raw: string) => {
+    code += raw;
+    folded += raw.toLowerCase();
+    masked += "''";
+  };
 
   while (i < sql.length) {
     const char = sql[i];
@@ -655,19 +980,56 @@ function readSqlForms(sql: string): SqlForms {
     }
 
     if (char === "/" && next === "*") {
-      i += 2;
-      while (i < sql.length && !(sql[i] === "*" && sql[i + 1] === "/")) i += 1;
-      i += 2;
+      /*
+       * DuckDB NESTS block comments: `/* a /* b *\/ c *\/` is one comment to the engine. A scanner
+       * that stopped at the first close would hand the engine text it had already treated as code,
+       * which is the same class of defect as mis-stripping `LIKE '%--%'`: the statement that runs
+       * stops being the statement that was checked.
+       */
+      let depth = 0;
+      while (i < sql.length) {
+        if (sql[i] === "/" && sql[i + 1] === "*") {
+          depth += 1;
+          i += 2;
+          continue;
+        }
+        if (sql[i] === "*" && sql[i + 1] === "/") {
+          depth -= 1;
+          i += 2;
+          if (depth === 0) break;
+          continue;
+        }
+        i += 1;
+      }
       code += " ";
       folded += " ";
       masked += " ";
       continue;
     }
 
-    if (char === "'") {
+    const dollarQuote = char === "$" ? DOLLAR_QUOTE_OPEN.exec(sql.slice(i)) : null;
+    if (dollarQuote) {
+      const tag = dollarQuote[0];
+      const close = sql.indexOf(tag, i + tag.length);
+      // An unterminated quote runs to the end, the way the engine reads it, so nothing past it is
+      // read back as code by a guard the engine would disagree with.
+      const stop = close === -1 ? sql.length : close + tag.length;
+      pushConstant(sql.slice(i, stop));
+      i = stop;
+      continue;
+    }
+
+    const escapeString = (char === "e" || char === "E") && next === "'" && atTokenBoundary(sql, i);
+    if (escapeString || char === "'") {
       const start = i;
-      i += 1;
+      i += escapeString ? 2 : 1;
       while (i < sql.length) {
+        // Backslash escapes a quote in E'...' and ONLY there. Getting this backwards desyncs the
+        // guard from the engine, which is exactly how a string smuggles code out of itself.
+        if (escapeString && sql[i] === "\\") {
+          i += 2;
+          continue;
+        }
         if (sql[i] === "'" && sql[i + 1] === "'") {
           i += 2;
           continue;
@@ -678,10 +1040,7 @@ function readSqlForms(sql: string): SqlForms {
         }
         i += 1;
       }
-      const literal = sql.slice(start, i);
-      code += literal;
-      folded += literal.toLowerCase();
-      masked += "''";
+      pushConstant(sql.slice(start, i));
       continue;
     }
 
@@ -702,8 +1061,16 @@ function readSqlForms(sql: string): SqlForms {
       const quoted = sql.slice(start, i);
       const inner = quoted.replace(/"/g, "").toLowerCase();
       code += quoted;
+      // Unquoted, so `"read_text"(` cannot hide a reader behind the quotes.
       folded += inner;
-      masked += inner;
+      /*
+       * The replacement scan reads a double quoted name too: `FROM "/etc/passwd"` returns the file
+       * on an unsealed engine, which no reported bypass mentioned. A name that needs the quotes
+       * only because it holds a path separator, a dot, a colon or a space is not naming a table in
+       * a session whose catalog holds one view, so it masks as a constant and the position walk
+       * judges it. `"properties"` is a plain identifier and stays one.
+       */
+      masked += PLAIN_IDENTIFIER.test(inner) ? inner : "''";
       continue;
     }
 
@@ -782,10 +1149,10 @@ export function guardSql(raw: string, limit: number = DEFAULT_LIMIT): GuardResul
     }
   }
 
-  if (STRING_IN_TABLE_POSITION.test(masked)) {
+  if (hasStringInTableReference(masked)) {
     return {
       ok: false,
-      reason: `Read only workbench. A quoted string after FROM or JOIN is a file or URL read, not a table: this session may only read the published "${VIEW_NAME}" view. If you meant a date or a cast, name the type first, as in EXTRACT(YEAR FROM DATE '1899-01-01').`,
+      reason: `Read only workbench. A string where a table name belongs is a file or URL read, not a table: DuckDB's replacement scan makes FROM '<path>' the same thing as read_parquet('<path>'), whichever way the string is quoted. This session may only read the published "${VIEW_NAME}" view. If you meant a date or a cast, name the type first, as in EXTRACT(YEAR FROM DATE '1899-01-01'); if you meant a value, put it in a subquery's SELECT list rather than in the FROM clause.`,
     };
   }
 

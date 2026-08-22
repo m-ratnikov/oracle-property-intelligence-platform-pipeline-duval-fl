@@ -9,7 +9,6 @@ import {
   OWNERSHIP_HOLD_YEARS,
   PRESETS,
   ROOF_AGE_YEARS,
-  TENURE_PLAUSIBLE_MAX_YEARS,
   WALK_DISTANCE_M,
   type QuestionPreset,
 } from "@/lib/sql";
@@ -75,11 +74,15 @@ export const COLUMN_MEANINGS: Record<string, string> = {
     "Sale date from the FDOR roll and SDF file ONLY, which cover the two most recent transfers. NULL on 351,742 of 404,023 Duval parcels (87.06 percent). A NULL here is NOT a long hold: use last_sale_date_any and years_since_last_sale, and has_sale_on_record to tell 'no transfer on record' apart. Never cite this as tenure evidence.",
   last_sale_price: "Price of that FDOR roll transfer, USD. Null wherever last_sale_date is null.",
   last_sale_date_any:
-    "DERIVED. The sale date actually used for tenure: the later of last_sale_date and coj_last_sale_date. Populated on 401,832 of 404,023 parcels (99.5 percent). tenure_basis names which column it came from. This is the column to cite for ownership hold questions.",
+    "DERIVED. The sale date actually used for tenure: the later of last_sale_date and coj_last_sale_date. Populated on 401,832 of 404,023 parcels (99.46 percent). tenure_basis names which column it came from. This is the column to cite for ownership hold questions.",
   tenure_basis:
     "DERIVED. Which column last_sale_date_any, years_since_last_sale and no_sale_10y_flag were computed from. FDOR_SALE = last_sale_date; COJ_SALESL = coj_last_sale_date; NO_SALE_ON_RECORD = no transfer in any source, and the three tenure columns are NULL for that reason, NOT because the property was held a long time. NEVER NULL, so do not test it with IS NULL.",
   tenure_source:
     "DERIVED. The source system that published the tenure date named by tenure_basis (coj_parcels or fdor_sdf). NULL when tenure_basis is NO_SALE_ON_RECORD.",
+  tenure_quality:
+    "DERIVED. Whether years_since_last_sale can honestly be read as an ownership hold. FILTER ANY TENURE QUESTION ON THIS COLUMN: tenure_quality = 'PLAUSIBLE' is the honest population, and a row outside it must never be presented as a long hold without saying which value it carries. NEVER NULL. PLAUSIBLE (388,444) = a tenure a reader can act on. IMPLAUSIBLE_DATE (1,454) = last_sale_date_any is before 1901 and is filler in the City recorded-sales file, not a transfer: 1899-12-30 on 842 rows, 1899-01-01 on 609, one 1800-01-01, which render as 126, 127 and 226 year holds. INSTITUTIONAL_OR_CIVIC (11,934) = the FDOR use code puts the parcel in the institutional, governmental or miscellaneous groups, so the date is usually real but it dates a public or institutional holding rather than a household sale. It does NOT claim the transfer was a plat dedication: no deed type is published. NO_SALE_ON_RECORD (2,191) = no source records a transfer.",
+  tenure_date_check:
+    "DERIVED. Whether the row's own two dates corroborate its tenure. NEVER NULL, and carries no threshold: it compares last_sale_date_any against built_year and nothing else. CONFIRMED = the sale is not earlier than the building. CONTRADICTED = the sale year precedes built_year, so the transfer cannot be a sale of the building now standing, which is what separates a 1901 date on a house built in 1952 from a genuine long hold. UNVERIFIABLE = no built_year to check against. Read it beside tenure_quality, never instead of it: tenure_quality comes from the use code, so a railway or utility parcel with an industrial or agricultural code stays PLAUSIBLE however civic it looks, and this column is what tells those apart.",
   has_sale_on_record:
     "DERIVED. False when no source records any transfer for the parcel (2,191 of 404,023). Never NULL. This is the column that separates 'no sale on record' from 'held a long time': years_since_last_sale is NULL exactly when this is false.",
   coj_last_sale_date: "The City of Jacksonville recorded sales date on its own, before the two sources are combined.",
@@ -240,7 +243,6 @@ export const THRESHOLDS = {
   roof_age_years: ROOF_AGE_YEARS,
   ownership_hold_years: OWNERSHIP_HOLD_YEARS,
   walk_distance_m: WALK_DISTANCE_M,
-  tenure_plausible_max_years: TENURE_PLAUSIBLE_MAX_YEARS,
 } as const;
 
 /**
