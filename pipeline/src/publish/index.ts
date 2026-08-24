@@ -6,7 +6,9 @@ import { buildCatalog } from "./catalog.js";
 import { computeFileCid, sameCid } from "./cid.js";
 import {
   createFilebaseClient,
+  deleteObject,
   gatewayUrls,
+  listObjects,
   ipfsUrl,
   ipnsToken,
   missingFilebaseEnv,
@@ -47,7 +49,73 @@ export const OBJECT_KEYS = {
   tables: (name: string) => `tables/${COUNTY.key}/${name}`,
   catalog: "catalog/published-counties.json",
   artifactsIndex: `artifacts/${COUNTY.key}/index.json`,
+  /**
+   * The bucket key an artifact is stored under when a client may hold its CID across publishes.
+   *
+   * On Filebase a CID is served for exactly as long as some object in some bucket has that
+   * content. Writing publish N+1 to the SAME key as publish N replaces that object, which unpins
+   * publish N's CID, and the gateway starts answering 504 for it within minutes. That is what took
+   * the hosted UI and the MCP down on 2026-08-25: both were bound to the immutable
+   * `/ipfs/<cid>` URLs of the 2026-08-22 query table (bound by design, see McpBinding), the cron
+   * had published eleven times since, and the first overwrite had already dropped the object
+   * they were reading.
+   *
+   * Keying the object by its own CID means no publish can overwrite another's, so a CID a client
+   * holds keeps resolving until retention (below) removes it, and retention never removes what
+   * the current publish references. The IPNS names are the moving pointers; the keys are not.
+   */
+  versioned: (key: string, cidV1: string) => `${VERSIONED_PREFIX}${cidV1}/${key}`,
 } as const;
+
+export const VERSIONED_PREFIX = "versions/";
+
+/**
+ * How long a superseded query table (and its coverage snapshot) stays served after a newer one is
+ * published. The MCP deployment is re-pointed at the new CID by the same workflow within minutes
+ * of the publish (see vercelEnv.ts), so the window only has to cover that step failing and a human
+ * noticing; three days is twelve scheduled publishes of slack at about 50 MB each.
+ */
+export const DEFAULT_RETENTION_DAYS = 3;
+
+/** Objects a client may address by CID across publishes, and which therefore get versioned keys. */
+const CID_PINNED_ARTIFACTS = new Set(["query-table.parquet", "dataset-coverage.json", "run-history.json"]);
+
+export interface RetentionReport {
+  retentionDays: number;
+  /** Versioned keys this publish wrote or re-wrote; never eligible for pruning in the same publish. */
+  current: string[];
+  /** Versioned keys removed because they were older than the window and not current. */
+  pruned: string[];
+  /** Versioned keys older than the window that could not be removed (reported, never fatal). */
+  failed: { key: string; reason: string }[];
+  /** Null when the prune ran; otherwise why it did not (dry run, listing failed). */
+  skipped: string | null;
+}
+
+/**
+ * Which versioned objects to delete: older than the window AND not written by this publish.
+ * Pure, so the rule is testable without a bucket. `keep` wins over age unconditionally: a key this
+ * publish just wrote is what the catalog, the MCP env and the artifacts index all point at.
+ */
+export function selectExpiredVersions(
+  objects: { key: string; lastModified: Date | null }[],
+  keep: Set<string>,
+  now: Date,
+  retentionDays: number,
+): string[] {
+  const cutoff = now.getTime() - retentionDays * 24 * 60 * 60 * 1000;
+  return objects
+    .filter((o) => o.key.startsWith(VERSIONED_PREFIX))
+    .filter((o) => !keep.has(o.key))
+    .filter((o) => o.lastModified !== null && o.lastModified.getTime() < cutoff)
+    .map((o) => o.key);
+}
+
+export function readRetentionDays(env: NodeJS.ProcessEnv): number {
+  const raw = env.PUBLISH_RETENTION_DAYS?.trim();
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_RETENTION_DAYS;
+}
 
 export interface PublishObject {
   name: string;
@@ -134,6 +202,8 @@ export interface PublishManifest {
   ok: boolean;
   /** What happened to the already-published run history on this publish (see publish/runHistory.ts). */
   runHistory: MergeResult;
+  /** Which superseded versioned objects were removed, and which this publish protects. */
+  retention: RetentionReport;
   /**
    * The run inside the published history that produced the query table this publish uploaded, and
    * the CID that proves it is the same file. Asserted before the first upload, so a manifest that
@@ -152,7 +222,8 @@ const JSON_CT = "application/json";
 
 async function describe(name: string, localPath: string, key: string, contentType: string, ipnsLabel: string | null): Promise<PublishObject> {
   const c = await computeFileCid(localPath);
-  return { name, localPath, key, contentType, bytes: c.bytes, sha256: c.sha256, cid: c.cid, cidV1: c.cidV1, ipnsLabel };
+  const storedKey = CID_PINNED_ARTIFACTS.has(name) ? OBJECT_KEYS.versioned(key, c.cidV1) : key;
+  return { name, localPath, key: storedKey, contentType, bytes: c.bytes, sha256: c.sha256, cid: c.cid, cidV1: c.cidV1, ipnsLabel };
 }
 
 /** Everything under DATA_DIR/artifacts/publish/duval that is eligible for IPFS (no PII beyond the public roll). */
@@ -207,6 +278,8 @@ export async function executePublish(opts: {
   clientFactory?: (fb: FilebaseEnv) => ReturnType<typeof createFilebaseClient>;
   /** Test seam / operator knob for the eventually-consistent IPNS readback. */
   ipnsReadback?: IpnsReadbackOptions;
+  /** Test seam: the clock retention measures object age against. */
+  now?: Date;
 }): Promise<PublishManifest> {
   const log = opts.logger.child({ stage: "publish" });
   const fb: FilebaseEnv | null = readFilebaseEnv(opts.env);
@@ -360,6 +433,18 @@ export async function executePublish(opts: {
     gatewayUrl: indexPublished.ipns?.gatewayUrl ?? null,
   };
 
+  // 5. retention. Only now, with every object of this publish in the bucket and every name pointed:
+  //    drop versioned objects older than the window that nothing current references. Best effort;
+  //    a prune that fails leaves extra objects in the bucket, which costs storage and nothing else.
+  const retention = await pruneExpiredVersions({
+    client,
+    bucket: fb?.bucket ?? null,
+    current: results.filter((r) => r.key.startsWith(VERSIONED_PREFIX)).map((r) => r.key),
+    retentionDays: readRetentionDays(opts.env),
+    now: opts.now ?? new Date(),
+    log,
+  });
+
   const openDataResultPath = join(opts.paths.publishDir, "open-data", "publish-result.json");
   let openDataIpns = `<k51 of oracle-open-data-${COUNTY.key}; run publish:open-data -- --publish>`;
   if (existsSync(openDataResultPath)) {
@@ -448,6 +533,7 @@ export async function executePublish(opts: {
     ipnsFailures,
     ok,
     runHistory,
+    retention,
     queryTableProvenance,
   };
   mkdirSync(opts.paths.publishDir, { recursive: true });
@@ -456,6 +542,46 @@ export async function executePublish(opts: {
   writeFileSync(join(opts.paths.publishDir, "mcp-env.txt"), formatMcpEnvFile(manifest));
   log.info("publish_manifest_written", { mode: manifest.mode, objects: results.length, ok, path: join(opts.paths.publishDir, "publish-manifest.json") });
   return manifest;
+}
+
+async function pruneExpiredVersions(opts: {
+  client: Pick<ReturnType<typeof createFilebaseClient>, "send"> | null;
+  bucket: string | null;
+  current: string[];
+  retentionDays: number;
+  now: Date;
+  log: Logger;
+}): Promise<RetentionReport> {
+  const report: RetentionReport = { retentionDays: opts.retentionDays, current: opts.current, pruned: [], failed: [], skipped: null };
+  if (opts.client === null || opts.bucket === null) {
+    report.skipped = "dry run";
+    return report;
+  }
+  let stored: { key: string; lastModified: Date | null }[];
+  try {
+    stored = await listObjects(opts.client, opts.bucket, VERSIONED_PREFIX);
+  } catch (err) {
+    report.skipped = `listing failed: ${err instanceof Error ? err.message : String(err)}`;
+    opts.log.warn("retention_list_failed", { reason: report.skipped });
+    return report;
+  }
+  const expired = selectExpiredVersions(stored, new Set(opts.current), opts.now, opts.retentionDays);
+  for (const key of expired) {
+    try {
+      await deleteObject(opts.client, opts.bucket, key);
+      report.pruned.push(key);
+    } catch (err) {
+      report.failed.push({ key, reason: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  opts.log.info("retention_applied", {
+    retentionDays: opts.retentionDays,
+    stored: stored.length,
+    current: opts.current.length,
+    pruned: report.pruned.length,
+    failed: report.failed.length,
+  });
+  return report;
 }
 
 /**
@@ -468,9 +594,12 @@ export function formatMcpEnvFile(m: PublishManifest): string {
   lines.push(`# @elephant-xyz/mcp configuration for ${m.county}, generated by the publish that produced these artifacts.`);
   lines.push(`# publish: ${m.publishedAt} (${m.mode})`);
   lines.push("#");
-  lines.push("# Re-apply the PER-PUBLISH lines after every publish. They are immutable CID URLs because the");
+  lines.push("# The PER-PUBLISH lines change on every publish. They are immutable CID URLs because the");
   lines.push("# server hands the query table straight to DuckDB, which pins the ETag it first saw and fails");
   lines.push("# every data tool the moment a mutable /ipns/ URL is re-pointed underneath a warm instance.");
+  lines.push("# The pipeline workflow applies them to the MCP deployment itself (`publish:apply-mcp-env`), and");
+  lines.push("# superseded CIDs stay served for PUBLISH_RETENTION_DAYS, so a missed apply degrades to stale");
+  lines.push("# data, never to a 504. Paste by hand only when that step is not configured.");
   lines.push("");
   lines.push("# --- per publish: re-apply these two, then redeploy ---");
   for (const b of m.mcpBindings.filter((b) => b.perPublish)) {
@@ -509,6 +638,13 @@ export function formatManifest(m: PublishManifest): string {
   // API the publisher writes to; served from this CID it is exactly what this publish produced.
   const rhObject = m.objects.find((o) => o.name === "run-history.json");
   if (rhObject !== undefined) lines.push(`          this publish's copy: ${rhObject.gatewayUrl}`);
+  const rt = m.retention;
+  lines.push(
+    `retain:   ${rt.current.length} versioned objects kept for ${rt.retentionDays} days` +
+      (rt.skipped === null
+        ? `, pruned ${rt.pruned.length} superseded` + (rt.failed.length > 0 ? `, ${rt.failed.length} could not be pruned` : "")
+        : ` (prune skipped: ${rt.skipped})`),
+  );
   for (const f of m.ipnsFailures) {
     const verb = f.kind === "quota" ? "SKIPPED (account name quota)" : "FAILED";
     lines.push(`ipns ${verb} label=${f.label} -> stays CID-addressed (${f.reason})`);

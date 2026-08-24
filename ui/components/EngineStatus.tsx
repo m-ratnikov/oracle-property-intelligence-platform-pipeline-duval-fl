@@ -37,8 +37,10 @@ export function EngineStatus({ compact = false }: { compact?: boolean }) {
         <div className="font-semibold">DuckDB-WASM could not load the query table.</div>
         <div className="mono mt-1 break-all">{engine.error}</div>
         <div className="mt-1 opacity-80">
-          Tried <span className="mono break-all">{url}</span>. A gateway that does not send
-          permissive CORS headers is the usual cause.
+          Tried <span className="mono break-all">{url}</span>, then the copy the published artifacts
+          index lists. A configured <span className="mono">/ipfs/&lt;cid&gt;</span> URL whose object a later
+          publish has superseded, or a gateway that does not send permissive CORS headers, are the usual
+          causes.
         </div>
       </div>
     );

@@ -12,6 +12,7 @@
     "features": "tsx src/cli.ts features",
     "validate": "tsx src/cli.ts validate",
     "publish:ipfs": "tsx src/cli.ts publish",
+    "publish:apply-mcp-env": "tsx src/cli.ts apply-mcp-env",
     "status": "tsx src/cli.ts status",
     "query": "tsx src/cli.ts query",
     "typecheck": "tsc --noEmit",

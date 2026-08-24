@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { ensureLoaded, getServerState, getState, runQuery, subscribe } from "./duckdb";
 import type { EngineState, QueryResult } from "./duckdb";
 import { queryTableParquetUrl } from "./config";
+import { fallbackFor } from "./artifactFallback";
 
 /** Live view of the DuckDB engine: boot, download, ready or error. */
 export function useEngine(): EngineState {
@@ -93,6 +94,20 @@ export function useJson<T>(url: string | null, parse: (input: unknown) => T): As
       .then(async (response) => {
         if (!response.ok) {
           throw new Error(`${response.status} ${response.statusText} for ${url}`);
+        }
+        return response.json();
+      })
+      .catch(async (error: unknown) => {
+        // The configured URL answered with an error. Before reporting it, ask the artifacts index
+        // where this object currently lives and try that once (lib/artifactFallback.ts). A
+        // deployment still bound to a superseded CID renders from the current publish instead of
+        // a red box; a URL the index does not know rethrows the original error unchanged.
+        const alternate = await fallbackFor(url);
+        if (alternate === null) throw error;
+        const response = await fetch(alternate, { cache: "default" });
+        if (!response.ok) {
+          const first = error instanceof Error ? error.message : String(error);
+          throw new Error(`${first}; the currently published copy at ${alternate} answered ${response.status}`);
         }
         return response.json();
       })

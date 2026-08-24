@@ -188,6 +188,7 @@ jobs:
           FILEBASE_ACCESS_KEY: ${{ secrets.FILEBASE_ACCESS_KEY }}
           FILEBASE_SECRET_KEY: ${{ secrets.FILEBASE_SECRET_KEY }}
           FILEBASE_BUCKET_DUVAL: ${{ secrets.FILEBASE_BUCKET_DUVAL }}
+          PUBLISH_RETENTION_DAYS: ${{ vars.PUBLISH_RETENTION_DAYS }}
           PUBLISH: ${{ github.event.inputs.publish || 'true' }}
         run: |
           if [ -n "$FILEBASE_ACCESS_KEY" ] && [ "$PUBLISH" = "true" ]; then
@@ -202,6 +203,31 @@ jobs:
             echo "Filebase secrets not configured (or publish=false): dry-run only"
             pnpm run publish:open-data
             pnpm run publish:ipfs
+          fi
+
+      # The publish above minted a new CID for the query table, and the MCP deployment is bound to
+      # a CID on purpose (DuckDB pins the ETag of the URL it opened, so a mutable name breaks every
+      # warm instance the moment it moves). Until 2026-08-25 the "re-apply these lines" note in
+      # mcp-env.txt was the whole mechanism; nobody re-applied them for three days, storage
+      # retention dropped the object, and the MCP answered 504. This step is the mechanism now:
+      # it upserts the two per-publish settings on the Vercel project, redeploys it, and fails the
+      # job unless the redeployed server answers a real query. Superseded CIDs stay served for
+      # PUBLISH_RETENTION_DAYS, so even a failure here degrades to stale data, not to an outage.
+      - name: Apply this publish's CID URLs to the MCP deployment and verify it
+        env:
+          FILEBASE_ACCESS_KEY: ${{ secrets.FILEBASE_ACCESS_KEY }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_TEAM_ID: ${{ vars.VERCEL_TEAM_ID }}
+          MCP_VERCEL_PROJECT_ID: ${{ vars.MCP_VERCEL_PROJECT_ID }}
+          MCP_URL: ${{ vars.MCP_URL }}
+          PUBLISH: ${{ github.event.inputs.publish || 'true' }}
+        run: |
+          if [ -z "$FILEBASE_ACCESS_KEY" ] || [ "$PUBLISH" != "true" ]; then
+            echo "dry run: nothing was published, nothing to apply"
+          elif [ -z "$VERCEL_TOKEN" ] || [ -z "$MCP_VERCEL_PROJECT_ID" ]; then
+            echo "::warning title=MCP not re-pointed::VERCEL_TOKEN secret or MCP_VERCEL_PROJECT_ID variable is not set, so the MCP deployment still reads the previous query table CID. It keeps working for PUBLISH_RETENTION_DAYS (default 3); paste runs/latest-mcp-env.txt into the deployment, or set the secret and variable so this step does it."
+          else
+            pnpm run publish:apply-mcp-env
           fi
 
       - name: Reconcile the CI run ledger against the GitHub Actions API

@@ -219,9 +219,11 @@ Rules (TS and SQL twins in `src/features/rules.ts` and `src/features/normalize.t
 
 Every publish writes `publish/duval/mcp-env.txt` (and the same values under `mcpEnv` /
 `mcpBindings` in `publish-manifest.json`, copied to `runs/latest-publish-manifest.json` and
-`runs/latest-mcp-env.txt`). Paste that file into the MCP deployment. Nothing else should be
-hand-assembled, because the same values are what the published `published-counties.json` catalog
-advertises, and the publish refuses to finish if the two disagree.
+`runs/latest-mcp-env.txt`). The workflow applies its per-publish lines to the MCP deployment
+itself (`pnpm run publish:apply-mcp-env`, below); the file is the record of what was applied and the
+fallback to paste by hand. Nothing else should be hand-assembled, because the same values are what
+the published `published-counties.json` catalog advertises, and the publish refuses to finish if
+the two disagree.
 
 **The query table is addressed by CID, not by its IPNS name.** This is not a preference:
 
@@ -245,13 +247,39 @@ describe the exact parquet that client is querying rather than racing ahead of i
 Everything else stays on a stable IPNS name and is set once: `PUBLISHED_COUNTY_CATALOG_URL` and
 `ORACLE_OPEN_DATA_IPNS_MAP` are both fetched as JSON behind short TTLs and never touch DuckDB.
 
-| Setting | Addressing | Re-apply after every publish |
+| Setting | Addressing | Changes on every publish |
 |---|---|---|
-| `PROPERTY_QUERY_TABLE_MAP` | `/ipfs/<cidv1>` | yes |
-| `DATASET_COVERAGE_MAP` | `/ipfs/<cidv1>` | yes |
+| `PROPERTY_QUERY_TABLE_MAP` | `/ipfs/<cidv1>` | yes, applied by the workflow |
+| `DATASET_COVERAGE_MAP` | `/ipfs/<cidv1>` | yes, applied by the workflow |
 | `PROPERTY_QUERY_TABLE_DEFAULT_COUNTY`, `ORACLE_OPEN_DATA_DEFAULT_COUNTY` | literal `duval` | no |
 | `ORACLE_OPEN_DATA_IPNS_MAP` | `/ipns/k51...` | no |
 | `PUBLISHED_COUNTY_CATALOG_URL` | `/ipns/k51...` | no |
+
+### Why a CID-bound client cannot be left to a paste, and cannot be allowed to 504
+
+On 2026-08-25 the hosted UI and the MCP both answered `504` for every query. Both were bound to the
+`/ipfs/<cid>` URLs of the 2026-08-22 publish; the cron had published eleven times since, each PUT
+to the same bucket key, and on Filebase replacing an object unpins the CID it had. The artifact
+they were reading had been garbage collected days earlier, and the "re-apply after every publish"
+row above had been carried out by nobody. Three things changed so that this cannot recur:
+
+1. **A publish never overwrites the object a client may be reading.** The query table, the coverage
+   snapshot and the run history are stored under `versions/<cidv1>/<key>` (`OBJECT_KEYS.versioned`),
+   so publish N+1 lands beside publish N instead of on top of it. Superseded versions are pruned only
+   when older than `PUBLISH_RETENTION_DAYS` (default 3, twelve scheduled publishes) and never when
+   the current publish references them (`selectExpiredVersions`, `test/publish-retention.test.ts`).
+   A CID a client holds keeps resolving for the whole window. Entity tables keep stable keys; nothing
+   pins those by CID across publishes.
+2. **The workflow discharges the obligation it creates.** `pnpm run publish:apply-mcp-env` reads the
+   manifest the publish just wrote, upserts the two per-publish settings on the MCP's Vercel project
+   (`VERCEL_TOKEN`, `MCP_VERCEL_PROJECT_ID`, `VERCEL_TEAM_ID`), redeploys it, waits for `READY`, and
+   then runs `queryProperties` through the public endpoint (`MCP_URL`). The step fails the job unless
+   that query answers, and a failed cron opens an issue. A missing token degrades to a warning and,
+   thanks to (1), to stale data rather than an outage.
+3. **The UI is configured with IPNS names and can recover from a dead URL.** Its browser code never
+   pins an ETag, so the names are safe there; and if a configured URL answers with an error, it
+   resolves the object's current URL from the published artifacts index and retries once
+   (`ui/lib/artifactFallback.ts`).
 
 The IPNS names are still minted and still recorded in `publish-manifest.json` and
 `artifacts-index.json`: the UI follows `oracle-run-history-duval` across runs (a CID there once
@@ -259,7 +287,8 @@ froze the runs page at eight runs), and the catalog name is what lets an operato
 `PUBLISHED_COUNTY_CATALOG_URL` once and never touch it again.
 
 The two per-publish lines are printed by `publish-artifacts.yml` in its job summary, so the current
-values are one click away in the Actions tab without downloading anything.
+values are one click away in the Actions tab without downloading anything, and both workflows apply
+them to the deployment right after printing them.
 
 ## The six questions: availability on the published artifact
 

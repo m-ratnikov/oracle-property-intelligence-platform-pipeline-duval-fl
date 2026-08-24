@@ -1,4 +1,4 @@
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import type { DeserializeHandler, DeserializeHandlerArguments, DeserializeHandlerOutput, DeserializeMiddleware, HandlerExecutionContext } from "@smithy/types";
 import type { ServiceInputTypes, ServiceOutputTypes } from "@aws-sdk/client-s3";
 import { envOrDefault } from "../config.js";
@@ -88,6 +88,38 @@ export async function putObject(
   command.middlewareStack.add(middleware as never, { step: "deserialize", name: "captureFilebaseCid", priority: "low" });
   await client.send(command);
   return captured?.["x-amz-meta-cid"];
+}
+
+export interface StoredObject {
+  key: string;
+  lastModified: Date | null;
+}
+
+/** Every object under `prefix`, following continuation tokens. */
+export async function listObjects(client: Pick<S3Client, "send">, bucket: string, prefix: string): Promise<StoredObject[]> {
+  const out: StoredObject[] = [];
+  let token: string | undefined;
+  do {
+    const page = (await client.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }))) as {
+      Contents?: { Key?: string; LastModified?: Date }[];
+      IsTruncated?: boolean;
+      NextContinuationToken?: string;
+    };
+    for (const c of page.Contents ?? []) {
+      if (c.Key) out.push({ key: c.Key, lastModified: c.LastModified ?? null });
+    }
+    token = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (token);
+  return out;
+}
+
+/**
+ * Remove one object. On Filebase this is what UNPINS its CID: an object that is no longer in any
+ * bucket stops being served by the gateway within minutes, which is the whole reason the publish
+ * never overwrites a key a client may still be reading (see OBJECT_KEYS.versioned in index.ts).
+ */
+export async function deleteObject(client: Pick<S3Client, "send">, bucket: string, key: string): Promise<void> {
+  await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 }
 
 export interface FilebaseIpnsName {

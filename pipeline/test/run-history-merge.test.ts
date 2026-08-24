@@ -32,6 +32,10 @@ import {
 const COUNTY = "duval";
 const GATEWAY = "https://ipfs.filebase.io";
 const RUN_HISTORY_KEY = "runs/duval/run-history.json";
+/** The history is stored under a key that carries its own CID (publish/index.ts OBJECT_KEYS.versioned); find it by its tail. */
+function shippedRunHistory(uploaded: Map<string, Buffer>): Buffer | undefined {
+  return [...uploaded.entries()].find(([key]) => key.endsWith(RUN_HISTORY_KEY))?.[1];
+}
 const NETWORK_KEY = "k51qzi5uqu5dl3zmapadjh90auy4k6gtr6w52zg6ozeu64kzbiwwgw8k9ef6ny";
 const PUBLISHED_URL = `${GATEWAY}/ipns/${NETWORK_KEY}`;
 
@@ -437,7 +441,7 @@ describe("publish: the cold-cache run cannot shrink the published history", () =
 
     // Assert the BYTES that went to the bucket before anything about the manifest: this is the
     // regression, and before the merge existed this line read 3.
-    const body = uploaded.get(RUN_HISTORY_KEY);
+    const body = shippedRunHistory(uploaded);
     expect(body).toBeDefined();
     const shipped = JSON.parse((body as Buffer).toString("utf8")) as RunHistoryDoc;
     expect(shipped.runs).toHaveLength(31);
@@ -488,7 +492,7 @@ describe("publish: the cold-cache run cannot shrink the published history", () =
       clientFactory: () => client as never,
     });
     expect(manifest.mode).toBe("published");
-    const shipped = JSON.parse((uploaded.get(RUN_HISTORY_KEY) as Buffer).toString("utf8")) as RunHistoryDoc;
+    const shipped = JSON.parse((shippedRunHistory(uploaded) as Buffer).toString("utf8")) as RunHistoryDoc;
     expect(shipped.runs).toHaveLength(1);
     expect(manifest.runHistory.outcome).toBe("published_unreachable");
   });

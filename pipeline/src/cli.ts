@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { ulid } from "ulid";
 import { COUNTY, getPaths } from "./config.js";
@@ -5,10 +6,11 @@ import { CONSOLIDATION_TRACK, consolidationArtifacts, consolidationSourceRecord,
 import { formatOpenDataResult, publishOpenData } from "./publish/openData.js";
 import { all, ensureSchema, openDb, q } from "./db.js";
 import { buildFeatures } from "./features/build.js";
-import { exportEntityTables, formatValidation, validateQueryTable } from "./features/export.js";
+import { exportEntityTables, formatValidation, QUERY_TABLE_OBJECT, validateQueryTable } from "./features/export.js";
 import { log } from "./log.js";
-import { executePublish, formatManifest, formatPlan, planPublish } from "./publish/index.js";
+import { executePublish, formatManifest, formatPlan, planPublish, type PublishManifest } from "./publish/index.js";
 import { readFilebaseEnv } from "./publish/filebase.js";
+import { applyMcpEnv, formatApplyResult, missingVercelTarget, readVercelTarget } from "./publish/vercelEnv.js";
 import {
   formatRegressions,
   readCiEnv,
@@ -67,6 +69,8 @@ const HELP = `duval oracle pipeline
   pnpm run validate                      re-run the query-table validation gate against the DB
   pnpm run publish:ipfs -- [--publish]   dry-run by default; --publish uploads to Filebase + re-points IPNS
                                          --publish without readable Filebase settings FAILS; it never becomes a dry run
+  pnpm run publish:apply-mcp-env         push the per-publish CID URLs from publish-manifest.json to the MCP Vercel
+                                         project, redeploy it and verify a query; needs VERCEL_TOKEN + MCP_VERCEL_PROJECT_ID
   pnpm run export:consolidation -- [--since all|changed|<run_id>] [--shard-size 10000] [--limit N] [--out-dir DIR]
   pnpm run publish:open-data -- [--publish]   per-property open-data files + shards + index; IPNS oracle-open-data-duval
   pnpm run status                        table counts + run history summary
@@ -205,6 +209,42 @@ async function main(): Promise<void> {
       if (!manifest.ok) {
         const failed = manifest.ipnsFailures.filter((f) => f.kind === "failed");
         log.error("publish_incomplete", { failed });
+        process.exitCode = 1;
+      }
+      return;
+    }
+    case "apply-mcp-env": {
+      // Discharges the obligation publish creates: PROPERTY_QUERY_TABLE_MAP and DATASET_COVERAGE_MAP
+      // name the CID of THIS publish, and the deployment that reads them has to be told. Reads the
+      // manifest publish just wrote, so the two cannot disagree.
+      const manifestPath = join(paths.publishDir, "publish-manifest.json");
+      if (!existsSync(manifestPath)) {
+        process.stdout.write(`APPLY REFUSED: no ${manifestPath}; run publish first\n`);
+        process.exitCode = 1;
+        return;
+      }
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as PublishManifest;
+      if (manifest.mode !== "published") {
+        process.stdout.write(`APPLY SKIPPED: manifest is a ${manifest.mode}; nothing is live to point the MCP at\n`);
+        return;
+      }
+      const target = readVercelTarget(env);
+      if (target === null) {
+        const missing = missingVercelTarget(env);
+        process.stdout.write(`APPLY SKIPPED: ${missing.join(", ")} not set. Paste the per-publish lines from mcp-env.txt by hand.\n`);
+        log.warn("apply_mcp_env_skipped", { missing });
+        return;
+      }
+      const qt = manifest.objects.find((o) => o.name === QUERY_TABLE_OBJECT);
+      const result = await applyMcpEnv({
+        target,
+        bindings: manifest.mcpBindings,
+        logger: log,
+        expectedQueryTableCid: qt?.cidV1 ?? null,
+      });
+      process.stdout.write(formatApplyResult(manifest, result) + "\n");
+      if (!result.verification.ok) {
+        log.error("apply_mcp_env_unverified", { reason: result.verification.reason });
         process.exitCode = 1;
       }
       return;

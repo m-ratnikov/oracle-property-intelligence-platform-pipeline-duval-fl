@@ -14,6 +14,7 @@
  */
 
 import * as duckdb from "@duckdb/duckdb-wasm";
+import { fallbackFor } from "./artifactFallback";
 import type { AsyncDuckDB, AsyncDuckDBConnection } from "@duckdb/duckdb-wasm";
 import { cacheGet, cachePut } from "./opfs";
 import { VIEW_NAME } from "./sql";
@@ -299,15 +300,36 @@ async function loadParquet(rawUrl: string): Promise<void> {
   });
 }
 
-/** Idempotent. Every page calls this, only the first call does work. */
+/**
+ * Idempotent. Every page calls this, only the first call does work.
+ *
+ * When the configured URL cannot be loaded, the currently published query table is resolved from
+ * the artifacts index and tried once (see lib/artifactFallback.ts for the outage this ends). The
+ * error surfaced when both fail is the original one, with the fallback attempt named, so the
+ * message still points at the configured URL that needs fixing.
+ */
 export function ensureLoaded(url: string): Promise<void> {
   if (loadedUrl === url && loadPromise) return loadPromise;
   loadedUrl = url;
-  loadPromise = loadParquet(url).catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    setState({ stage: "error", error: message, message: "Could not load the query table" });
-    throw error;
-  });
+  loadPromise = loadParquet(url)
+    .catch(async (error: unknown) => {
+      const alternate = await fallbackFor(url);
+      if (alternate === null) throw error;
+      console.warn(`[duckdb] configured query table failed, retrying the published one at ${alternate}`, error);
+      setState({ stage: "attaching", message: "Configured URL failed, loading the currently published query table", sourceUrl: alternate });
+      try {
+        await loadParquet(alternate);
+      } catch (retryError: unknown) {
+        const first = error instanceof Error ? error.message : String(error);
+        const second = retryError instanceof Error ? retryError.message : String(retryError);
+        throw new Error(`${first}; the currently published copy at ${alternate} also failed: ${second}`);
+      }
+    })
+    .catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      setState({ stage: "error", error: message, message: "Could not load the query table" });
+      throw error;
+    });
   return loadPromise;
 }
 
