@@ -1,14 +1,14 @@
 {
   "county": "duval",
-  "updated_at": "2026-08-29T07:01:46.962Z",
+  "updated_at": "2026-08-29T12:56:49.380Z",
   "by_event": {
-    "schedule": 32,
+    "schedule": 33,
     "workflow_dispatch": 19
   },
   "by_event_conclusion": {
     "schedule": {
       "in_progress": 1,
-      "success": 29,
+      "success": 30,
       "failure": 1,
       "cancelled": 1
     },
@@ -24,17 +24,28 @@
     "endpoint": "https://api.github.com/repos/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/workflows/pipeline.yml/runs?per_page=100",
     "repository": "m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl",
     "workflow": "pipeline.yml",
-    "fetched_at": "2026-08-29T07:01:46.962Z",
-    "api_total": 51,
+    "fetched_at": "2026-08-29T12:56:49.379Z",
+    "api_total": 52,
     "pages": 1,
     "detail": null
   },
   "workflow_runs": [
     {
-      "ci_run_id": "33238801857",
+      "ci_run_id": "33252694724",
       "event": "schedule",
       "status": "in_progress",
       "conclusion": null,
+      "head_branch": "main",
+      "head_sha": "5409692e4418c76f896c7ae77533c4dc911cafac",
+      "run_attempt": 1,
+      "run_started_at": "2026-08-29T12:30:56Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/33252694724"
+    },
+    {
+      "ci_run_id": "33238801857",
+      "event": "schedule",
+      "status": "completed",
+      "conclusion": "success",
       "head_branch": "main",
       "head_sha": "002020af42e56aac9d7a8ddebf6d78d7c2351999",
       "run_attempt": 1,
@@ -593,6 +604,20 @@
     }
   ],
   "runs": [
+    {
+      "run_id": "01M16R4S149CDPKP0T8CYXE6B2",
+      "kind": "ingestion",
+      "trigger": "schedule",
+      "ci_event": "schedule",
+      "ci_workflow": "pipeline",
+      "ci_run_id": "33252694724",
+      "ci_run_attempt": "1",
+      "ci_run_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/33252694724",
+      "ci_ref": "main",
+      "started_at": "2026-08-29T12:33:06.085Z",
+      "finished_at": "2026-08-29T12:56:45.300Z",
+      "status": "completed"
+    },
     {
       "run_id": "01M1651WVX8JJ4F5EZPZZ1Z9AP",
       "kind": "consolidation",
