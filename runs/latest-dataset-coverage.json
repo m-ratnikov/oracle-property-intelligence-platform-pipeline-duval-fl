@@ -1,6 +1,6 @@
 {
   "county": "duval",
-  "exportedAt": "2026-08-28T21:56:47.854Z",
+  "exportedAt": "2026-08-29T01:04:11.679Z",
   "datasets": [
     {
       "county": "duval",
@@ -22,7 +22,7 @@
         "No roof attributes in the bulk roll (ACT_YR_BLT/EFF_YR_BLT used as roof-age proxy)",
         "Sale fields cover only the roll's current and prior year (2025-2026)"
       ],
-      "last_run_id": "01M154P1HH4MP2Z9X37VMCVBNB",
+      "last_run_id": "01M15G6T03KD9QCKJ9GX9WWJPZ",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null
@@ -46,7 +46,7 @@
         "Sale dates carry year+month only (day unknown; stored as first of month)",
         "Only 2025-2026 transfers; older tenure comes from the COJ parcels layer (SALESL*)"
       ],
-      "last_run_id": "01M154P1HH4MP2Z9X37VMCVBNB",
+      "last_run_id": "01M15G6T03KD9QCKJ9GX9WWJPZ",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
@@ -75,7 +75,7 @@
         "192 MB archive; centroids computed from polygons (not rooftop points)",
         "Parcels present in NAL but missing from the shapefile get no coordinates"
       ],
-      "last_run_id": "01M154P1HH4MP2Z9X37VMCVBNB",
+      "last_run_id": "01M15G6T03KD9QCKJ9GX9WWJPZ",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
@@ -101,7 +101,7 @@
         "No GTFS-RT; no licence text published",
         "Walking distance is straight-line (haversine), not network distance"
       ],
-      "last_run_id": "01M154P1HH4MP2Z9X37VMCVBNB",
+      "last_run_id": "01M15G6T03KD9QCKJ9GX9WWJPZ",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
@@ -128,7 +128,7 @@
         "NHD lake/pond polygons below 1 ha and unnamed flowlines are excluded",
         "Parcel polygons are not stored; the parcel bounding box stands in for the polygon"
       ],
-      "last_run_id": "01M154P1HH4MP2Z9X37VMCVBNB",
+      "last_run_id": "01M15G6T03KD9QCKJ9GX9WWJPZ",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
@@ -153,7 +153,7 @@
         "Brand matching by name (Starbucks); confidence varies; CDLA-Permissive 2.0",
         "Reading the release scans ~2.5 min of remote parquet"
       ],
-      "last_run_id": "01M154P1HH4MP2Z9X37VMCVBNB",
+      "last_run_id": "01M15G6T03KD9QCKJ9GX9WWJPZ",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
@@ -180,7 +180,7 @@
         "Layout page (dos.sunbiz.org/data-definitions/cor.html) was unreachable (HTTP 522); offsets validated against live records instead",
         "Officers kept as names only; events file parsed for doc number + raw line"
       ],
-      "last_run_id": "01M154P1HH4MP2Z9X37VMCVBNB",
+      "last_run_id": "01M15G6T03KD9QCKJ9GX9WWJPZ",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
@@ -193,9 +193,9 @@
       "source": "entity_links",
       "ingested_count": 1444905,
       "expected_count": 1444905,
-      "first_loaded_at": "2026-08-28T21:56:13Z",
-      "last_loaded_at": "2026-08-28T21:56:13Z",
-      "cid": "Qmec9nkzYygLMYuoX8yscY33cBm42HHBnkNKKUPtMYoMHN",
+      "first_loaded_at": "2026-08-29T01:03:38Z",
+      "last_loaded_at": "2026-08-29T01:03:38Z",
+      "cid": "QmZ4SLxCRJmhrMAPpfDi88TaYgtzoov1f2yQ1esjZM4CD9",
       "ipns_label": "duval-oracle-artifacts",
       "track": "links",
       "source_system": "duval_reconciliation",
@@ -206,7 +206,7 @@
       "limitations": [
         "Address matching is exact on the normalized line 1 + ZIP5; unit-level mismatches are not linked"
       ],
-      "last_run_id": "01M154P1HH4MP2Z9X37VMCVBNB",
+      "last_run_id": "01M15G6T03KD9QCKJ9GX9WWJPZ",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
@@ -280,7 +280,7 @@
         "HTTP 403 from non-US IPs; from a US runner with a browser UA the files download",
         "BBB not used: terms forbid aggregation"
       ],
-      "last_run_id": "01M154P1HH4MP2Z9X37VMCVBNB",
+      "last_run_id": "01M15G6T03KD9QCKJ9GX9WWJPZ",
       "last_run_status": "completed",
       "requires_us_egress": true,
       "last_skip_reason": "skipped: non-US egress (HTTP 403)",
@@ -336,7 +336,7 @@
       "last_run_id": "01M154P1HH4MP2Z9X37VMCVBNB",
       "last_run_status": "completed",
       "requires_us_egress": true,
-      "last_skip_reason": null,
+      "last_skip_reason": "skipped: non-US egress (HTTP 0, fetch failed)",
       "sales_history_rows_contributed": 41689
     }
   ]
