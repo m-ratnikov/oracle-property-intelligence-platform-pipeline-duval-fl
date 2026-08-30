@@ -1,14 +1,14 @@
 {
   "county": "duval",
-  "updated_at": "2026-08-30T01:25:25.214Z",
+  "updated_at": "2026-08-30T07:02:23.912Z",
   "by_event": {
-    "schedule": 35,
+    "schedule": 36,
     "workflow_dispatch": 19
   },
   "by_event_conclusion": {
     "schedule": {
       "in_progress": 1,
-      "failure": 3,
+      "failure": 4,
       "success": 30,
       "cancelled": 1
     },
@@ -24,17 +24,28 @@
     "endpoint": "https://api.github.com/repos/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/workflows/pipeline.yml/runs?per_page=100",
     "repository": "m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl",
     "workflow": "pipeline.yml",
-    "fetched_at": "2026-08-30T01:25:25.213Z",
-    "api_total": 54,
+    "fetched_at": "2026-08-30T07:02:23.911Z",
+    "api_total": 55,
     "pages": 1,
     "detail": null
   },
   "workflow_runs": [
     {
-      "ci_run_id": "33284776509",
+      "ci_run_id": "33297270077",
       "event": "schedule",
       "status": "in_progress",
       "conclusion": null,
+      "head_branch": "main",
+      "head_sha": "88f638e61c3397c730e3c86ce5905298536db691",
+      "run_attempt": 1,
+      "run_started_at": "2026-08-30T06:36:07Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/33297270077"
+    },
+    {
+      "ci_run_id": "33284776509",
+      "event": "schedule",
+      "status": "completed",
+      "conclusion": "failure",
       "head_branch": "main",
       "head_sha": "728cbe0768995815610024b1f16312a865ffd968",
       "run_attempt": 1,
@@ -626,6 +637,20 @@
     }
   ],
   "runs": [
+    {
+      "run_id": "01M18P7VV62Y4VKATVCPNZSTPZ",
+      "kind": "ingestion",
+      "trigger": "schedule",
+      "ci_event": "schedule",
+      "ci_workflow": "pipeline",
+      "ci_run_id": "33297270077",
+      "ci_run_attempt": "1",
+      "ci_run_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/33297270077",
+      "ci_ref": "main",
+      "started_at": "2026-08-30T06:38:18.983Z",
+      "finished_at": "2026-08-30T07:02:19.130Z",
+      "status": "completed"
+    },
     {
       "run_id": "01M18373FVGG3NJDHDXBW90WWH",
       "kind": "ingestion",
