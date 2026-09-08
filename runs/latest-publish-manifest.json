@@ -1,23 +1,23 @@
 {
   "county": "duval",
   "mode": "published",
-  "publishedAt": "2026-09-08T07:06:05.556Z",
+  "publishedAt": "2026-09-08T13:01:03.269Z",
   "bucket": "duval-property",
   "gateway": "https://ipfs.filebase.io",
   "objects": [
     {
       "name": "query-table.parquet",
       "localPath": "/home/runner/work/oracle-property-intelligence-platform-pipeline-duval-fl/oracle-property-intelligence-platform-pipeline-duval-fl/.data/artifacts/publish/duval/query-table.parquet",
-      "key": "versions/bafybeiegfrjzovq7k7w2vsol2bglotn7fiup4dghou6lmnj73vbxjo2pt4/query-tables/duval/query-table.parquet",
+      "key": "versions/bafybeibsrsm2jxnz2rljzvnjdrarydkdpj256tr3h6plohqefypjdbeguq/query-tables/duval/query-table.parquet",
       "contentType": "application/vnd.apache.parquet",
-      "bytes": 50379098,
-      "sha256": "491c101f435fdeed51271d4d97d2c562cc23ae76ee2745c35275cd99d362ea32",
-      "cid": "QmXNQYV56DeiJ82BBcKWMfvX9iGmAPLYQfRsAesoC7xZyQ",
-      "cidV1": "bafybeiegfrjzovq7k7w2vsol2bglotn7fiup4dghou6lmnj73vbxjo2pt4",
+      "bytes": 50380355,
+      "sha256": "464a30011da4279e9bf3c3dcb682dfee4158b82c058b7a7035d44e989f5fd908",
+      "cid": "QmRjySaudJcpgaKKogF3z2BAPxPMvvcowRD9GHZevtEKLw",
+      "cidV1": "bafybeibsrsm2jxnz2rljzvnjdrarydkdpj256tr3h6plohqefypjdbeguq",
       "ipnsLabel": "oracle-query-table-duval",
       "uploaded": true,
-      "remoteCid": "QmXNQYV56DeiJ82BBcKWMfvX9iGmAPLYQfRsAesoC7xZyQ",
-      "gatewayUrl": "https://ipfs.filebase.io/ipfs/bafybeiegfrjzovq7k7w2vsol2bglotn7fiup4dghou6lmnj73vbxjo2pt4",
+      "remoteCid": "QmRjySaudJcpgaKKogF3z2BAPxPMvvcowRD9GHZevtEKLw",
+      "gatewayUrl": "https://ipfs.filebase.io/ipfs/bafybeibsrsm2jxnz2rljzvnjdrarydkdpj256tr3h6plohqefypjdbeguq",
       "ipns": {
         "label": "oracle-query-table-duval",
         "networkKey": "k51qzi5uqu5djeq93ll0n7gsrzwfry2jmxb3xa66tcthufpjxv0c3odj1hpq4r",
@@ -28,16 +28,16 @@
     {
       "name": "dataset-coverage.json",
       "localPath": "/home/runner/work/oracle-property-intelligence-platform-pipeline-duval-fl/oracle-property-intelligence-platform-pipeline-duval-fl/.data/artifacts/publish/duval/dataset-coverage.json",
-      "key": "versions/bafybeia2sf5ctnstapsthqbl6277pgoaaeb6xlquukuu26hdl2iwntrg4y/incremental-status/duval/dataset-coverage.json",
+      "key": "versions/bafybeienn5x4kwiq62bdqfrrj3ct6n5purotqiwrmxojxvbslh7s7tasju/incremental-status/duval/dataset-coverage.json",
       "contentType": "application/json",
       "bytes": 14420,
-      "sha256": "94925c6bb3e86769322b5ce8b233514044ed7077e4fabdbdb3ae05defee35939",
-      "cid": "QmQ8MyErTHkBCTht2T6Bvcy8jwUE5JXvCq4VQi9AYfz7Eu",
-      "cidV1": "bafybeia2sf5ctnstapsthqbl6277pgoaaeb6xlquukuu26hdl2iwntrg4y",
+      "sha256": "1f0a4eadb591603c7368455d37c50bb2b54da147d76586d4ec6a0f9dd12727fc",
+      "cid": "QmXrkkTKfNScpDUvqfzFQE1NdTZkG91sAdmAY3vRDH1Gmz",
+      "cidV1": "bafybeienn5x4kwiq62bdqfrrj3ct6n5purotqiwrmxojxvbslh7s7tasju",
       "ipnsLabel": "oracle-dataset-coverage-duval",
       "uploaded": true,
-      "remoteCid": "QmQ8MyErTHkBCTht2T6Bvcy8jwUE5JXvCq4VQi9AYfz7Eu",
-      "gatewayUrl": "https://ipfs.filebase.io/ipfs/bafybeia2sf5ctnstapsthqbl6277pgoaaeb6xlquukuu26hdl2iwntrg4y",
+      "remoteCid": "QmXrkkTKfNScpDUvqfzFQE1NdTZkG91sAdmAY3vRDH1Gmz",
+      "gatewayUrl": "https://ipfs.filebase.io/ipfs/bafybeienn5x4kwiq62bdqfrrj3ct6n5purotqiwrmxojxvbslh7s7tasju",
       "ipns": {
         "label": "oracle-dataset-coverage-duval",
         "networkKey": "k51qzi5uqu5dgefy44zrdzqpp6pqikkged7vea2lxu8354kfl1ah7ijrl2pwum",
@@ -48,16 +48,16 @@
     {
       "name": "run-history.json",
       "localPath": "/home/runner/work/oracle-property-intelligence-platform-pipeline-duval-fl/oracle-property-intelligence-platform-pipeline-duval-fl/.data/artifacts/publish/duval/run-history.json",
-      "key": "versions/bafybeid4newsfwnwz55lskfn4w7jot4m5oeinsw3mht6iqnve3axi2o7re/runs/duval/run-history.json",
+      "key": "versions/bafybeihtsw62iyoqytp36vb4mksggzc6k2rc5urzmo56hbpmfdlh54apre/runs/duval/run-history.json",
       "contentType": "application/json",
-      "bytes": 3577831,
-      "sha256": "a4d9c382ab92f00ccd9d33ea17717823c8b20a1a31adab00e9566199d053ba1f",
-      "cid": "QmWiJHLfbVfWf6VAeZ22akARxtYonMzWFTooaNEkCmedSg",
-      "cidV1": "bafybeid4newsfwnwz55lskfn4w7jot4m5oeinsw3mht6iqnve3axi2o7re",
+      "bytes": 3618231,
+      "sha256": "2187e765af85177d00958a1be9f1b53efa02bb6ea804a4a44a494a267929f209",
+      "cid": "QmejWDE6k524qrdR2cm8XjV55CoPKJh3XsKZaAfbQoerEk",
+      "cidV1": "bafybeihtsw62iyoqytp36vb4mksggzc6k2rc5urzmo56hbpmfdlh54apre",
       "ipnsLabel": "oracle-run-history-duval",
       "uploaded": true,
-      "remoteCid": "QmWiJHLfbVfWf6VAeZ22akARxtYonMzWFTooaNEkCmedSg",
-      "gatewayUrl": "https://ipfs.filebase.io/ipfs/bafybeid4newsfwnwz55lskfn4w7jot4m5oeinsw3mht6iqnve3axi2o7re",
+      "remoteCid": "QmejWDE6k524qrdR2cm8XjV55CoPKJh3XsKZaAfbQoerEk",
+      "gatewayUrl": "https://ipfs.filebase.io/ipfs/bafybeihtsw62iyoqytp36vb4mksggzc6k2rc5urzmo56hbpmfdlh54apre",
       "ipns": {
         "label": "oracle-run-history-duval",
         "networkKey": "k51qzi5uqu5dl3zmapadjh90auy4k6gtr6w52zg6ozeu64kzbiwwgw8k9ef6ny",
@@ -100,14 +100,14 @@
       "localPath": "/home/runner/work/oracle-property-intelligence-platform-pipeline-duval-fl/oracle-property-intelligence-platform-pipeline-duval-fl/.data/artifacts/publish/duval/tables/contractors.parquet",
       "key": "tables/duval/contractors.parquet",
       "contentType": "application/vnd.apache.parquet",
-      "bytes": 207931,
-      "sha256": "0d1e20446bf952ca6b334b9f076cb17a8f88cfc346c81e65307d34582e570806",
-      "cid": "QmT7gh8QH7h8H5sDPwtCEB2bbX26Gu6ErMFBNsgANA8ASb",
-      "cidV1": "bafybeicg7aqf6fervfbajkzktbujyvebsntbx5xoesbe6r7ztrsmx5wmta",
+      "bytes": 208019,
+      "sha256": "cefd2e4fcfbc18bd7721e37e48521879c68be9253e7eb02759ca5310f2131b06",
+      "cid": "QmREJ6c6JfTNc2RnocQr2UH66G1Zr6AKMpvLjaNdh2WvVS",
+      "cidV1": "bafybeibk6jcq7cptquqiiasfnay7egacc3tthidtuwj6ez5lurq5wqzj7u",
       "ipnsLabel": null,
       "uploaded": true,
-      "remoteCid": "QmT7gh8QH7h8H5sDPwtCEB2bbX26Gu6ErMFBNsgANA8ASb",
-      "gatewayUrl": "https://ipfs.filebase.io/ipfs/bafybeicg7aqf6fervfbajkzktbujyvebsntbx5xoesbe6r7ztrsmx5wmta",
+      "remoteCid": "QmREJ6c6JfTNc2RnocQr2UH66G1Zr6AKMpvLjaNdh2WvVS",
+      "gatewayUrl": "https://ipfs.filebase.io/ipfs/bafybeibk6jcq7cptquqiiasfnay7egacc3tthidtuwj6ez5lurq5wqzj7u",
       "ipns": null
     },
     {
@@ -116,13 +116,13 @@
       "key": "tables/duval/entity_links.parquet",
       "contentType": "application/vnd.apache.parquet",
       "bytes": 46601758,
-      "sha256": "734afe5a2a01e36d7f944f3663d8c5bf8df2171898d28b508a80d12cc16f741b",
-      "cid": "QmXB5wz9Vt6TRHKfYhVQ7ZHHKA6iHJeFUX1p7KU1X1Ljgw",
-      "cidV1": "bafybeiedixuzicjq65dypurj36a3ipkl5wr7xy6j45pn24zz6hxmb5yqfq",
+      "sha256": "cd31495a717fc97f5f81ee24cf197d4027b0a058045631c2a7776a4389ab119a",
+      "cid": "QmSYHXoqCv1mvto7LGz1gvoaXo81XDyoZQHT5xA7KFyQ7E",
+      "cidV1": "bafybeib6nhczs4nlj4etummntgdgy3wxjlkuronu6dt4r5mismo7sq47qu",
       "ipnsLabel": null,
       "uploaded": true,
-      "remoteCid": "QmXB5wz9Vt6TRHKfYhVQ7ZHHKA6iHJeFUX1p7KU1X1Ljgw",
-      "gatewayUrl": "https://ipfs.filebase.io/ipfs/bafybeiedixuzicjq65dypurj36a3ipkl5wr7xy6j45pn24zz6hxmb5yqfq",
+      "remoteCid": "QmSYHXoqCv1mvto7LGz1gvoaXo81XDyoZQHT5xA7KFyQ7E",
+      "gatewayUrl": "https://ipfs.filebase.io/ipfs/bafybeib6nhczs4nlj4etummntgdgy3wxjlkuronu6dt4r5mismo7sq47qu",
       "ipns": null
     },
     {
@@ -221,13 +221,13 @@
       "key": "catalog/published-counties.json",
       "contentType": "application/json",
       "bytes": 594,
-      "sha256": "e580f920190a12543ba9d37146e0a7b3b72ba6b6e187414f2b7c9e39417d1f3e",
-      "cid": "QmRcWTD6YCFEWcF59WVrQdwDmhZjjyWCMrtWQYfo9DsaAn",
-      "cidV1": "bafybeibqumcimuqe7aunfseg2n462x4clu4nam2bvq35wvuls4fbo22y5m",
+      "sha256": "ed4c584db0885e5946aa97558cfada7fd2a18d63fda120dadf7f0c4d81b7cf6d",
+      "cid": "QmWU6wPqyp9FompA3DefnBStCSf3BS9iEw33cdU7H1hD4A",
+      "cidV1": "bafybeidyyy36ulslll2fd5swtdzsoa5svo7dniwdleiorsa5advw7nuzu4",
       "ipnsLabel": "oracle-published-counties",
       "uploaded": true,
-      "remoteCid": "QmRcWTD6YCFEWcF59WVrQdwDmhZjjyWCMrtWQYfo9DsaAn",
-      "gatewayUrl": "https://ipfs.filebase.io/ipfs/bafybeibqumcimuqe7aunfseg2n462x4clu4nam2bvq35wvuls4fbo22y5m",
+      "remoteCid": "QmWU6wPqyp9FompA3DefnBStCSf3BS9iEw33cdU7H1hD4A",
+      "gatewayUrl": "https://ipfs.filebase.io/ipfs/bafybeidyyy36ulslll2fd5swtdzsoa5svo7dniwdleiorsa5advw7nuzu4",
       "ipns": {
         "label": "oracle-published-counties",
         "networkKey": "k51qzi5uqu5dhbku9cn93fphs8tj703ydh5ypo2tk3k13d5t7tz08pr0qijy7d",
@@ -241,13 +241,13 @@
       "key": "artifacts/duval/index.json",
       "contentType": "application/json",
       "bytes": 10642,
-      "sha256": "352a403da5554297ed725b86c1e0b6e02ac71751769e020e03bf5d7b05440011",
-      "cid": "QmQ4WFNRry14Rzj9HkKDwJYVrGNXs1q6PNhhQC5gHio7HP",
-      "cidV1": "bafybeiazssbzsl5v7fxjlazdu362xdj323j4i36x3nklufgljlhzzepgby",
+      "sha256": "15ca9dcf0328a0e90aa738783cc06cbdadc6621fbcc68d53cee66d6ac4e530d9",
+      "cid": "QmdfPnRfAn3dbA7wJLdzET2K3qciHc3QVmxsrZGQzk2hqY",
+      "cidV1": "bafybeihdvr3idtxmupe36jskokh3gux7b5ojzl4yxzo7dzllnlpozn44k4",
       "ipnsLabel": "duval-oracle-artifacts",
       "uploaded": true,
-      "remoteCid": "QmQ4WFNRry14Rzj9HkKDwJYVrGNXs1q6PNhhQC5gHio7HP",
-      "gatewayUrl": "https://ipfs.filebase.io/ipfs/bafybeiazssbzsl5v7fxjlazdu362xdj323j4i36x3nklufgljlhzzepgby",
+      "remoteCid": "QmdfPnRfAn3dbA7wJLdzET2K3qciHc3QVmxsrZGQzk2hqY",
+      "gatewayUrl": "https://ipfs.filebase.io/ipfs/bafybeihdvr3idtxmupe36jskokh3gux7b5ojzl4yxzo7dzllnlpozn44k4",
       "ipns": {
         "label": "duval-oracle-artifacts",
         "networkKey": "k51qzi5uqu5dibf140h91d3bh02wpu9apokitczidyp1hliaj5650wuphryfeu",
@@ -260,38 +260,38 @@
     "oracle-query-table-duval": {
       "label": "oracle-query-table-duval",
       "networkKey": "k51qzi5uqu5djeq93ll0n7gsrzwfry2jmxb3xa66tcthufpjxv0c3odj1hpq4r",
-      "cid": "QmXNQYV56DeiJ82BBcKWMfvX9iGmAPLYQfRsAesoC7xZyQ",
+      "cid": "QmRjySaudJcpgaKKogF3z2BAPxPMvvcowRD9GHZevtEKLw",
       "gatewayUrl": "https://ipfs.filebase.io/ipns/k51qzi5uqu5djeq93ll0n7gsrzwfry2jmxb3xa66tcthufpjxv0c3odj1hpq4r"
     },
     "oracle-dataset-coverage-duval": {
       "label": "oracle-dataset-coverage-duval",
       "networkKey": "k51qzi5uqu5dgefy44zrdzqpp6pqikkged7vea2lxu8354kfl1ah7ijrl2pwum",
-      "cid": "QmQ8MyErTHkBCTht2T6Bvcy8jwUE5JXvCq4VQi9AYfz7Eu",
+      "cid": "QmXrkkTKfNScpDUvqfzFQE1NdTZkG91sAdmAY3vRDH1Gmz",
       "gatewayUrl": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dgefy44zrdzqpp6pqikkged7vea2lxu8354kfl1ah7ijrl2pwum"
     },
     "oracle-run-history-duval": {
       "label": "oracle-run-history-duval",
       "networkKey": "k51qzi5uqu5dl3zmapadjh90auy4k6gtr6w52zg6ozeu64kzbiwwgw8k9ef6ny",
-      "cid": "QmWiJHLfbVfWf6VAeZ22akARxtYonMzWFTooaNEkCmedSg",
+      "cid": "QmejWDE6k524qrdR2cm8XjV55CoPKJh3XsKZaAfbQoerEk",
       "gatewayUrl": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dl3zmapadjh90auy4k6gtr6w52zg6ozeu64kzbiwwgw8k9ef6ny"
     },
     "oracle-published-counties": {
       "label": "oracle-published-counties",
       "networkKey": "k51qzi5uqu5dhbku9cn93fphs8tj703ydh5ypo2tk3k13d5t7tz08pr0qijy7d",
-      "cid": "QmRcWTD6YCFEWcF59WVrQdwDmhZjjyWCMrtWQYfo9DsaAn",
+      "cid": "QmWU6wPqyp9FompA3DefnBStCSf3BS9iEw33cdU7H1hD4A",
       "gatewayUrl": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dhbku9cn93fphs8tj703ydh5ypo2tk3k13d5t7tz08pr0qijy7d"
     },
     "duval-oracle-artifacts": {
       "label": "duval-oracle-artifacts",
       "networkKey": "k51qzi5uqu5dibf140h91d3bh02wpu9apokitczidyp1hliaj5650wuphryfeu",
-      "cid": "QmQ4WFNRry14Rzj9HkKDwJYVrGNXs1q6PNhhQC5gHio7HP",
+      "cid": "QmdfPnRfAn3dbA7wJLdzET2K3qciHc3QVmxsrZGQzk2hqY",
       "gatewayUrl": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dibf140h91d3bh02wpu9apokitczidyp1hliaj5650wuphryfeu"
     }
   },
   "mcpEnv": {
-    "PROPERTY_QUERY_TABLE_MAP": "{\"duval\":\"https://ipfs.filebase.io/ipfs/bafybeiegfrjzovq7k7w2vsol2bglotn7fiup4dghou6lmnj73vbxjo2pt4\"}",
+    "PROPERTY_QUERY_TABLE_MAP": "{\"duval\":\"https://ipfs.filebase.io/ipfs/bafybeibsrsm2jxnz2rljzvnjdrarydkdpj256tr3h6plohqefypjdbeguq\"}",
     "PROPERTY_QUERY_TABLE_DEFAULT_COUNTY": "duval",
-    "DATASET_COVERAGE_MAP": "{\"duval\":\"https://ipfs.filebase.io/ipfs/bafybeia2sf5ctnstapsthqbl6277pgoaaeb6xlquukuu26hdl2iwntrg4y\"}",
+    "DATASET_COVERAGE_MAP": "{\"duval\":\"https://ipfs.filebase.io/ipfs/bafybeienn5x4kwiq62bdqfrrj3ct6n5purotqiwrmxojxvbslh7s7tasju\"}",
     "ORACLE_OPEN_DATA_IPNS_MAP": "{\"duval\":\"k51qzi5uqu5dig8412edx2zx5x4bxcmilhho2gusgvm7z0wsikrv13nxfzihm2\"}",
     "ORACLE_OPEN_DATA_DEFAULT_COUNTY": "duval",
     "PUBLISHED_COUNTY_CATALOG_URL": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dhbku9cn93fphs8tj703ydh5ypo2tk3k13d5t7tz08pr0qijy7d"
@@ -299,7 +299,7 @@
   "mcpBindings": [
     {
       "env": "PROPERTY_QUERY_TABLE_MAP",
-      "value": "{\"duval\":\"https://ipfs.filebase.io/ipfs/bafybeiegfrjzovq7k7w2vsol2bglotn7fiup4dghou6lmnj73vbxjo2pt4\"}",
+      "value": "{\"duval\":\"https://ipfs.filebase.io/ipfs/bafybeibsrsm2jxnz2rljzvnjdrarydkdpj256tr3h6plohqefypjdbeguq\"}",
       "addressing": "cid",
       "perPublish": true,
       "reason": "DuckDB reads this URL directly and pins its ETag for the life of a warm instance; a mutable /ipns/ URL breaks every data tool the moment the name moves."
@@ -313,7 +313,7 @@
     },
     {
       "env": "DATASET_COVERAGE_MAP",
-      "value": "{\"duval\":\"https://ipfs.filebase.io/ipfs/bafybeia2sf5ctnstapsthqbl6277pgoaaeb6xlquukuu26hdl2iwntrg4y\"}",
+      "value": "{\"duval\":\"https://ipfs.filebase.io/ipfs/bafybeienn5x4kwiq62bdqfrrj3ct6n5purotqiwrmxojxvbslh7s7tasju\"}",
       "addressing": "cid",
       "perPublish": true,
       "reason": "Read with plain fetch, so a name would work, but pinning it to this publish keeps the reported coverage describing the exact parquet PROPERTY_QUERY_TABLE_MAP serves."
@@ -345,33 +345,33 @@
   "ok": true,
   "runHistory": {
     "outcome": "merged",
-    "localRuns": 175,
-    "publishedRuns": 173,
-    "mergedRuns": 175,
+    "localRuns": 177,
+    "publishedRuns": 175,
+    "mergedRuns": 177,
     "url": "https://ipfs.filebase.io/ipns/k51qzi5uqu5dl3zmapadjh90auy4k6gtr6w52zg6ozeu64kzbiwwgw8k9ef6ny",
     "detail": null
   },
   "retention": {
     "retentionDays": 14,
     "current": [
-      "versions/bafybeiegfrjzovq7k7w2vsol2bglotn7fiup4dghou6lmnj73vbxjo2pt4/query-tables/duval/query-table.parquet",
-      "versions/bafybeia2sf5ctnstapsthqbl6277pgoaaeb6xlquukuu26hdl2iwntrg4y/incremental-status/duval/dataset-coverage.json",
-      "versions/bafybeid4newsfwnwz55lskfn4w7jot4m5oeinsw3mht6iqnve3axi2o7re/runs/duval/run-history.json"
+      "versions/bafybeibsrsm2jxnz2rljzvnjdrarydkdpj256tr3h6plohqefypjdbeguq/query-tables/duval/query-table.parquet",
+      "versions/bafybeienn5x4kwiq62bdqfrrj3ct6n5purotqiwrmxojxvbslh7s7tasju/incremental-status/duval/dataset-coverage.json",
+      "versions/bafybeihtsw62iyoqytp36vb4mksggzc6k2rc5urzmo56hbpmfdlh54apre/runs/duval/run-history.json"
     ],
     "pruned": [
-      "versions/bafybeicnhas47oaw2gn5m6uvmget5bd4hx5tbs56e6gqbxq5r7qyk45hoq/incremental-status/duval/dataset-coverage.json",
-      "versions/bafybeiewveibfszzdxkmpkpuyyoebhlsnerwrbzmitiwxgpqmeyeq2wqlm/query-tables/duval/query-table.parquet",
-      "versions/bafybeihxo5tjndq4qqdmvvvnxqheparfj52dwgklwd2ky3iu76nosq3s7a/runs/duval/run-history.json"
+      "versions/bafybeib3l2bvvejwofj56twidae4c6yeiswo4ieknucc3keb47tvridqji/query-tables/duval/query-table.parquet",
+      "versions/bafybeiefte77dk3ju2gbhwry7v4ycrgq3yqkhwik7ztybiqahx4smkziey/incremental-status/duval/dataset-coverage.json",
+      "versions/bafybeiey6fqvquxp6cvkq4zul2zyyc6pobexdvgdvdyt6djhd5qtq2qa4e/runs/duval/run-history.json"
     ],
     "failed": [],
     "skipped": null
   },
   "queryTableProvenance": {
-    "cid": "QmXNQYV56DeiJ82BBcKWMfvX9iGmAPLYQfRsAesoC7xZyQ",
-    "cidV1": "bafybeiegfrjzovq7k7w2vsol2bglotn7fiup4dghou6lmnj73vbxjo2pt4",
-    "runId": "01M1ZXC21XSRS5TSXN5Y1YFY2W",
-    "runStartedAt": "2026-09-08T07:05:28.382Z",
+    "cid": "QmRjySaudJcpgaKKogF3z2BAPxPMvvcowRD9GHZevtEKLw",
+    "cidV1": "bafybeibsrsm2jxnz2rljzvnjdrarydkdpj256tr3h6plohqefypjdbeguq",
+    "runId": "01M20HP0Y1WVBKXNRXQ02E7BW9",
+    "runStartedAt": "2026-09-08T13:00:26.435Z",
     "runTrigger": "consolidation",
-    "historyRuns": 175
+    "historyRuns": 177
   }
 }
