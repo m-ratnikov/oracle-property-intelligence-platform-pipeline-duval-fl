@@ -1,134 +1,134 @@
 {
   "county": "duval",
-  "updated_at": "2026-09-10T01:23:56.087Z",
+  "updated_at": "2026-09-10T06:53:46.245Z",
   "tables": {
     "parcels": {
       "max": 404023,
-      "max_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "max_at": "2026-09-10T01:23:56.087Z",
+      "max_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "max_at": "2026-09-10T06:53:46.245Z",
       "current": 404023,
-      "current_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "current_at": "2026-09-10T01:23:56.087Z"
+      "current_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "current_at": "2026-09-10T06:53:46.245Z"
     },
     "parcel_geometry": {
       "max": 405716,
-      "max_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "max_at": "2026-09-10T01:23:56.087Z",
+      "max_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "max_at": "2026-09-10T06:53:46.245Z",
       "current": 405716,
-      "current_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "current_at": "2026-09-10T01:23:56.087Z"
+      "current_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "current_at": "2026-09-10T06:53:46.245Z"
     },
     "sales_history": {
       "max": 166949,
-      "max_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "max_at": "2026-09-10T01:23:56.087Z",
+      "max_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "max_at": "2026-09-10T06:53:46.245Z",
       "current": 166949,
-      "current_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "current_at": "2026-09-10T01:23:56.087Z"
+      "current_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "current_at": "2026-09-10T06:53:46.245Z"
     },
     "permits": {
       "max": 0,
-      "max_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "max_at": "2026-09-10T01:23:56.087Z",
+      "max_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "max_at": "2026-09-10T06:53:46.245Z",
       "current": 0,
-      "current_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "current_at": "2026-09-10T01:23:56.087Z"
+      "current_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "current_at": "2026-09-10T06:53:46.245Z"
     },
     "contractors": {
       "max": 4091,
-      "max_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "max_at": "2026-09-10T01:23:56.087Z",
+      "max_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "max_at": "2026-09-10T06:53:46.245Z",
       "current": 4091,
-      "current_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "current_at": "2026-09-10T01:23:56.087Z"
+      "current_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "current_at": "2026-09-10T06:53:46.245Z"
     },
     "businesses": {
-      "max": 439723,
-      "max_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "max_at": "2026-09-10T01:23:56.087Z",
-      "current": 439723,
-      "current_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "current_at": "2026-09-10T01:23:56.087Z"
+      "max": 439805,
+      "max_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "max_at": "2026-09-10T06:53:46.245Z",
+      "current": 439805,
+      "current_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "current_at": "2026-09-10T06:53:46.245Z"
     },
     "business_events": {
-      "max": 30068,
-      "max_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "max_at": "2026-09-10T01:23:56.087Z",
-      "current": 30068,
-      "current_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "current_at": "2026-09-10T01:23:56.087Z"
+      "max": 31278,
+      "max_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "max_at": "2026-09-10T06:53:46.245Z",
+      "current": 31278,
+      "current_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "current_at": "2026-09-10T06:53:46.245Z"
     },
     "places": {
       "max": 3084,
-      "max_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "max_at": "2026-09-10T01:23:56.087Z",
+      "max_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "max_at": "2026-09-10T06:53:46.245Z",
       "current": 3084,
-      "current_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "current_at": "2026-09-10T01:23:56.087Z"
+      "current_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "current_at": "2026-09-10T06:53:46.245Z"
     },
     "transit_stops": {
       "max": 2501,
-      "max_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "max_at": "2026-09-10T01:23:56.087Z",
+      "max_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "max_at": "2026-09-10T06:53:46.245Z",
       "current": 2501,
-      "current_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "current_at": "2026-09-10T01:23:56.087Z"
+      "current_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "current_at": "2026-09-10T06:53:46.245Z"
     },
     "transit_routes": {
       "max": 45,
-      "max_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "max_at": "2026-09-10T01:23:56.087Z",
+      "max_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "max_at": "2026-09-10T06:53:46.245Z",
       "current": 45,
-      "current_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "current_at": "2026-09-10T01:23:56.087Z"
+      "current_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "current_at": "2026-09-10T06:53:46.245Z"
     },
     "water_bodies": {
       "max": 757,
-      "max_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "max_at": "2026-09-10T01:23:56.087Z",
+      "max_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "max_at": "2026-09-10T06:53:46.245Z",
       "current": 757,
-      "current_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "current_at": "2026-09-10T01:23:56.087Z"
+      "current_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "current_at": "2026-09-10T06:53:46.245Z"
     },
     "address_points": {
       "max": 672662,
-      "max_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "max_at": "2026-09-10T01:23:56.087Z",
+      "max_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "max_at": "2026-09-10T06:53:46.245Z",
       "current": 672662,
-      "current_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "current_at": "2026-09-10T01:23:56.087Z"
+      "current_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "current_at": "2026-09-10T06:53:46.245Z"
     },
     "coj_parcels": {
       "max": 408380,
-      "max_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "max_at": "2026-09-10T01:23:56.087Z",
+      "max_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "max_at": "2026-09-10T06:53:46.245Z",
       "current": 408380,
-      "current_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "current_at": "2026-09-10T01:23:56.087Z"
+      "current_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "current_at": "2026-09-10T06:53:46.245Z"
     },
     "owners": {
       "max": 323925,
-      "max_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "max_at": "2026-09-10T01:23:56.087Z",
+      "max_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "max_at": "2026-09-10T06:53:46.245Z",
       "current": 323925,
-      "current_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "current_at": "2026-09-10T01:23:56.087Z"
+      "current_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "current_at": "2026-09-10T06:53:46.245Z"
     },
     "entity_links": {
-      "max": 1445584,
-      "max_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "max_at": "2026-09-10T01:23:56.087Z",
-      "current": 1445584,
-      "current_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "current_at": "2026-09-10T01:23:56.087Z"
+      "max": 1445628,
+      "max_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "max_at": "2026-09-10T06:53:46.245Z",
+      "current": 1445628,
+      "current_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "current_at": "2026-09-10T06:53:46.245Z"
     },
     "derived.properties_features": {
       "max": 404023,
-      "max_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "max_at": "2026-09-10T01:23:56.087Z",
+      "max_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "max_at": "2026-09-10T06:53:46.245Z",
       "current": 404023,
-      "current_run_id": "01M24D9JRE1KMH52748QGPPTA5",
-      "current_at": "2026-09-10T01:23:56.087Z"
+      "current_run_id": "01M250WNPVVM85N44E6HGRECJA",
+      "current_at": "2026-09-10T06:53:46.245Z"
     }
   },
   "events": [
