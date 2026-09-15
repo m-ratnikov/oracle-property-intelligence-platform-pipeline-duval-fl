@@ -1,14 +1,14 @@
 {
   "county": "duval",
-  "updated_at": "2026-09-14T18:55:46.400Z",
+  "updated_at": "2026-09-15T01:26:29.595Z",
   "by_event": {
-    "schedule": 98,
+    "schedule": 99,
     "workflow_dispatch": 19
   },
   "by_event_conclusion": {
     "schedule": {
       "in_progress": 1,
-      "success": 88,
+      "success": 89,
       "failure": 8,
       "cancelled": 1
     },
@@ -24,17 +24,28 @@
     "endpoint": "https://api.github.com/repos/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/workflows/pipeline.yml/runs?per_page=100",
     "repository": "m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl",
     "workflow": "pipeline.yml",
-    "fetched_at": "2026-09-14T18:55:46.399Z",
-    "api_total": 117,
+    "fetched_at": "2026-09-15T01:26:29.594Z",
+    "api_total": 118,
     "pages": 2,
     "detail": null
   },
   "workflow_runs": [
     {
-      "ci_run_id": "34881169268",
+      "ci_run_id": "34915502075",
       "event": "schedule",
       "status": "in_progress",
       "conclusion": null,
+      "head_branch": "main",
+      "head_sha": "3690e28ba818424bfad6112efac88893112090c0",
+      "run_attempt": 1,
+      "run_started_at": "2026-09-15T01:00:27Z",
+      "html_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/34915502075"
+    },
+    {
+      "ci_run_id": "34881169268",
+      "event": "schedule",
+      "status": "completed",
+      "conclusion": "success",
       "head_branch": "main",
       "head_sha": "94d0b101f2a0187ff57cefd588eb420abe449bf9",
       "run_attempt": 1,
@@ -1319,6 +1330,34 @@
     }
   ],
   "runs": [
+    {
+      "run_id": "01M2HAP5ZZ0253TMBZYJMWPRZ9",
+      "kind": "consolidation",
+      "trigger": "consolidation",
+      "ci_event": "schedule",
+      "ci_workflow": "pipeline",
+      "ci_run_id": "34915502075",
+      "ci_run_attempt": "1",
+      "ci_run_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/34915502075",
+      "ci_ref": "main",
+      "started_at": "2026-09-15T01:25:16.928Z",
+      "finished_at": "2026-09-15T01:25:51.818Z",
+      "status": "completed"
+    },
+    {
+      "run_id": "01M2H9CYJVP7ZC3D13BSGG8W5B",
+      "kind": "ingestion",
+      "trigger": "schedule",
+      "ci_event": "schedule",
+      "ci_workflow": "pipeline",
+      "ci_run_id": "34915502075",
+      "ci_run_attempt": "1",
+      "ci_run_url": "https://github.com/m-ratnikov/oracle-property-intelligence-platform-pipeline-duval-fl/actions/runs/34915502075",
+      "ci_ref": "main",
+      "started_at": "2026-09-15T01:02:45.852Z",
+      "finished_at": "2026-09-15T01:25:13.137Z",
+      "status": "completed"
+    },
     {
       "run_id": "01M2GM9WPENFMSYXKS3PPNWTFS",
       "kind": "consolidation",
