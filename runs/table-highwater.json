@@ -1,134 +1,134 @@
 {
   "county": "duval",
-  "updated_at": "2026-09-23T07:07:54.647Z",
+  "updated_at": "2026-09-23T13:04:40.974Z",
   "tables": {
     "parcels": {
       "max": 404023,
-      "max_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "max_at": "2026-09-23T07:07:54.647Z",
+      "max_run_id": "01M374H065VE2786V6N93R9F81",
+      "max_at": "2026-09-23T13:04:40.974Z",
       "current": 404023,
-      "current_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "current_at": "2026-09-23T07:07:54.647Z"
+      "current_run_id": "01M374H065VE2786V6N93R9F81",
+      "current_at": "2026-09-23T13:04:40.974Z"
     },
     "parcel_geometry": {
       "max": 405716,
-      "max_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "max_at": "2026-09-23T07:07:54.647Z",
+      "max_run_id": "01M374H065VE2786V6N93R9F81",
+      "max_at": "2026-09-23T13:04:40.974Z",
       "current": 405716,
-      "current_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "current_at": "2026-09-23T07:07:54.647Z"
+      "current_run_id": "01M374H065VE2786V6N93R9F81",
+      "current_at": "2026-09-23T13:04:40.974Z"
     },
     "sales_history": {
-      "max": 246853,
-      "max_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "max_at": "2026-09-23T07:07:54.647Z",
-      "current": 246853,
-      "current_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "current_at": "2026-09-23T07:07:54.647Z"
+      "max": 248017,
+      "max_run_id": "01M374H065VE2786V6N93R9F81",
+      "max_at": "2026-09-23T13:04:40.974Z",
+      "current": 248017,
+      "current_run_id": "01M374H065VE2786V6N93R9F81",
+      "current_at": "2026-09-23T13:04:40.974Z"
     },
     "permits": {
       "max": 0,
-      "max_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "max_at": "2026-09-23T07:07:54.647Z",
+      "max_run_id": "01M374H065VE2786V6N93R9F81",
+      "max_at": "2026-09-23T13:04:40.974Z",
       "current": 0,
-      "current_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "current_at": "2026-09-23T07:07:54.647Z"
+      "current_run_id": "01M374H065VE2786V6N93R9F81",
+      "current_at": "2026-09-23T13:04:40.974Z"
     },
     "contractors": {
-      "max": 4101,
-      "max_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "max_at": "2026-09-23T07:07:54.647Z",
-      "current": 4101,
-      "current_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "current_at": "2026-09-23T07:07:54.647Z"
+      "max": 4105,
+      "max_run_id": "01M374H065VE2786V6N93R9F81",
+      "max_at": "2026-09-23T13:04:40.974Z",
+      "current": 4105,
+      "current_run_id": "01M374H065VE2786V6N93R9F81",
+      "current_at": "2026-09-23T13:04:40.974Z"
     },
     "businesses": {
       "max": 440562,
-      "max_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "max_at": "2026-09-23T07:07:54.647Z",
+      "max_run_id": "01M374H065VE2786V6N93R9F81",
+      "max_at": "2026-09-23T13:04:40.974Z",
       "current": 440562,
-      "current_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "current_at": "2026-09-23T07:07:54.647Z"
+      "current_run_id": "01M374H065VE2786V6N93R9F81",
+      "current_at": "2026-09-23T13:04:40.974Z"
     },
     "business_events": {
       "max": 40189,
-      "max_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "max_at": "2026-09-23T07:07:54.647Z",
+      "max_run_id": "01M374H065VE2786V6N93R9F81",
+      "max_at": "2026-09-23T13:04:40.974Z",
       "current": 40189,
-      "current_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "current_at": "2026-09-23T07:07:54.647Z"
+      "current_run_id": "01M374H065VE2786V6N93R9F81",
+      "current_at": "2026-09-23T13:04:40.974Z"
     },
     "places": {
       "max": 3084,
-      "max_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "max_at": "2026-09-23T07:07:54.647Z",
+      "max_run_id": "01M374H065VE2786V6N93R9F81",
+      "max_at": "2026-09-23T13:04:40.974Z",
       "current": 3084,
-      "current_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "current_at": "2026-09-23T07:07:54.647Z"
+      "current_run_id": "01M374H065VE2786V6N93R9F81",
+      "current_at": "2026-09-23T13:04:40.974Z"
     },
     "transit_stops": {
       "max": 2501,
-      "max_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "max_at": "2026-09-23T07:07:54.647Z",
+      "max_run_id": "01M374H065VE2786V6N93R9F81",
+      "max_at": "2026-09-23T13:04:40.974Z",
       "current": 2501,
-      "current_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "current_at": "2026-09-23T07:07:54.647Z"
+      "current_run_id": "01M374H065VE2786V6N93R9F81",
+      "current_at": "2026-09-23T13:04:40.974Z"
     },
     "transit_routes": {
       "max": 45,
-      "max_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "max_at": "2026-09-23T07:07:54.647Z",
+      "max_run_id": "01M374H065VE2786V6N93R9F81",
+      "max_at": "2026-09-23T13:04:40.974Z",
       "current": 45,
-      "current_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "current_at": "2026-09-23T07:07:54.647Z"
+      "current_run_id": "01M374H065VE2786V6N93R9F81",
+      "current_at": "2026-09-23T13:04:40.974Z"
     },
     "water_bodies": {
       "max": 757,
-      "max_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "max_at": "2026-09-23T07:07:54.647Z",
+      "max_run_id": "01M374H065VE2786V6N93R9F81",
+      "max_at": "2026-09-23T13:04:40.974Z",
       "current": 757,
-      "current_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "current_at": "2026-09-23T07:07:54.647Z"
+      "current_run_id": "01M374H065VE2786V6N93R9F81",
+      "current_at": "2026-09-23T13:04:40.974Z"
     },
     "address_points": {
-      "max": 672795,
-      "max_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "max_at": "2026-09-23T07:07:54.647Z",
-      "current": 672795,
-      "current_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "current_at": "2026-09-23T07:07:54.647Z"
+      "max": 672839,
+      "max_run_id": "01M374H065VE2786V6N93R9F81",
+      "max_at": "2026-09-23T13:04:40.974Z",
+      "current": 672839,
+      "current_run_id": "01M374H065VE2786V6N93R9F81",
+      "current_at": "2026-09-23T13:04:40.974Z"
     },
     "coj_parcels": {
       "max": 408380,
-      "max_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "max_at": "2026-09-23T07:07:54.647Z",
+      "max_run_id": "01M374H065VE2786V6N93R9F81",
+      "max_at": "2026-09-23T13:04:40.974Z",
       "current": 408380,
-      "current_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "current_at": "2026-09-23T07:07:54.647Z"
+      "current_run_id": "01M374H065VE2786V6N93R9F81",
+      "current_at": "2026-09-23T13:04:40.974Z"
     },
     "owners": {
       "max": 323925,
-      "max_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "max_at": "2026-09-23T07:07:54.647Z",
+      "max_run_id": "01M374H065VE2786V6N93R9F81",
+      "max_at": "2026-09-23T13:04:40.974Z",
       "current": 323925,
-      "current_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "current_at": "2026-09-23T07:07:54.647Z"
+      "current_run_id": "01M374H065VE2786V6N93R9F81",
+      "current_at": "2026-09-23T13:04:40.974Z"
     },
     "entity_links": {
-      "max": 1446860,
-      "max_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "max_at": "2026-09-23T07:07:54.647Z",
-      "current": 1446860,
-      "current_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "current_at": "2026-09-23T07:07:54.647Z"
+      "max": 1446914,
+      "max_run_id": "01M374H065VE2786V6N93R9F81",
+      "max_at": "2026-09-23T13:04:40.974Z",
+      "current": 1446914,
+      "current_run_id": "01M374H065VE2786V6N93R9F81",
+      "current_at": "2026-09-23T13:04:40.974Z"
     },
     "derived.properties_features": {
       "max": 404023,
-      "max_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "max_at": "2026-09-23T07:07:54.647Z",
+      "max_run_id": "01M374H065VE2786V6N93R9F81",
+      "max_at": "2026-09-23T13:04:40.974Z",
       "current": 404023,
-      "current_run_id": "01M36G5SKSVCY0QY57G3ZS8E6P",
-      "current_at": "2026-09-23T07:07:54.647Z"
+      "current_run_id": "01M374H065VE2786V6N93R9F81",
+      "current_at": "2026-09-23T13:04:40.974Z"
     }
   },
   "events": [
