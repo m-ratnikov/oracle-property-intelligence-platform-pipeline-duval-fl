@@ -1,6 +1,6 @@
 {
   "county": "duval",
-  "exportedAt": "2026-11-03T14:43:16.423Z",
+  "exportedAt": "2026-11-03T23:44:38.503Z",
   "datasets": [
     {
       "county": "duval",
@@ -34,7 +34,7 @@
       "expected_count": 64532,
       "first_loaded_at": "2026-08-21T13:59:15Z",
       "last_loaded_at": "2026-08-21T13:59:15Z",
-      "cid": "QmYCiBdPLKA3yiM6kNZgPRTE1QLvwrcMtgADwvpji73AY4",
+      "cid": "QmcACMkCgZXPq9FkJAcjbRC2jMKEA2zFfs3XybzkvztcNJ",
       "ipns_label": "duval-oracle-artifacts",
       "track": "sales",
       "source_system": "fdor_sdf",
@@ -50,10 +50,10 @@
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
-      "table_rows_total": 468005,
-      "rows_from_other_tracks": 403473,
+      "table_rows_total": 469605,
+      "rows_from_other_tracks": 405073,
       "additional_rows_by_source": {
-        "PA_DETAIL": 403473
+        "PA_DETAIL": 405073
       }
     },
     {
@@ -75,7 +75,7 @@
         "192 MB archive; centroids computed from polygons (not rooftop points)",
         "Parcels present in NAL but missing from the shapefile get no coordinates"
       ],
-      "last_run_id": "01M6GWCJF5QE1KBDMSXX1X2WC0",
+      "last_run_id": "01M6HVW08FZED74FA1JX8CHN0P",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
@@ -85,11 +85,11 @@
     {
       "county": "duval",
       "source": "transit",
-      "ingested_count": 2501,
+      "ingested_count": 2528,
       "expected_count": 2501,
       "first_loaded_at": "2026-09-01T06:44:25Z",
-      "last_loaded_at": "2026-09-01T06:44:25Z",
-      "cid": "QmWN5N7QTwSD41seMX2km91iQEpAhUD6omAGrbDC9cXX3S",
+      "last_loaded_at": "2026-11-03T23:28:32Z",
+      "cid": "QmduW27Jrzaa5ctKwyZx5FMnJJEQssgHcL9niygCxuDAzq",
       "ipns_label": "duval-oracle-artifacts",
       "track": "transit",
       "source_system": "jta_gtfs",
@@ -101,11 +101,11 @@
         "No GTFS-RT; no licence text published",
         "Walking distance is straight-line (haversine), not network distance"
       ],
-      "last_run_id": "01M6GWCJF5QE1KBDMSXX1X2WC0",
+      "last_run_id": "01M6HVW08FZED74FA1JX8CHN0P",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
-      "routes": 45,
+      "routes": 46,
       "parcels_near_transit_800m": 326112
     },
     {
@@ -128,7 +128,7 @@
         "NHD lake/pond polygons below 1 ha and unnamed flowlines are excluded",
         "Parcel polygons are not stored; the parcel bounding box stands in for the polygon"
       ],
-      "last_run_id": "01M6GWCJF5QE1KBDMSXX1X2WC0",
+      "last_run_id": "01M6HVW08FZED74FA1JX8CHN0P",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
@@ -180,7 +180,7 @@
         "Layout page (dos.sunbiz.org/data-definitions/cor.html) was unreachable (HTTP 522); offsets validated against live records instead",
         "Officers kept as names only; events file parsed for doc number + raw line"
       ],
-      "last_run_id": "01M6GWCJF5QE1KBDMSXX1X2WC0",
+      "last_run_id": "01M6HVW08FZED74FA1JX8CHN0P",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
@@ -193,9 +193,9 @@
       "source": "entity_links",
       "ingested_count": 1449909,
       "expected_count": 1449909,
-      "first_loaded_at": "2026-11-03T14:42:38Z",
-      "last_loaded_at": "2026-11-03T14:42:38Z",
-      "cid": "QmbksPYepBLdomg3XfNJiy6UxwVX77Mri2L6xsfnNvEjmb",
+      "first_loaded_at": "2026-11-03T23:44:13Z",
+      "last_loaded_at": "2026-11-03T23:44:13Z",
+      "cid": "QmcdD7cmUP5RWvKV4S3XhJPsfL3qtsU9djWYCXfbtW498b",
       "ipns_label": "duval-oracle-artifacts",
       "track": "links",
       "source_system": "duval_reconciliation",
@@ -206,7 +206,7 @@
       "limitations": [
         "Address matching is exact on the normalized line 1 + ZIP5; unit-level mismatches are not linked"
       ],
-      "last_run_id": "01M6GWCJF5QE1KBDMSXX1X2WC0",
+      "last_run_id": "01M6HVW08FZED74FA1JX8CHN0P",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
@@ -231,7 +231,7 @@
         "US egress only (COJ hosts block non-US and cloud IPs)",
         "Paged at 2000 rows, concurrency 2, 250 ms delay"
       ],
-      "last_run_id": "01M6GWCJF5QE1KBDMSXX1X2WC0",
+      "last_run_id": "01M6HVW08FZED74FA1JX8CHN0P",
       "last_run_status": "completed",
       "requires_us_egress": true,
       "last_skip_reason": "skipped: non-US egress (HTTP 0, fetch failed)",
@@ -256,7 +256,7 @@
         "US egress only (COJ hosts block non-US and cloud IPs)",
         "First run is a full paged pull; later runs filter EDIT_DATE"
       ],
-      "last_run_id": "01M6GWCJF5QE1KBDMSXX1X2WC0",
+      "last_run_id": "01M6HVW08FZED74FA1JX8CHN0P",
       "last_run_status": "completed",
       "requires_us_egress": true,
       "last_skip_reason": "skipped: non-US egress (HTTP 0, fetch failed)"
@@ -280,7 +280,7 @@
         "HTTP 403 from non-US IPs; from a US runner with a browser UA the files download",
         "BBB not used: terms forbid aggregation"
       ],
-      "last_run_id": "01M6GWCJF5QE1KBDMSXX1X2WC0",
+      "last_run_id": "01M6HVW08FZED74FA1JX8CHN0P",
       "last_run_status": "completed",
       "requires_us_egress": true,
       "last_skip_reason": "skipped: non-US egress (HTTP 403)",
@@ -306,7 +306,7 @@
         "US egress only; one cheap discovery + probe per run is kept as evidence (status codes recorded); enumeration runs only when a probe returns JSON",
         "Angular shell loads chunks dynamically, so static literal discovery finds no API paths"
       ],
-      "last_run_id": "01M6GWCJF5QE1KBDMSXX1X2WC0",
+      "last_run_id": "01M6HVW08FZED74FA1JX8CHN0P",
       "last_run_status": "completed",
       "requires_us_egress": true,
       "last_skip_reason": "skipped: non-US egress (HTTP 0, fetch failed)",
@@ -316,10 +316,10 @@
     {
       "county": "duval",
       "source": "pa_detail",
-      "ingested_count": 79929,
+      "ingested_count": 80154,
       "expected_count": 398324,
       "first_loaded_at": "2026-08-21T18:51:08Z",
-      "last_loaded_at": "2026-11-03T14:42:38Z",
+      "last_loaded_at": "2026-11-03T23:44:12Z",
       "cid": null,
       "ipns_label": null,
       "track": "pa_detail",
@@ -333,11 +333,11 @@
         "Slow source by design: ~300 pages per run; full seed (398,324 parcels) needs many runs; throughput recorded per run",
         "Lexicon transform runs the vendored Elephant scripts per page; owners/*.json prerequisites come from the mapping scripts on the same page"
       ],
-      "last_run_id": "01M6FEX7DC28NS206BDNR303QC",
+      "last_run_id": "01M6HVW08FZED74FA1JX8CHN0P",
       "last_run_status": "completed",
       "requires_us_egress": true,
       "last_skip_reason": "skipped: non-US egress (HTTP 0, fetch failed)",
-      "sales_history_rows_contributed": 403473
+      "sales_history_rows_contributed": 405073
     }
   ]
 }
