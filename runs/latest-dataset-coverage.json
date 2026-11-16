@@ -1,6 +1,6 @@
 {
   "county": "duval",
-  "exportedAt": "2026-11-15T19:17:53.884Z",
+  "exportedAt": "2026-11-16T06:47:41.009Z",
   "datasets": [
     {
       "county": "duval",
@@ -75,7 +75,7 @@
         "192 MB archive; centroids computed from polygons (not rooftop points)",
         "Parcels present in NAL but missing from the shapefile get no coordinates"
       ],
-      "last_run_id": "01M7G965Z17DRSJGQJ8VQVENZM",
+      "last_run_id": "01M7HGXK4YW8H62SZHRP4QTJ3T",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
@@ -101,7 +101,7 @@
         "No GTFS-RT; no licence text published",
         "Walking distance is straight-line (haversine), not network distance"
       ],
-      "last_run_id": "01M7G965Z17DRSJGQJ8VQVENZM",
+      "last_run_id": "01M7HGXK4YW8H62SZHRP4QTJ3T",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
@@ -128,7 +128,7 @@
         "NHD lake/pond polygons below 1 ha and unnamed flowlines are excluded",
         "Parcel polygons are not stored; the parcel bounding box stands in for the polygon"
       ],
-      "last_run_id": "01M7G965Z17DRSJGQJ8VQVENZM",
+      "last_run_id": "01M7HGXK4YW8H62SZHRP4QTJ3T",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
@@ -163,11 +163,11 @@
     {
       "county": "duval",
       "source": "sunbiz",
-      "ingested_count": 443778,
-      "expected_count": 443778,
+      "ingested_count": 443823,
+      "expected_count": 443823,
       "first_loaded_at": "2026-08-21T18:36:07Z",
-      "last_loaded_at": "2026-11-15T06:40:34Z",
-      "cid": "QmQ5Gf7t6hGopgVF99oJv1HeqgXv456rqTj2UYMPuPYXQi",
+      "last_loaded_at": "2026-11-16T06:39:50Z",
+      "cid": "QmQfkeTpbgwrnzRsrutCmKV6dWjzNJfc7XacJUX8dsGNFT",
       "ipns_label": "duval-oracle-artifacts",
       "track": "businesses",
       "source_system": "sunbiz",
@@ -180,22 +180,22 @@
         "Layout page (dos.sunbiz.org/data-definitions/cor.html) was unreachable (HTTP 522); offsets validated against live records instead",
         "Officers kept as names only; events file parsed for doc number + raw line"
       ],
-      "last_run_id": "01M7G965Z17DRSJGQJ8VQVENZM",
+      "last_run_id": "01M7HGXK4YW8H62SZHRP4QTJ3T",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
       "events": 110554,
-      "files_processed": 174,
-      "parcels_linked_to_business": 117526
+      "files_processed": 175,
+      "parcels_linked_to_business": 117534
     },
     {
       "county": "duval",
       "source": "entity_links",
-      "ingested_count": 1450609,
-      "expected_count": 1450609,
-      "first_loaded_at": "2026-11-15T19:17:18Z",
-      "last_loaded_at": "2026-11-15T19:17:18Z",
-      "cid": "QmYGVyxjF6XQ8dEXMvU3vZwiZv38NtrhxjLWhoDaijdxvg",
+      "ingested_count": 1450629,
+      "expected_count": 1450629,
+      "first_loaded_at": "2026-11-16T06:47:01Z",
+      "last_loaded_at": "2026-11-16T06:47:01Z",
+      "cid": "QmRACSJy5JmAoyVwfsfrqUFPGHoTw7szViczFrFGk7Aju9",
       "ipns_label": "duval-oracle-artifacts",
       "track": "links",
       "source_system": "duval_reconciliation",
@@ -206,7 +206,7 @@
       "limitations": [
         "Address matching is exact on the normalized line 1 + ZIP5; unit-level mismatches are not linked"
       ],
-      "last_run_id": "01M7G965Z17DRSJGQJ8VQVENZM",
+      "last_run_id": "01M7HGXK4YW8H62SZHRP4QTJ3T",
       "last_run_status": "completed",
       "requires_us_egress": false,
       "last_skip_reason": null,
@@ -231,7 +231,7 @@
         "US egress only (COJ hosts block non-US and cloud IPs)",
         "Paged at 2000 rows, concurrency 2, 250 ms delay"
       ],
-      "last_run_id": "01M7G965Z17DRSJGQJ8VQVENZM",
+      "last_run_id": "01M7HGXK4YW8H62SZHRP4QTJ3T",
       "last_run_status": "completed",
       "requires_us_egress": true,
       "last_skip_reason": "skipped: non-US egress (HTTP 0, fetch failed)",
@@ -256,7 +256,7 @@
         "US egress only (COJ hosts block non-US and cloud IPs)",
         "First run is a full paged pull; later runs filter EDIT_DATE"
       ],
-      "last_run_id": "01M7G965Z17DRSJGQJ8VQVENZM",
+      "last_run_id": "01M7HGXK4YW8H62SZHRP4QTJ3T",
       "last_run_status": "completed",
       "requires_us_egress": true,
       "last_skip_reason": "skipped: non-US egress (HTTP 0, fetch failed)"
@@ -280,7 +280,7 @@
         "HTTP 403 from non-US IPs; from a US runner with a browser UA the files download",
         "BBB not used: terms forbid aggregation"
       ],
-      "last_run_id": "01M7G965Z17DRSJGQJ8VQVENZM",
+      "last_run_id": "01M7HGXK4YW8H62SZHRP4QTJ3T",
       "last_run_status": "completed",
       "requires_us_egress": true,
       "last_skip_reason": "skipped: non-US egress (HTTP 403)",
@@ -306,7 +306,7 @@
         "US egress only; one cheap discovery + probe per run is kept as evidence (status codes recorded); enumeration runs only when a probe returns JSON",
         "Angular shell loads chunks dynamically, so static literal discovery finds no API paths"
       ],
-      "last_run_id": "01M7G965Z17DRSJGQJ8VQVENZM",
+      "last_run_id": "01M7HGXK4YW8H62SZHRP4QTJ3T",
       "last_run_status": "completed",
       "requires_us_egress": true,
       "last_skip_reason": "skipped: non-US egress (HTTP 0, fetch failed)",
