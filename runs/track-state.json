@@ -1,35 +1,35 @@
 {
   "county": "duval",
-  "run_id": "01M85DHQAZC3EHCPW6X742G3P5",
-  "updated_at": "2026-11-24T00:16:30.126Z",
+  "run_id": "01M86FXK49GXYWX9GZWXGAJDYY",
+  "updated_at": "2026-11-24T10:23:32.184Z",
   "state": [
     {
       "track": "coj_addresses",
       "key": "last_edit_date_iso",
       "value": "2026-11-13T15:57:56",
-      "updated_at": "2026-11-24T00:09:23Z",
-      "run_id": "01M85DHQAZC3EHCPW6X742G3P5"
+      "updated_at": "2026-11-24T10:13:05Z",
+      "run_id": "01M86FXK49GXYWX9GZWXGAJDYY"
     },
     {
       "track": "coj_addresses",
       "key": "watermark_held_runs",
       "value": "0",
-      "updated_at": "2026-11-24T00:09:23Z",
-      "run_id": "01M85DHQAZC3EHCPW6X742G3P5"
+      "updated_at": "2026-11-24T10:13:05Z",
+      "run_id": "01M86FXK49GXYWX9GZWXGAJDYY"
     },
     {
       "track": "pa_detail",
       "key": "seed_cursor",
-      "value": "96511",
-      "updated_at": "2026-11-23T08:00:25Z",
-      "run_id": "01M83NQMSX4RPB9K7KC8PH977H"
+      "value": "97111",
+      "updated_at": "2026-11-24T10:22:52Z",
+      "run_id": "01M86FXK49GXYWX9GZWXGAJDYY"
     },
     {
       "track": "permits",
       "key": "discovered_api",
       "value": "[]",
-      "updated_at": "2026-11-24T00:09:45Z",
-      "run_id": "01M85DHQAZC3EHCPW6X742G3P5"
+      "updated_at": "2026-11-24T10:13:28Z",
+      "run_id": "01M86FXK49GXYWX9GZWXGAJDYY"
     }
   ]
 }
