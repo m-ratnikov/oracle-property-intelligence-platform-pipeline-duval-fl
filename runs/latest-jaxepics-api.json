@@ -1,10 +1,10 @@
 {
-  "discoveredAt": "2026-11-23T07:53:50.414Z",
+  "discoveredAt": "2026-11-24T00:09:45.416Z",
   "shellUrl": "https://jaxepics.coj.net/Permit/View/B-25-279425.000",
   "scripts": [
     "https://js.arcgis.com/calcite-components/3.0.3/calcite.esm.js",
     "polyfills-5FDKUQTZ.js",
-    "main-GBCR4VS6.js"
+    "main-W3W3T6AX.js"
   ],
   "bundles": [
     {
@@ -20,7 +20,7 @@
       "literals": 0
     },
     {
-      "url": "https://jaxepics.coj.net/main-GBCR4VS6.js",
+      "url": "https://jaxepics.coj.net/main-W3W3T6AX.js",
       "status": 200,
       "bytes": 616,
       "literals": 0
