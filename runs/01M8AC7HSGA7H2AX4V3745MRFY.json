@@ -1,0 +1,76 @@
+{
+  "run_id": "01M8AC7HSGA7H2AX4V3745MRFY",
+  "county": "duval",
+  "started_at": "2026-11-25T22:11:44.562Z",
+  "finished_at": "2026-11-25T22:12:22.985Z",
+  "status": "completed",
+  "trigger": "consolidation",
+  "git_sha": null,
+  "tracks": [
+    "consolidation"
+  ],
+  "window": "changed",
+  "sources": [
+    {
+      "track": "consolidation",
+      "source_system": "duval_consolidation",
+      "target_table": "consolidation_state",
+      "source_url": "derived",
+      "artifact_path": "open-data",
+      "artifact_sha256": null,
+      "artifact_etag": null,
+      "artifact_last_modified": null,
+      "artifact_bytes": null,
+      "download_status": "derived",
+      "rows_staged": 404023,
+      "inserted": 404,
+      "updated": 0,
+      "unchanged": 403619,
+      "missing_in_source": 0,
+      "table_total_after": 404023,
+      "delta_vs_prev_total": 0,
+      "started_at": "2026-11-25T22:11:44.562Z",
+      "finished_at": "2026-11-25T22:12:22.985Z",
+      "status": "completed",
+      "limitations": [],
+      "notes": {
+        "shards": 41,
+        "totalBytes": 4908641288,
+        "indexCid": "QmY5GdnQsDUnHrukmUuxMZ469pn3JkiccoZ98jS2tcsfiT",
+        "manifestCid": "QmbsKoNJ9Ta5zSac4NVJ2MPj2shjLCvPfbfknjM9uY14K4",
+        "ms": 26718,
+        "limit": null,
+        "since": "changed"
+      },
+      "error": null
+    }
+  ],
+  "limitations": [],
+  "totals": {
+    "consolidation_state": 404023,
+    "totalBytes": 4908641288,
+    "shards": 41
+  },
+  "artifacts": {
+    "openData": {
+      "outDir": "/home/runner/work/oracle-property-intelligence-platform-pipeline-duval-fl/oracle-property-intelligence-platform-pipeline-duval-fl/.data/artifacts/publish/duval/open-data",
+      "indexCid": "QmY5GdnQsDUnHrukmUuxMZ469pn3JkiccoZ98jS2tcsfiT",
+      "manifestCid": "QmbsKoNJ9Ta5zSac4NVJ2MPj2shjLCvPfbfknjM9uY14K4",
+      "propertyCount": 404023,
+      "totalBytes": 4908641288,
+      "shards": 41
+    },
+    "queryTable": {
+      "path": "query-table.parquet",
+      "rows": 404023,
+      "bytes": 51242914,
+      "sha256": "02f0002634509c6a830fecb4af2fb306d3b77ae3869f3e020174b7d566044c8b",
+      "cid": "QmPido9vTdAWMMzJBGzpWJ4fLT6J5sJ6CeimaSmPQi8HKD",
+      "cidV1": "bafybeiaupvxlhzvy5e6bqo33uiegdpbckfjm4pxhzevgfy4rmrxwhboi5a",
+      "validationOk": true,
+      "problems": [],
+      "propertyCidFilled": 404023
+    }
+  },
+  "error": null
+}
