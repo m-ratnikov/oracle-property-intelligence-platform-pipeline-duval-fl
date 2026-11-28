@@ -1,0 +1,860 @@
+{
+  "run_id": "01M8GJBDY5NQAC6T37ZBYP4CYB",
+  "county": "duval",
+  "started_at": "2026-11-28T07:54:09.734Z",
+  "finished_at": "2026-11-28T08:14:04.058Z",
+  "status": "completed_with_errors",
+  "trigger": "schedule",
+  "git_sha": "043671a651565c40f232655e09c1a7eded739560",
+  "tracks": [
+    "appraisal",
+    "sales",
+    "geometry",
+    "transit",
+    "water",
+    "places",
+    "businesses",
+    "coj_parcels",
+    "coj_addresses",
+    "contractors",
+    "permits",
+    "pa_detail",
+    "links"
+  ],
+  "window": null,
+  "sources": [
+    {
+      "track": "appraisal",
+      "source_system": "duval_appraiser",
+      "target_table": "parcels",
+      "source_url": "https://floridarevenue.com/property/dataportal/Documents/PTO%20Data%20Portal/Tax%20Roll%20Data%20Files/NAL/2026P/Duval%2026%20Preliminary%20NAL%202026.zip",
+      "artifact_path": null,
+      "artifact_sha256": null,
+      "artifact_etag": null,
+      "artifact_last_modified": null,
+      "artifact_bytes": null,
+      "download_status": null,
+      "rows_staged": 0,
+      "inserted": null,
+      "updated": null,
+      "unchanged": null,
+      "missing_in_source": null,
+      "table_total_after": null,
+      "delta_vs_prev_total": null,
+      "started_at": "2026-11-28T07:54:10.869Z",
+      "finished_at": "2026-11-28T07:54:10.869Z",
+      "status": "failed",
+      "limitations": [
+        "FDOR posts only the current roll type; prior years by email request",
+        "No roof attributes in the bulk roll (ACT_YR_BLT/EFF_YR_BLT used as roof-age proxy)",
+        "Sale fields cover only the roll's current and prior year (2025-2026)"
+      ],
+      "notes": {},
+      "error": "Download failed: HTTP 404 NOT FOUND for https://floridarevenue.com/property/dataportal/Documents/PTO%20Data%20Portal/Tax%20Roll%20Data%20Files/NAL/2026P/Duval%2026%20Preliminary%20NAL%202026.zip"
+    },
+    {
+      "track": "sales",
+      "source_system": "fdor_sdf",
+      "target_table": "sales_history",
+      "source_url": "https://floridarevenue.com/property/dataportal/Documents/PTO%20Data%20Portal/Tax%20Roll%20Data%20Files/SDF/2026P/Duval%2026%20Preliminary%20SDF%202026.zip",
+      "artifact_path": null,
+      "artifact_sha256": null,
+      "artifact_etag": null,
+      "artifact_last_modified": null,
+      "artifact_bytes": null,
+      "download_status": null,
+      "rows_staged": 0,
+      "inserted": null,
+      "updated": null,
+      "unchanged": null,
+      "missing_in_source": null,
+      "table_total_after": null,
+      "delta_vs_prev_total": null,
+      "started_at": "2026-11-28T07:54:11.763Z",
+      "finished_at": "2026-11-28T07:54:11.763Z",
+      "status": "failed",
+      "limitations": [
+        "Sale dates carry year+month only (day unknown; stored as first of month)",
+        "Only 2025-2026 transfers; older tenure comes from the COJ parcels layer (SALESL*)"
+      ],
+      "notes": {},
+      "error": "Download failed: HTTP 404 NOT FOUND for https://floridarevenue.com/property/dataportal/Documents/PTO%20Data%20Portal/Tax%20Roll%20Data%20Files/SDF/2026P/Duval%2026%20Preliminary%20SDF%202026.zip"
+    },
+    {
+      "track": "geometry",
+      "source_system": "fdor_par",
+      "target_table": "parcel_geometry",
+      "source_url": "https://floridarevenue.com/property/dataportal/Documents/PTO%20Data%20Portal/Map%20Data/2026F/2026F%20PAR/duval_2026Ppar.zip",
+      "artifact_path": "geometry/duval_2026ppar.zip",
+      "artifact_sha256": "ba461d7ef298801fe50fd28a880c2504e5afdcaff9384c6bf8521f9556963244",
+      "artifact_etag": "\"{DC343265-01E9-4E74-9894-75E0DA1A24FF},2\"",
+      "artifact_last_modified": "Fri, 07 Aug 2026 12:43:19 GMT",
+      "artifact_bytes": 192382098,
+      "download_status": "unchanged",
+      "rows_staged": 405716,
+      "inserted": 0,
+      "updated": 0,
+      "unchanged": 405716,
+      "missing_in_source": 0,
+      "table_total_after": 405716,
+      "delta_vs_prev_total": 0,
+      "started_at": "2026-11-28T07:54:11.768Z",
+      "finished_at": "2026-11-28T07:54:21.494Z",
+      "status": "completed",
+      "limitations": [
+        "192 MB archive; centroids computed from polygons (not rooftop points)",
+        "Parcels present in NAL but missing from the shapefile get no coordinates"
+      ],
+      "notes": {
+        "shapefile": "duval_2026Ppar.shp",
+        "featureCount": 405716,
+        "sourceCrs": "NAD83(HARN) / Florida East (ftUS) [EPSG:2881]",
+        "readMs": 7340,
+        "parcelsWithCoordinates": 403813,
+        "parcelsTotal": 404023
+      },
+      "error": null
+    },
+    {
+      "track": "transit",
+      "source_system": "jta_gtfs",
+      "target_table": "transit_stops",
+      "source_url": "https://ride.jtafla.com/gtfs-archive/gtfs.zip",
+      "artifact_path": "transit/gtfs.zip",
+      "artifact_sha256": "4a9d9179e86b66b25ccb62734a8396bd5c41773463c64272b5439c9848bcfd76",
+      "artifact_etag": "\"1dd78b118fe740a\"",
+      "artifact_last_modified": "Fri, 20 Nov 2026 05:36:31 GMT",
+      "artifact_bytes": 4861322,
+      "download_status": "unchanged",
+      "rows_staged": 2355,
+      "inserted": 0,
+      "updated": 0,
+      "unchanged": 2355,
+      "missing_in_source": 173,
+      "table_total_after": 2528,
+      "delta_vs_prev_total": 0,
+      "started_at": "2026-11-28T07:54:21.497Z",
+      "finished_at": "2026-11-28T07:54:51.671Z",
+      "status": "completed",
+      "limitations": [
+        "No GTFS-RT; no licence text published",
+        "Walking distance is straight-line (haversine), not network distance"
+      ],
+      "notes": {
+        "routes": 40,
+        "routeTypes": {
+          "bus": 40
+        },
+        "stopsWithoutService": 1,
+        "routesMerge": {
+          "staged": 40,
+          "inserted": 0,
+          "updated": 0,
+          "unchanged": 40,
+          "missingInSource": 6,
+          "totalBefore": 46,
+          "totalAfter": 46
+        },
+        "nearest": {
+          "parcels": 403813,
+          "withNeighbour": 403813,
+          "fallback": 47861
+        }
+      },
+      "error": null
+    },
+    {
+      "track": "water",
+      "source_system": "coj_nhd_hydrography",
+      "target_table": "water_bodies",
+      "source_url": "https://services1.arcgis.com/NXfNVaFp7QMxnE3j/arcgis/rest/services/stjohnsriver/FeatureServer/0",
+      "artifact_path": "water/nhd_h_0307_hu4_gdb.zip",
+      "artifact_sha256": "5c68b47be1628e8d4552880396fb59675ff73a8bc3fd94af02a60f1c60fafa29",
+      "artifact_etag": "\"0e16450c7809c3eac18ad7464e02f309-12\"",
+      "artifact_last_modified": "Sat, 18 Nov 2023 01:48:37 GMT",
+      "artifact_bytes": 97334732,
+      "download_status": "unchanged",
+      "rows_staged": 757,
+      "inserted": 0,
+      "updated": 0,
+      "unchanged": 757,
+      "missing_in_source": 0,
+      "table_total_after": 757,
+      "delta_vs_prev_total": 0,
+      "started_at": "2026-11-28T07:54:51.675Z",
+      "finished_at": "2026-11-28T07:59:38.554Z",
+      "status": "completed",
+      "limitations": [
+        "Water view is a proximity proxy (centroid within 150 m of a mapped shoreline vertex, or parcel bbox within 30 m), not a sightline analysis; distances beyond ~1 km are not computed",
+        "NHD lake/pond polygons below 1 ha and unnamed flowlines are excluded",
+        "Parcel polygons are not stored; the parcel bounding box stands in for the polygon"
+      ],
+      "notes": {
+        "stjohnsriver_features": 10,
+        "stjohnsriver_sha256": "359e1aa54191d2389834fc29ecc9d043865273ec9a87d4e5508519d0f381c700",
+        "jax_river_features": 1,
+        "jax_river_sha256": "03e50421a52f30acf380444c890240cba3971a8d05d87717f2e860d637ca28d1",
+        "nhdLayers": {
+          "NHDFCode": 126,
+          "NHDFeatureToMetadata": 682348,
+          "NHDFlow": 156740,
+          "NHDFlowlineVAA": 120345,
+          "NHDMetadata": 228,
+          "NHDProcessingParameters": 5,
+          "NHDReachCodeMaintenance": 130654,
+          "NHDReachCrossReference": 144441,
+          "NHDSourceCitation": 307,
+          "NHDStatus": 0,
+          "NHDVerticalRelationship": 0,
+          "NHDWaterbody": 88049,
+          "NHDPointEventFC": 2530,
+          "NHDPoint": 105,
+          "NHDLineEventFC": 0,
+          "NHDLine": 235,
+          "NHDFlowline": 121904,
+          "NHDAreaEventFC": 0,
+          "NHDArea": 492
+        },
+        "byLayer": {
+          "coj_jax_river": 1,
+          "coj_stjohnsriver": 10,
+          "nhd_NHDArea": 9,
+          "nhd_NHDFlowline": 514,
+          "nhd_NHDWaterbody": 223
+        },
+        "readMs": 9188,
+        "waterVertices": 55620,
+        "distance": {
+          "parcelsWithin1km": 228369,
+          "waterViewFlag": 89588,
+          "ms": 274938
+        }
+      },
+      "error": null
+    },
+    {
+      "track": "places",
+      "source_system": "overture_places",
+      "target_table": "places",
+      "source_url": "s3://overturemaps-us-west-2/release/2026-08-19.0/theme=places/type=place/*",
+      "artifact_path": null,
+      "artifact_sha256": null,
+      "artifact_etag": null,
+      "artifact_last_modified": null,
+      "artifact_bytes": null,
+      "download_status": null,
+      "rows_staged": 0,
+      "inserted": null,
+      "updated": null,
+      "unchanged": null,
+      "missing_in_source": null,
+      "table_total_after": null,
+      "delta_vs_prev_total": null,
+      "started_at": "2026-11-28T07:59:39.329Z",
+      "finished_at": "2026-11-28T07:59:39.329Z",
+      "status": "failed",
+      "limitations": [
+        "Brand matching by name (Starbucks); confidence varies; CDLA-Permissive 2.0",
+        "Reading the release scans ~2.5 min of remote parquet"
+      ],
+      "notes": {},
+      "error": "IO Error: No files found that match the pattern \"s3://overturemaps-us-west-2/release/2026-08-19.0/theme=places/type=place/*\"\n\nLINE 17:     FROM read_parquet('s3://overturemaps-us-west-2/release/2026-08...\n                  ^"
+    },
+    {
+      "track": "businesses",
+      "source_system": "sunbiz",
+      "target_table": "businesses",
+      "source_url": "sftp://sftp.floridados.gov/doc/cor/",
+      "artifact_path": null,
+      "artifact_sha256": null,
+      "artifact_etag": null,
+      "artifact_last_modified": null,
+      "artifact_bytes": null,
+      "download_status": null,
+      "rows_staged": 0,
+      "inserted": 0,
+      "updated": 0,
+      "unchanged": 0,
+      "missing_in_source": 0,
+      "table_total_after": 444445,
+      "delta_vs_prev_total": 0,
+      "started_at": "2026-11-28T07:59:39.345Z",
+      "finished_at": "2026-11-28T07:59:43.399Z",
+      "status": "completed",
+      "limitations": [
+        "No county filter: rows kept when principal/mailing ZIP starts with 322 or city starts with JACKSONVILLE",
+        "Layout page (dos.sunbiz.org/data-definitions/cor.html) was unreachable (HTTP 522); offsets validated against live records instead",
+        "Officers kept as names only; events file parsed for doc number + raw line"
+      ],
+      "notes": {
+        "baseSnapshot": {
+          "remote": "doc/Quarterly/Cor/cordata.zip",
+          "bytes": 1793034019,
+          "status": "already loaded"
+        },
+        "remoteDailyFiles": 1419,
+        "windowDays": 14,
+        "filesInWindow": 28,
+        "alreadyProcessed": 28,
+        "filesThisRun": [],
+        "filesProcessed": [],
+        "recordsParsed": 0,
+        "baseRecordsParsed": 0,
+        "baseRecordsKept": 0,
+        "eventsStaged": 0,
+        "authoritativeFiles": []
+      },
+      "error": null
+    },
+    {
+      "track": "coj_parcels",
+      "source_system": "coj_parcels",
+      "target_table": "coj_parcels",
+      "source_url": "https://maps.coj.net/coj/rest/services/CityBiz/Parcels/MapServer/0/query",
+      "artifact_path": null,
+      "artifact_sha256": null,
+      "artifact_etag": null,
+      "artifact_last_modified": null,
+      "artifact_bytes": null,
+      "download_status": null,
+      "rows_staged": 409862,
+      "inserted": 0,
+      "updated": 0,
+      "unchanged": 409862,
+      "missing_in_source": 279,
+      "table_total_after": 410141,
+      "delta_vs_prev_total": 0,
+      "started_at": "2026-11-28T07:59:43.726Z",
+      "finished_at": "2026-11-28T08:02:13.672Z",
+      "status": "completed",
+      "limitations": [
+        "US egress only (COJ hosts block non-US and cloud IPs)",
+        "Paged at 2000 rows, concurrency 2, 250 ms delay"
+      ],
+      "notes": {
+        "pages": 205,
+        "total": 409934,
+        "fetchMs": 99140,
+        "featuresFetched": 409934,
+        "matchedToNal": 403465,
+        "withSaleDate": 407062,
+        "floodZones": {
+          "NOT IN FLOOD ZONE": 343906,
+          "0.2 PCT ANNUAL CHANCE FLOOD HAZARD,AE": 20933,
+          "AE": 20051,
+          "0.2 PCT ANNUAL CHANCE FLOOD HAZARD": 17940,
+          "AO": 2692,
+          "A": 1629,
+          "0.2 PCT ANNUAL CHANCE FLOOD HAZARD,AE,VE": 528,
+          "AH": 488
+        }
+      },
+      "error": null
+    },
+    {
+      "track": "coj_addresses",
+      "source_system": "coj_address_points",
+      "target_table": "address_points",
+      "source_url": "https://maps.coj.net/coj/rest/services/ERAT/EratDashboard_3000/MapServer/41/query",
+      "artifact_path": null,
+      "artifact_sha256": null,
+      "artifact_etag": null,
+      "artifact_last_modified": null,
+      "artifact_bytes": null,
+      "download_status": null,
+      "rows_staged": 672425,
+      "inserted": 0,
+      "updated": 0,
+      "unchanged": 672425,
+      "missing_in_source": 1438,
+      "table_total_after": 673863,
+      "delta_vs_prev_total": 0,
+      "started_at": "2026-11-28T08:02:14.180Z",
+      "finished_at": "2026-11-28T08:06:06.854Z",
+      "status": "completed",
+      "limitations": [
+        "US egress only (COJ hosts block non-US and cloud IPs)",
+        "First run is a full paged pull; later runs filter EDIT_DATE",
+        "EDIT_DATE filter rejected (400 Failed to execute query.); full pull instead"
+      ],
+      "notes": {
+        "mode": "full",
+        "where": "1=1",
+        "pages": 337,
+        "total": 672425,
+        "fetchMs": 200828,
+        "rowsFetched": 672425,
+        "matchedToNal": 370552,
+        "authoritativeScope": "whole table (complete snapshot, sole writer)",
+        "lastEditDate": "2026-11-24T15:16:12",
+        "maxEditSeen": "2026-11-24T15:16:12",
+        "watermark": {
+          "advanced": true,
+          "heldRuns": 0,
+          "reason": "complete pull: the whole window was covered"
+        }
+      },
+      "error": null
+    },
+    {
+      "track": "contractors",
+      "source_system": "dbpr_cilb",
+      "target_table": "contractors",
+      "source_url": "https://www2.myfloridalicense.com/sto/file_download/extracts/cilb_certified.csv",
+      "artifact_path": "contractors/cilb_certified.csv",
+      "artifact_sha256": "2588ea598bc6a4518da2da02efd5f23c74401e93aeb6662a0d281aaccb829771",
+      "artifact_etag": null,
+      "artifact_last_modified": "Fri, 27 Nov 2026 11:46:24 GMT",
+      "artifact_bytes": 746354714,
+      "download_status": "unchanged",
+      "rows_staged": 3901,
+      "inserted": 0,
+      "updated": 0,
+      "unchanged": 3901,
+      "missing_in_source": 241,
+      "table_total_after": 4142,
+      "delta_vs_prev_total": 0,
+      "started_at": "2026-11-28T08:06:07.329Z",
+      "finished_at": "2026-11-28T08:06:26.174Z",
+      "status": "completed",
+      "limitations": [
+        "HTTP 403 from non-US IPs; from a US runner with a browser UA the files download",
+        "BBB not used: terms forbid aggregation",
+        "cilb_certified: 342 malformed CSV rows rejected (ragged/quoted lines), see DuckDB rejects",
+        "cilb_registered: 124 malformed CSV rows rejected (ragged/quoted lines), see DuckDB rejects",
+        "DBPR CILB extracts are headerless course-completion rows, mapped by column position; they carry no county, licence status, board number or DBA, so those stay NULL",
+        "Duval matched on municipality name plus the 322xx zip range, which overlaps a few neighbouring-county zips (e.g. 32259 St Johns); DBPR publishes no county field"
+      ],
+      "notes": {
+        "cilb_certified_first_row": [
+          "CGC",
+          "Cert General",
+          "CGC058548",
+          "AALDERINK, JAMES",
+          "623 SE 19 CT",
+          "column5",
+          "CAPE CORAL, FL  33990",
+          "08/31/2028",
+          "0008545",
+          "UNDERSTANDING WORKERS COMPENSATION",
+          "1",
+          "07/29/2020"
+        ],
+        "cilb_certified_rows_statewide": 4085578,
+        "cilb_certified_rows_rejected": 342,
+        "cilb_certified_sha256": "2588ea598bc6a4518da2da02efd5f23c74401e93aeb6662a0d281aaccb829771",
+        "cilb_registered_first_row": [
+          "RA",
+          "Reg Air",
+          "RA13067315",
+          "ABELL, LAWRENCE",
+          "4049 A GRAND BOULEVARD",
+          "column5",
+          "NEW PORT RICHEY, FL  34652",
+          "08/31/2027",
+          "0008513",
+          "BUSINESS MANAGEMENT: BRIEF OVERVIEW",
+          "1",
+          "07/26/2017"
+        ],
+        "cilb_registered_rows_statewide": 162915,
+        "cilb_registered_rows_rejected": 124,
+        "cilb_registered_sha256": "92f963dcd713c874f632e77285337e1238a83657beeca9badb902d616e90ef65",
+        "roofingContractorsDuval": 498,
+        "duvalContractorsAllTrades": 3901
+      },
+      "error": null
+    },
+    {
+      "track": "permits",
+      "source_system": "coj_jaxepics",
+      "target_table": "permits",
+      "source_url": "https://jaxepics.coj.net/Permit/View/",
+      "artifact_path": null,
+      "artifact_sha256": null,
+      "artifact_etag": null,
+      "artifact_last_modified": null,
+      "artifact_bytes": null,
+      "download_status": null,
+      "rows_staged": 0,
+      "inserted": 0,
+      "updated": 0,
+      "unchanged": 0,
+      "missing_in_source": 0,
+      "table_total_after": 0,
+      "delta_vs_prev_total": 0,
+      "started_at": "2026-11-28T08:06:26.361Z",
+      "finished_at": "2026-11-28T08:06:28.374Z",
+      "status": "completed",
+      "limitations": [
+        "Constrained source: JaxEPICS API behind Akamai WAF (HTTP 403 Access Denied on every /api guess, browser UA included); search/reports require login; no open permit dataset; public-records request is the documented path",
+        "US egress only; one cheap discovery + probe per run is kept as evidence (status codes recorded); enumeration runs only when a probe returns JSON",
+        "Angular shell loads chunks dynamically, so static literal discovery finds no API paths",
+        "endpoint probe with B-25-279425.000: https://jaxepicsapi.coj.net/api/Permit/View/B-25-279425.000 -> 403 (428 B); https://jaxepicsapi.coj.net/api/Permit/B-25-279425.000 -> 403 (419 B); https://jaxepicsapi.coj.net/api/permits/B-25-279425.000 -> 403 (420 B); https://jaxepicsapi.coj.net/api/Permit/GetPermit?permitNumber=B-25-279425.000 -> 403 (406 B); https://jaxepicsapi.coj.net/api/Permit/Details/B-25-279425.000 -> 403 (431 B)",
+        "constrained: JaxEPICS API behind Akamai WAF (403 Access Denied on every /api guess); search/reports require login; no open dataset; public-records request (PRR) is the documented path; enumeration skipped, no permit numbers claimed"
+      ],
+      "notes": {
+        "apiPathsDiscovered": [],
+        "bundles": [
+          {
+            "url": "https://js.arcgis.com/calcite-components/3.0.3/calcite.esm.js",
+            "status": 200,
+            "bytes": 53909,
+            "literals": 0
+          },
+          {
+            "url": "https://jaxepics.coj.net/polyfills-5FDKUQTZ.js",
+            "status": 200,
+            "bytes": 34609,
+            "literals": 0
+          },
+          {
+            "url": "https://jaxepics.coj.net/main-ASNNLHHI.js",
+            "status": 200,
+            "bytes": 616,
+            "literals": 0
+          }
+        ],
+        "candidateEndpoints": [
+          "/api/Permit/View/{permitNumber}",
+          "/api/Permit/{permitNumber}",
+          "/api/permits/{permitNumber}",
+          "/api/Permit/GetPermit?permitNumber={permitNumber}",
+          "/api/Permit/Details/{permitNumber}"
+        ],
+        "probeAttempts": [
+          {
+            "endpoint": "/api/Permit/View/{permitNumber}",
+            "url": "https://jaxepicsapi.coj.net/api/Permit/View/B-25-279425.000",
+            "status": 403,
+            "bytes": 428,
+            "json": false
+          },
+          {
+            "endpoint": "/api/Permit/{permitNumber}",
+            "url": "https://jaxepicsapi.coj.net/api/Permit/B-25-279425.000",
+            "status": 403,
+            "bytes": 419,
+            "json": false
+          },
+          {
+            "endpoint": "/api/permits/{permitNumber}",
+            "url": "https://jaxepicsapi.coj.net/api/permits/B-25-279425.000",
+            "status": 403,
+            "bytes": 420,
+            "json": false
+          },
+          {
+            "endpoint": "/api/Permit/GetPermit?permitNumber={permitNumber}",
+            "url": "https://jaxepicsapi.coj.net/api/Permit/GetPermit?permitNumber=B-25-279425.000",
+            "status": 403,
+            "bytes": 406,
+            "json": false
+          },
+          {
+            "endpoint": "/api/Permit/Details/{permitNumber}",
+            "url": "https://jaxepicsapi.coj.net/api/Permit/Details/B-25-279425.000",
+            "status": 403,
+            "bytes": 431,
+            "json": false
+          }
+        ],
+        "constrained": true,
+        "throughput": {
+          "hits": 0,
+          "misses": 0,
+          "errors": 0,
+          "minutes": 0,
+          "permitsPerMin": 0
+        }
+      },
+      "error": null
+    },
+    {
+      "track": "pa_detail",
+      "source_system": "duval_pa_detail",
+      "target_table": "pa_detail_buildings",
+      "source_url": "https://paopropertysearch.coj.net/Basic/Detail.aspx?RE=",
+      "artifact_path": null,
+      "artifact_sha256": null,
+      "artifact_etag": null,
+      "artifact_last_modified": null,
+      "artifact_bytes": null,
+      "download_status": null,
+      "rows_staged": 298,
+      "inserted": 276,
+      "updated": 0,
+      "unchanged": 0,
+      "missing_in_source": 0,
+      "table_total_after": 93866,
+      "delta_vs_prev_total": 276,
+      "started_at": "2026-11-28T08:06:28.628Z",
+      "finished_at": "2026-11-28T08:13:32.146Z",
+      "status": "completed",
+      "limitations": [
+        "US egress only (paopropertysearch.coj.net blocks non-US and cloud IPs); concurrency 2, 400 ms delay",
+        "Slow source by design: ~300 pages per run; full seed (398,324 parcels) needs many runs; throughput recorded per run",
+        "Lexicon transform runs the vendored Elephant scripts per page; owners/*.json prerequisites come from the mapping scripts on the same page",
+        "measured: 300 pages fetched (+0 cached) in 7 min at concurrency 2 / 400 ms; 0 misses, 0 errors",
+        "seed position 99211 -> 99511 of 398324 parcels done (300 attempted this window of 300); derived from pa_detail_buildings / pa_detail_sales / merged-parcels.txt, never from a stored cursor"
+      ],
+      "notes": {
+        "seedTotal": 398324,
+        "cursorStart": 99211,
+        "remainingStart": 299113,
+        "window": 300,
+        "throughput": {
+          "fetched": 300,
+          "cached": 0,
+          "misses": 0,
+          "errors": 0,
+          "parsed": 298,
+          "lexiconOk": 298,
+          "minutes": 7.04,
+          "pagesPerMin": 42.6
+        },
+        "salesMerge": {
+          "staged": 1629,
+          "inserted": 1629,
+          "updated": 0,
+          "unchanged": 0,
+          "missingInSource": 0,
+          "totalBefore": 513518,
+          "totalAfter": 515147
+        },
+        "salesHistoryMerge": {
+          "staged": 1629,
+          "inserted": 1629,
+          "updated": 0,
+          "unchanged": 0,
+          "missingInSource": 0,
+          "totalBefore": 550037,
+          "totalAfter": 551666
+        },
+        "cursorEnd": 99511,
+        "remainingEnd": 298813
+      },
+      "error": null
+    },
+    {
+      "track": "links",
+      "source_system": "duval_reconciliation",
+      "target_table": "entity_links",
+      "source_url": "derived",
+      "artifact_path": null,
+      "artifact_sha256": null,
+      "artifact_etag": null,
+      "artifact_last_modified": null,
+      "artifact_bytes": null,
+      "download_status": null,
+      "rows_staged": 323925,
+      "inserted": 0,
+      "updated": 0,
+      "unchanged": 323925,
+      "missing_in_source": 0,
+      "table_total_after": 323925,
+      "delta_vs_prev_total": 0,
+      "started_at": "2026-11-28T08:13:32.150Z",
+      "finished_at": "2026-11-28T08:13:46.812Z",
+      "status": "completed",
+      "limitations": [
+        "Address matching is exact on the normalized line 1 + ZIP5; unit-level mismatches are not linked"
+      ],
+      "notes": {
+        "links": [
+          {
+            "link_type": "address_parcel",
+            "match_method": "parcel_id_norm",
+            "n": 371238
+          },
+          {
+            "link_type": "business_parcel",
+            "match_method": "owner_name_match",
+            "n": 27901
+          },
+          {
+            "link_type": "business_parcel",
+            "match_method": "situs_address_match",
+            "n": 244443
+          },
+          {
+            "link_type": "coj_parcel_parcel",
+            "match_method": "parcel_id_norm",
+            "n": 403726
+          },
+          {
+            "link_type": "parcel_owner",
+            "match_method": "owner_name_mailing_hash",
+            "n": 404023
+          }
+        ],
+        "parcelsLinkedToBusiness": 117645,
+        "businessesLinkedToParcel": 229843,
+        "owners": 323925
+      },
+      "error": null
+    }
+  ],
+  "limitations": [
+    "appraisal: FDOR posts only the current roll type; prior years by email request",
+    "appraisal: No roof attributes in the bulk roll (ACT_YR_BLT/EFF_YR_BLT used as roof-age proxy)",
+    "appraisal: Sale fields cover only the roll's current and prior year (2025-2026)",
+    "sales: Sale dates carry year+month only (day unknown; stored as first of month)",
+    "sales: Only 2025-2026 transfers; older tenure comes from the COJ parcels layer (SALESL*)",
+    "geometry: 192 MB archive; centroids computed from polygons (not rooftop points)",
+    "geometry: Parcels present in NAL but missing from the shapefile get no coordinates",
+    "transit: No GTFS-RT; no licence text published",
+    "transit: Walking distance is straight-line (haversine), not network distance",
+    "water: Water view is a proximity proxy (centroid within 150 m of a mapped shoreline vertex, or parcel bbox within 30 m), not a sightline analysis; distances beyond ~1 km are not computed",
+    "water: NHD lake/pond polygons below 1 ha and unnamed flowlines are excluded",
+    "water: Parcel polygons are not stored; the parcel bounding box stands in for the polygon",
+    "places: Brand matching by name (Starbucks); confidence varies; CDLA-Permissive 2.0",
+    "places: Reading the release scans ~2.5 min of remote parquet",
+    "businesses: No county filter: rows kept when principal/mailing ZIP starts with 322 or city starts with JACKSONVILLE",
+    "businesses: Layout page (dos.sunbiz.org/data-definitions/cor.html) was unreachable (HTTP 522); offsets validated against live records instead",
+    "businesses: Officers kept as names only; events file parsed for doc number + raw line",
+    "coj_parcels: US egress only (COJ hosts block non-US and cloud IPs)",
+    "coj_parcels: Paged at 2000 rows, concurrency 2, 250 ms delay",
+    "coj_addresses: US egress only (COJ hosts block non-US and cloud IPs)",
+    "coj_addresses: First run is a full paged pull; later runs filter EDIT_DATE",
+    "coj_addresses: EDIT_DATE filter rejected (400 Failed to execute query.); full pull instead",
+    "contractors: HTTP 403 from non-US IPs; from a US runner with a browser UA the files download",
+    "contractors: BBB not used: terms forbid aggregation",
+    "contractors: cilb_certified: 342 malformed CSV rows rejected (ragged/quoted lines), see DuckDB rejects",
+    "contractors: cilb_registered: 124 malformed CSV rows rejected (ragged/quoted lines), see DuckDB rejects",
+    "contractors: DBPR CILB extracts are headerless course-completion rows, mapped by column position; they carry no county, licence status, board number or DBA, so those stay NULL",
+    "contractors: Duval matched on municipality name plus the 322xx zip range, which overlaps a few neighbouring-county zips (e.g. 32259 St Johns); DBPR publishes no county field",
+    "permits: Constrained source: JaxEPICS API behind Akamai WAF (HTTP 403 Access Denied on every /api guess, browser UA included); search/reports require login; no open permit dataset; public-records request is the documented path",
+    "permits: US egress only; one cheap discovery + probe per run is kept as evidence (status codes recorded); enumeration runs only when a probe returns JSON",
+    "permits: Angular shell loads chunks dynamically, so static literal discovery finds no API paths",
+    "permits: endpoint probe with B-25-279425.000: https://jaxepicsapi.coj.net/api/Permit/View/B-25-279425.000 -> 403 (428 B); https://jaxepicsapi.coj.net/api/Permit/B-25-279425.000 -> 403 (419 B); https://jaxepicsapi.coj.net/api/permits/B-25-279425.000 -> 403 (420 B); https://jaxepicsapi.coj.net/api/Permit/GetPermit?permitNumber=B-25-279425.000 -> 403 (406 B); https://jaxepicsapi.coj.net/api/Permit/Details/B-25-279425.000 -> 403 (431 B)",
+    "permits: constrained: JaxEPICS API behind Akamai WAF (403 Access Denied on every /api guess); search/reports require login; no open dataset; public-records request (PRR) is the documented path; enumeration skipped, no permit numbers claimed",
+    "pa_detail: US egress only (paopropertysearch.coj.net blocks non-US and cloud IPs); concurrency 2, 400 ms delay",
+    "pa_detail: Slow source by design: ~300 pages per run; full seed (398,324 parcels) needs many runs; throughput recorded per run",
+    "pa_detail: Lexicon transform runs the vendored Elephant scripts per page; owners/*.json prerequisites come from the mapping scripts on the same page",
+    "pa_detail: measured: 300 pages fetched (+0 cached) in 7 min at concurrency 2 / 400 ms; 0 misses, 0 errors",
+    "pa_detail: seed position 99211 -> 99511 of 398324 parcels done (300 attempted this window of 300); derived from pa_detail_buildings / pa_detail_sales / merged-parcels.txt, never from a stored cursor",
+    "links: Address matching is exact on the normalized line 1 + ZIP5; unit-level mismatches are not linked"
+  ],
+  "totals": {
+    "parcels": 404023,
+    "parcel_geometry": 405716,
+    "sales_history": 551666,
+    "permits": 0,
+    "contractors": 4142,
+    "businesses": 444445,
+    "business_events": 121804,
+    "places": 3084,
+    "transit_stops": 2528,
+    "transit_routes": 46,
+    "water_bodies": 757,
+    "address_points": 673863,
+    "coj_parcels": 410141,
+    "owners": 323925,
+    "entity_links": 1451331,
+    "derived.properties_features": 404023
+  },
+  "artifacts": {
+    "queryTable": {
+      "path": "query-table.parquet",
+      "rows": 404023,
+      "bytes": 51269739,
+      "sha256": "82b4ab664d26bc9cdb02ce66bc216a89f0c31f8ef8e133f19e8e03e42adb7ef7",
+      "cid": "QmVUDrqMPD71JvcoVAQPEeV3zmdsMMdmCyNWCpTxdTK2Fx",
+      "cidV1": "bafybeidj6jnymga4pai3kb22frdp4lkaq73v54wevglgqijyyb5idikxg4",
+      "validationOk": true,
+      "problems": []
+    },
+    "tables": {
+      "parcels": {
+        "path": "tables/parcels.parquet",
+        "rows": 404023,
+        "bytes": 38911589,
+        "sha256": "8e2a7156c31167e9af01a40dc405aba2fc0d246441f7ffba89696b6e7ae8a943",
+        "cid": "QmVjVDJBssTQu7HCJJA2HW17XN5v1yzdRV2LjFbJni93fi",
+        "cidV1": "bafybeidn3nw5wag3jlspvw4plvhyaclskepvlsed3h63l54uicqwkifohu"
+      },
+      "parcel_geometry": {
+        "path": "tables/parcel_geometry.parquet",
+        "rows": 405716,
+        "bytes": 25307296,
+        "sha256": "66b7a056cc8b0a6da952f49b672a072d2e59e86e7e574a758f284996e7b64adb",
+        "cid": "QmNZLbUGJQF2ZQEmGjMkMXuzpZLQhmPuZM5QFh34yE3g8W",
+        "cidV1": "bafybeiadiaiyrcviba6kdqf433hymsmorirwmfk5pqjzgrgk4rt3fjntb4"
+      },
+      "sales_history": {
+        "path": "tables/sales_history.parquet",
+        "rows": 551666,
+        "bytes": 34558772,
+        "sha256": "145cb2b5b53ee2c803fd79418fe4202dbc64b5a4150208a244ea5f4b28ca6f27",
+        "cid": "QmVC5W7zuQDFvLnMeCPRueeVaKifWqbYk2mqUV3CdP6iDq",
+        "cidV1": "bafybeidfz6oxucyhpjao5syqcfcspxdzamch66ouleq3ryakgyurxyrocq"
+      },
+      "contractors": {
+        "path": "tables/contractors.parquet",
+        "rows": 4142,
+        "bytes": 216156,
+        "sha256": "5341aca413444b4319cec3d758fde7129b5faa4546136042617957019e506594",
+        "cid": "Qma5E4LrrmWDUs2CqXpXojKKDsGH9zKH9bLh4DWZC3vnsz",
+        "cidV1": "bafybeifolcugyil67w2pzxdhpxreuvpdsbzmy6bpb35kanagfm2mhauxve"
+      },
+      "businesses": {
+        "path": "tables/businesses.parquet",
+        "rows": 444445,
+        "bytes": 43143572,
+        "sha256": "95abffaaacc8be9c34a2395a6153d03d77d1904027ee871d1a8930be7c6d2666",
+        "cid": "QmPuAuER1jrE2tg6NU2uieXMsnUHhEDRdgUfExMcBmgYBs",
+        "cidV1": "bafybeiaxgbuswij6qkmiacv2crw2t55tdqlvpaxvep2r7g5m6t46vzlcvi"
+      },
+      "places": {
+        "path": "tables/places.parquet",
+        "rows": 3084,
+        "bytes": 382955,
+        "sha256": "75d406d73946641d17aed697a5b5e785f7437074d23abccecf621408602ad276",
+        "cid": "QmP1Qhhp3EhDUMCAbjPeyJdGzjWi8gQRuhLNvQekK6qvQT",
+        "cidV1": "bafybeiaj5xifsumjswaevdd6n2rqpq7chtxampmezhe5h2pvsyyi2tmccq"
+      },
+      "transit_stops": {
+        "path": "tables/transit_stops.parquet",
+        "rows": 2528,
+        "bytes": 112326,
+        "sha256": "06834848894165352408dfbae79a1091d59c73f3a18ea3eb48c80a11a56d2b86",
+        "cid": "QmaqPboYR9yiZoA8RvcMdwvMX9v2qFrWPEHkj4ivGjd5wo",
+        "cidV1": "bafybeifzveam3y3nruht7nkk3kumlem7ramuduhhexhswy5edlxpy7luli"
+      },
+      "water_bodies": {
+        "path": "tables/water_bodies.parquet",
+        "rows": 757,
+        "bytes": 3161848,
+        "sha256": "73f8f595ca545393e835f1f1b229f312ed5bb782f24a11982d5a2c10d1c119d5",
+        "cid": "QmbsB5t72MmKa7uRCVfAwFek5TnTgum1jYMTtu6ANKo7vt",
+        "cidV1": "bafybeigi7gzs5fqomvi6phscks7wsj6sdqkelfguubzvtckwlpfrbzmghu"
+      },
+      "address_points": {
+        "path": "tables/address_points.parquet",
+        "rows": 673863,
+        "bytes": 28280004,
+        "sha256": "4e39b09c2509c6962f50a6c692780990f9456308839c9d0feb664ee42abe2201",
+        "cid": "QmcMdiC7mAfh2PjfgCmcF2bEaRCtzWQFfZnkTwYFLikjtn",
+        "cidV1": "bafybeigqiqizs5oyffbhbx66ve2xqdvgmtwr3og6oji4mxnpsxte42svzm"
+      },
+      "entity_links": {
+        "path": "tables/entity_links.parquet",
+        "rows": 1451331,
+        "bytes": 46767788,
+        "sha256": "d0079983d1d7bbabfb35be9e68e362599f20bae09794b00160f179e03361c733",
+        "cid": "QmadAeFiW4tTZi94PwYiTMk33CGioX1UUNzFB5JDDDX8m8",
+        "cidV1": "bafybeifwq5q47c64lbbp4dytnmpf7sg7rvae2gb52sabs5jtx7ild3umnm"
+      }
+    },
+    "egressCountry": "US",
+    "coverage": {
+      "path": "dataset-coverage.json",
+      "bytes": 14453,
+      "sha256": "91766dfabbd562e0a1849fbab4ffa0e8166087f65c90a8cbc255fe0b91b056bd",
+      "cid": "QmYXDKV7rJ7WvGPs1edesKPL6joE4iSv4S49Z2zqYyCsqg",
+      "cidV1": "bafybeiexjgglcmna5o7k3zh4gzxlwazyrda34koilwkejx7jiodg7aebe4"
+    }
+  },
+  "error": null
+}
